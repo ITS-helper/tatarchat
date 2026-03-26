@@ -89,7 +89,7 @@ npm run dev
 - Фронтенд: [http://localhost:5173](http://localhost:5173) (Vite, `npm run dev` в `client/`)
 - API и Socket.io: [http://localhost:3001](http://localhost:3001)
 
-Сначала **зарегистрируйте** пользователя (имя + пароль), затем войдите. История чата по-прежнему доступна без входа только на чтение (`GET /api/messages/family`).
+Сначала **зарегистрируйте** пользователя (имя + пароль), затем войдите. Два групповых чата: **DreamTeamDauns** (без пароля) и **Family** (пароль комнаты по умолчанию `777`, см. `FAMILY_ROOM_PASSWORD` на сервере). История сообщений — только с JWT и, для Family, заголовком пароля комнаты.
 
 В **production** на Render задайте **`JWT_SECRET`** (длинная случайная строка), иначе сервер не запустится.
 
@@ -106,14 +106,15 @@ Get-Content migrations\002_users_password_hash.sql -Raw | docker exec -i tatarch
 | `GET` | `/api/health` | Проверка сервера |
 | `POST` | `/api/auth/register` | `{ "name", "password" }` — пароль от 6 символов; ответ `{ token, user }` |
 | `POST` | `/api/auth/login` | `{ "name", "password" }` — ответ `{ token, user }` |
-| `GET` | `/api/messages/family` | Последние 50 сообщений (без авторизации) |
-| `POST` | `/api/messages` | Заголовок `Authorization: Bearer <token>`, тело `{ "room": "family", "text": "..." }` |
+| `GET` | `/api/rooms` | Список комнат: `slug`, `title`, `requiresPassword` |
+| `GET` | `/api/messages/:slug` | История (например `dreamteamdauns`, `family`). Заголовки: `Authorization: Bearer`, для закрытых комнат — `X-Room-Password` |
+| `POST` | `/api/messages` | `Authorization: Bearer`, при необходимости `X-Room-Password`; тело `{ "room": "dreamteamdauns" \| "family", "text": "..." }` |
 
 ## Socket.io
 
-- Подключение только с **`auth: { token }`** (JWT после логина). После connect сервер сам подключает к комнате `family`.
-- `message` — `{ text }`; запись в БД и broadcast.
-- `leave` — выход из комнаты и снятие с онлайн (с учётом нескольких вкладок).
+- Подключение с **`auth: { token }`**. Комнату выбирает клиент событием **`join-room`**: `{ room: "dreamteamdauns" }` или `{ room: "family", roomPassword: "777" }`.
+- **`message`** — `{ text }` в текущей комнате (после успешного `join-room`).
+- **`leave`** — выход и снятие с онлайн (несколько вкладок учитываются).
 
 Ограничения: санитизация текста, не более **30 сообщений в минуту** на пользователя (in-memory).
 

@@ -1,6 +1,6 @@
 /**
  * TatarChat: Express + Socket.io + PostgreSQL.
- * Вход: регистрация (имя + пароль), JWT. Сокет только с валидным токеном.
+ * Вход по аккаунту (JWT). Групповые комнаты; часть комнат с паролем.
  */
 require("dotenv").config();
 const http = require("http");
@@ -14,7 +14,6 @@ const { Pool } = require("pg");
 const { Server } = require("socket.io");
 
 const PORT = Number(process.env.PORT) || 3001;
-const ROOM_FAMILY = "family";
 const MAX_MESSAGE_LEN = 2000;
 const MAX_NICK_LEN = 64;
 const MIN_PASSWORD_LEN = 6;
@@ -22,6 +21,18 @@ const MAX_PASSWORD_LEN = 128;
 const MESSAGES_PER_MINUTE = 30;
 const BCRYPT_ROUNDS = 10;
 const JWT_EXPIRES = "7d";
+
+/** slug → отображаемое имя и пароль комнаты (null = без пароля) */
+const GROUP_ROOMS = {
+  dreamteamdauns: {
+    title: "DreamTeamDauns",
+    roomPassword: null,
+  },
+  family: {
+    title: "Family",
+    roomPassword: process.env.FAMILY_ROOM_PASSWORD || "777",
+  },
+};
 
 const JWT_SECRET =
   process.env.JWT_SECRET ||
@@ -107,6 +118,21 @@ function sanitizePassword(input) {
   return s;
 }
 
+function normalizeRoomSlug(input) {
+  const s = String(input ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "");
+  return GROUP_ROOMS[s] ? s : "";
+}
+
+function roomAllowsAccess(slug, roomPasswordFromClient) {
+  const conf = GROUP_ROOMS[slug];
+  if (!conf) return false;
+  if (conf.roomPassword == null) return true;
+  return conf.roomPassword === String(roomPasswordFromClient ?? "");
+}
+
 const presenceByUserId = new Map();
 function incPresence(userId) {
   presenceByUserId.set(userId, (presenceByUserId.get(userId) || 0) + 1);
@@ -184,13 +210,6 @@ async function insertMessage(room, userId, text) {
   return rows[0];
 }
 
-async function getOnlineUsers() {
-  const { rows } = await pool.query(
-    `SELECT id, nickname FROM users WHERE online = TRUE ORDER BY nickname ASC`
-  );
-  return rows;
-}
-
 async function findUserByNickname(nickname) {
   const { rows } = await pool.query(
     `SELECT id, nickname, password_hash FROM users WHERE nickname = $1`,
@@ -226,10 +245,28 @@ async function requireAuth(req, res, next) {
   }
 }
 
+/** Пароль закрытой комнаты: заголовок X-Room-Password или query roomPassword */
+function getRoomPasswordFromRequest(req) {
+  const h = req.headers["x-room-password"];
+  if (h != null && h !== "") return String(h);
+  const q = req.query?.roomPassword;
+  if (q != null && q !== "") return String(q);
+  return "";
+}
+
 // --- REST ---
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
+});
+
+app.get("/api/rooms", (_req, res) => {
+  const rooms = Object.entries(GROUP_ROOMS).map(([slug, c]) => ({
+    slug,
+    title: c.title,
+    requiresPassword: c.roomPassword != null,
+  }));
+  res.json({ rooms });
 });
 
 app.post("/api/auth/register", async (req, res) => {
@@ -300,12 +337,20 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-app.get("/api/messages/family", async (_req, res) => {
+app.get("/api/messages/:roomSlug", requireAuth, async (req, res) => {
   try {
-    const messages = await getLastMessages(ROOM_FAMILY, 50);
-    res.json({ room: ROOM_FAMILY, messages });
+    const slug = normalizeRoomSlug(req.params.roomSlug);
+    if (!slug) {
+      return res.status(404).json({ error: "Комната не найдена" });
+    }
+    const rp = getRoomPasswordFromRequest(req);
+    if (!roomAllowsAccess(slug, rp)) {
+      return res.status(403).json({ error: "Нужен пароль комнаты" });
+    }
+    const messages = await getLastMessages(slug, 50);
+    res.json({ room: slug, title: GROUP_ROOMS[slug].title, messages });
   } catch (err) {
-    console.error("GET /api/messages/family", err);
+    console.error("GET /api/messages/:roomSlug", err);
     res.status(500).json({ error: "Не удалось загрузить сообщения" });
   }
 });
@@ -342,38 +387,17 @@ io.use(async (socket, next) => {
   }
 });
 
-async function joinFamilyRoom(socket) {
-  const userId = socket.data.userId;
-  const nickname = socket.data.nickname;
-  if (!userId) return;
-
-  if (socket.data.joinedFamily) {
-    const history = await getLastMessages(ROOM_FAMILY, 50);
-    const online = await getOnlineUsers();
-    socket.emit("history", history);
-    socket.emit("online-users", online);
-    return;
-  }
-
-  await pool.query("UPDATE users SET online = TRUE WHERE id = $1", [userId]);
-  incPresence(userId);
-  socket.data.joinedFamily = true;
-  await socket.join(ROOM_FAMILY);
-
-  const history = await getLastMessages(ROOM_FAMILY, 50);
-  const online = await getOnlineUsers();
-  io.to(ROOM_FAMILY).emit("online-users", online);
-  socket.emit("history", history);
-  socket.emit("online-users", online);
-}
-
 app.post("/api/messages", requireAuth, async (req, res) => {
   try {
-    const { room = ROOM_FAMILY, text } = req.body || {};
-    if (room !== ROOM_FAMILY) {
-      return res.status(400).json({ error: "Неподдерживаемая комната" });
+    const slug = normalizeRoomSlug(req.body?.room);
+    if (!slug) {
+      return res.status(400).json({ error: "Неизвестная комната" });
     }
-    const body = sanitizeText(text);
+    const rp = getRoomPasswordFromRequest(req);
+    if (!roomAllowsAccess(slug, rp)) {
+      return res.status(403).json({ error: "Нужен пароль комнаты" });
+    }
+    const body = sanitizeText(req.body?.text);
     if (!body) {
       return res.status(400).json({ error: "Пустое сообщение" });
     }
@@ -383,13 +407,14 @@ app.post("/api/messages", requireAuth, async (req, res) => {
       return res.status(429).json({ error: "Слишком много сообщений в минуту" });
     }
 
-    const row = await insertMessage(ROOM_FAMILY, userId, body);
+    const row = await insertMessage(slug, userId, body);
     const payload = {
+      room: slug,
       user_nick: req.user.nickname,
       text: body,
       time: row.created_at,
     };
-    io.to(ROOM_FAMILY).emit("message", payload);
+    io.to(slug).emit("message", payload);
     res.status(201).json({ ok: true, message: payload });
   } catch (err) {
     console.error("POST /api/messages", err);
@@ -405,21 +430,59 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-io.on("connection", async (socket) => {
-  try {
-    await joinFamilyRoom(socket);
-  } catch (err) {
-    console.error("socket join", err);
-    socket.emit("error-toast", { error: "Не удалось войти в комнату" });
-    socket.disconnect(true);
-    return;
-  }
+io.on("connection", (socket) => {
+  socket.on("join-room", async (payload, ack) => {
+    try {
+      const slug = normalizeRoomSlug(payload?.room);
+      if (!slug) {
+        const e = { ok: false, error: "Неизвестная комната" };
+        if (typeof ack === "function") ack(e);
+        return socket.emit("error-toast", e);
+      }
+      if (!roomAllowsAccess(slug, payload?.roomPassword)) {
+        const e = { ok: false, error: "Неверный пароль комнаты" };
+        if (typeof ack === "function") ack(e);
+        return socket.emit("error-toast", e);
+      }
+
+      const prev = socket.data.currentRoom;
+      if (prev && prev !== slug) {
+        await socket.leave(prev);
+      }
+      socket.data.currentRoom = slug;
+      await socket.join(slug);
+
+      if (!socket.data.appOnlineSet) {
+        socket.data.appOnlineSet = true;
+        await pool.query("UPDATE users SET online = TRUE WHERE id = $1", [socket.data.userId]);
+        incPresence(socket.data.userId);
+      }
+
+      const history = await getLastMessages(slug, 50);
+      socket.emit("room-changed", { room: slug });
+      socket.emit("history", history);
+      if (typeof ack === "function") {
+        ack({ ok: true, room: slug });
+      }
+    } catch (err) {
+      console.error("join-room", err);
+      const e = { ok: false, error: "Ошибка входа в комнату" };
+      if (typeof ack === "function") ack(e);
+      socket.emit("error-toast", e);
+    }
+  });
 
   socket.on("message", async (payload, ack) => {
     try {
       const uid = socket.data.userId;
+      const slug = socket.data.currentRoom;
       if (!uid) {
         const e = { ok: false, error: "Нет авторизации" };
+        if (typeof ack === "function") ack(e);
+        return;
+      }
+      if (!slug) {
+        const e = { ok: false, error: "Выберите комнату" };
         if (typeof ack === "function") ack(e);
         return;
       }
@@ -438,13 +501,14 @@ io.on("connection", async (socket) => {
         return socket.emit("error-toast", e);
       }
 
-      const row = await insertMessage(ROOM_FAMILY, uid, body);
+      const row = await insertMessage(slug, uid, body);
       const out = {
+        room: slug,
         user_nick: socket.data.nickname,
         text: body,
         time: row.created_at,
       };
-      io.to(ROOM_FAMILY).emit("message", out);
+      io.to(slug).emit("message", out);
       if (typeof ack === "function") ack({ ok: true });
     } catch (err) {
       console.error("message", err);
@@ -456,16 +520,18 @@ io.on("connection", async (socket) => {
   socket.on("leave", async () => {
     try {
       const uid = socket.data.userId;
+      const prev = socket.data.currentRoom;
+      if (prev) {
+        await socket.leave(prev);
+      }
+      socket.data.currentRoom = undefined;
       if (!uid) return;
       if (decPresence(uid)) {
         await setUserOffline(uid);
       }
       socket.data.userId = undefined;
       socket.data.nickname = undefined;
-      socket.data.joinedFamily = false;
-      await socket.leave(ROOM_FAMILY);
-      const online = await getOnlineUsers();
-      io.to(ROOM_FAMILY).emit("online-users", online);
+      socket.data.appOnlineSet = false;
     } catch (err) {
       console.error("leave", err);
     }
@@ -478,8 +544,6 @@ io.on("connection", async (socket) => {
       if (decPresence(uid)) {
         await setUserOffline(uid);
       }
-      const online = await getOnlineUsers();
-      io.to(ROOM_FAMILY).emit("online-users", online);
     } catch (err) {
       console.error("disconnect", err);
     }
