@@ -430,46 +430,62 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-io.on("connection", (socket) => {
-  socket.on("join-room", async (payload, ack) => {
-    try {
-      const slug = normalizeRoomSlug(payload?.room);
-      if (!slug) {
-        const e = { ok: false, error: "Неизвестная комната" };
-        if (typeof ack === "function") ack(e);
-        return socket.emit("error-toast", e);
-      }
-      if (!roomAllowsAccess(slug, payload?.roomPassword)) {
-        const e = { ok: false, error: "Неверный пароль комнаты" };
-        if (typeof ack === "function") ack(e);
-        return socket.emit("error-toast", e);
-      }
-
-      const prev = socket.data.currentRoom;
-      if (prev && prev !== slug) {
-        await socket.leave(prev);
-      }
-      socket.data.currentRoom = slug;
-      await socket.join(slug);
-
-      if (!socket.data.appOnlineSet) {
-        socket.data.appOnlineSet = true;
-        await pool.query("UPDATE users SET online = TRUE WHERE id = $1", [socket.data.userId]);
-        incPresence(socket.data.userId);
-      }
-
-      const history = await getLastMessages(slug, 50);
-      socket.emit("room-changed", { room: slug });
-      socket.emit("history", history);
-      if (typeof ack === "function") {
-        ack({ ok: true, room: slug });
-      }
-    } catch (err) {
-      console.error("join-room", err);
-      const e = { ok: false, error: "Ошибка входа в комнату" };
+async function processJoinRoom(socket, payload, ack) {
+  try {
+    const slug = normalizeRoomSlug(payload?.room);
+    if (!slug) {
+      const e = { ok: false, error: "Неизвестная комната" };
       if (typeof ack === "function") ack(e);
       socket.emit("error-toast", e);
+      return;
     }
+    if (!roomAllowsAccess(slug, payload?.roomPassword)) {
+      const e = { ok: false, error: "Неверный пароль комнаты" };
+      if (typeof ack === "function") ack(e);
+      socket.emit("error-toast", e);
+      return;
+    }
+
+    const prev = socket.data.currentRoom;
+    if (prev && prev !== slug) {
+      await socket.leave(prev);
+    }
+    socket.data.currentRoom = slug;
+    await socket.join(slug);
+
+    if (!socket.data.appOnlineSet) {
+      try {
+        await pool.query("UPDATE users SET online = TRUE WHERE id = $1", [socket.data.userId]);
+      } catch (updErr) {
+        if (updErr.code !== "42703") {
+          throw updErr;
+        }
+        console.warn("join-room: колонка users.online отсутствует, пропускаем presence");
+      }
+      socket.data.appOnlineSet = true;
+      incPresence(socket.data.userId);
+    }
+
+    const history = await getLastMessages(slug, 50);
+    socket.emit("room-changed", { room: slug });
+    socket.emit("history", { room: slug, messages: history });
+    if (typeof ack === "function") {
+      ack({ ok: true, room: slug });
+    }
+  } catch (err) {
+    console.error("join-room", err?.message || err, err?.code || "");
+    const e = { ok: false, error: "Ошибка входа в комнату" };
+    if (typeof ack === "function") ack(e);
+    socket.emit("error-toast", e);
+  }
+}
+
+io.on("connection", (socket) => {
+  /** Несколько join-room подряд без await дают параллельные async-обработчики — гонка и падения в БД/socket */
+  socket.on("join-room", (payload, ack) => {
+    socket.data._joinQueue = (socket.data._joinQueue || Promise.resolve())
+      .catch(() => {})
+      .then(() => processJoinRoom(socket, payload, ack));
   });
 
   socket.on("message", async (payload, ack) => {

@@ -72,6 +72,7 @@ export default function App() {
   const listRef = useRef(null);
   const socketRef = useRef(null);
   const roomJoinedRef = useRef(false);
+  const joinGenRef = useRef(0);
   const activeRoomRef = useRef(activeRoom);
 
   useEffect(() => {
@@ -128,11 +129,18 @@ export default function App() {
   }, [token, activeRoom, loadHistoryForRoom]);
 
   const emitJoinRoom = useCallback((socket) => {
+    const gen = ++joinGenRef.current;
     const r = activeRoomRef.current;
     const pw = r === "family" ? sessionStorage.getItem(SS_FAMILY_ROOM_PW) || "" : undefined;
     setRoomJoined(false);
     roomJoinedRef.current = false;
     socket.emit("join-room", { room: r, roomPassword: pw || undefined }, (ack) => {
+      if (gen !== joinGenRef.current) return;
+      if (ack?.ok) {
+        setRoomJoined(true);
+        roomJoinedRef.current = true;
+        return;
+      }
       if (ack && !ack.ok) {
         setBanner(ack.error || "Не удалось войти в комнату");
         setRoomJoined(false);
@@ -177,8 +185,20 @@ export default function App() {
       }
     });
 
-    socket.on("history", (rows) => {
-      if (Array.isArray(rows)) setMessages(rows);
+    socket.on("history", (payload) => {
+      let rows;
+      let room;
+      if (payload && typeof payload === "object" && !Array.isArray(payload) && Array.isArray(payload.messages)) {
+        rows = payload.messages;
+        room = payload.room;
+      } else if (Array.isArray(payload)) {
+        rows = payload;
+        room = rows[0]?.room;
+      } else {
+        return;
+      }
+      if (room && room !== activeRoomRef.current) return;
+      setMessages(rows);
       setRoomJoined(true);
       roomJoinedRef.current = true;
     });
