@@ -85,7 +85,7 @@ psql %DATABASE_URL% -f init.sql
 npm run dev
 ```
 
-- Фронтенд: [http://localhost:3000](http://localhost:3000) (Vite)
+- Фронтенд: [http://localhost:5173](http://localhost:5173) (Vite, `npm run dev` в `client/`)
 - API и Socket.io: [http://localhost:3001](http://localhost:3001)
 
 Откройте два браузера или окна инкогнито с разными никами — проверьте онлайн и сообщения. После перезагрузки страницы история подтягивается из API.
