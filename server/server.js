@@ -208,9 +208,12 @@ async function loadMessagesSchema() {
   const need = ["room", "user_id", "text"];
   const missing = need.filter((c) => !cols.has(c));
   if (missing.length) {
-    const e = new Error(
-      `В messages не хватает колонок: ${missing.join(", ")}. Сверьте схему с init.sql.`
-    );
+    let hint = " Сверьте схему с init.sql.";
+    if (missing.includes("user_id")) {
+      hint =
+        " Выполните на базе migrations/003_messages_user_id.sql (Render: Shell → psql $DATABASE_URL -f …) или см. README.";
+    }
+    const e = new Error(`В messages не хватает колонок: ${missing.join(", ")}.${hint}`);
     e.code = "SCHEMA_MESSAGES";
     throw e;
   }

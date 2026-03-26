@@ -99,6 +99,14 @@ npm run dev
 Get-Content migrations\002_users_password_hash.sql -Raw | docker exec -i tatarchat-db psql -U postgres -d tatarchat-db
 ```
 
+Если в интерфейсе ошибка про отсутствие **`user_id`** в `messages` (часто на старой БД без пересоздания таблицы):
+
+```powershell
+Get-Content migrations\003_messages_user_id.sql -Raw | docker exec -i tatarchat-db psql -U postgres -d tatarchat-db
+```
+
+На **Render**: Dashboard → PostgreSQL → **Shell** или подключитесь к `DATABASE_URL` любым клиентом и выполните содержимое `migrations/003_messages_user_id.sql`. Сообщения без сопоставимого пользователя по полям `user_nick` / `nickname` / `author` будут **удалены**; затем перезапустите веб-сервис.
+
 ## API
 
 | Метод | Путь | Описание |
