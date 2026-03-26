@@ -182,66 +182,118 @@ async function setUserOffline(userId) {
   await pool.query("UPDATE users SET online = FALSE WHERE id = $1", [userId]);
 }
 
+/** Кэш полей таблицы messages (created_at vs legacy timestamp). */
+let messagesSchemaCache = null;
+
+function invalidateMessagesSchemaCache() {
+  messagesSchemaCache = null;
+}
+
+async function loadMessagesSchema() {
+  const { rows } = await pool.query(
+    `
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'messages'
+    `
+  );
+  if (rows.length === 0) {
+    const e = new Error(
+      "Таблица public.messages не найдена. Выполните init.sql или создайте БД по README."
+    );
+    e.code = "SCHEMA_MESSAGES";
+    throw e;
+  }
+  const cols = new Set(rows.map((r) => r.column_name));
+  const need = ["room", "user_id", "text"];
+  const missing = need.filter((c) => !cols.has(c));
+  if (missing.length) {
+    const e = new Error(
+      `В messages не хватает колонок: ${missing.join(", ")}. Сверьте схему с init.sql.`
+    );
+    e.code = "SCHEMA_MESSAGES";
+    throw e;
+  }
+
+  let timeSelect;
+  let timeReturning;
+  if (cols.has("created_at")) {
+    timeSelect = "m.created_at";
+    timeReturning = "created_at";
+  } else {
+    const ts = rows.find((r) => r.column_name.toLowerCase() === "timestamp");
+    if (!ts) {
+      const e = new Error(
+        "В messages нет колонки времени (created_at или timestamp). Выполните migrations/001_rename_messages_timestamp.sql или пересоздайте таблицу по init.sql."
+      );
+      e.code = "SCHEMA_MESSAGES_TIME";
+      throw e;
+    }
+    const id = ts.column_name.replace(/"/g, '""');
+    timeSelect = `m."${id}"`;
+    timeReturning = `"${id}" AS created_at`;
+  }
+
+  return { timeSelect, timeReturning };
+}
+
+async function getMessagesSchema() {
+  if (!messagesSchemaCache) {
+    messagesSchemaCache = await loadMessagesSchema();
+  }
+  return messagesSchemaCache;
+}
+
 async function getLastMessages(room, limit = 50) {
-  const q = `
-    SELECT
-      m.id,
-      m.room,
-      m.text,
-      m.created_at AS time,
-      u.nickname AS user_nick
-    FROM messages m
-    JOIN users u ON u.id = m.user_id
-    WHERE m.room = $1
-    ORDER BY m.created_at DESC
-    LIMIT $2
-  `;
-  try {
-    const { rows } = await pool.query(q, [room, limit]);
-    return rows.reverse();
-  } catch (err) {
-    if (err.code === "42703") {
-      const qLegacy = `
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { timeSelect } = await getMessagesSchema();
+      const q = `
         SELECT
           m.id,
           m.room,
           m.text,
-          m."timestamp" AS time,
+          ${timeSelect} AS time,
           u.nickname AS user_nick
         FROM messages m
         JOIN users u ON u.id = m.user_id
         WHERE m.room = $1
-        ORDER BY m."timestamp" DESC
+        ORDER BY ${timeSelect} DESC
         LIMIT $2
       `;
-      const { rows } = await pool.query(qLegacy, [room, limit]);
+      const { rows } = await pool.query(q, [room, limit]);
       return rows.reverse();
+    } catch (err) {
+      if (attempt === 0 && (err.code === "42703" || err.code === "42P01")) {
+        invalidateMessagesSchemaCache();
+        continue;
+      }
+      throw err;
     }
-    throw err;
   }
+  throw new Error("getLastMessages: запрос не выполнен");
 }
 
 async function insertMessage(room, userId, text) {
-  const q = `
-    INSERT INTO messages (room, user_id, text)
-    VALUES ($1, $2, $3)
-    RETURNING id, created_at
-  `;
-  try {
-    const { rows } = await pool.query(q, [room, userId, text]);
-    return rows[0];
-  } catch (err) {
-    if (err.code === "42703") {
-      const qLegacy = `
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { timeReturning } = await getMessagesSchema();
+      const q = `
         INSERT INTO messages (room, user_id, text)
         VALUES ($1, $2, $3)
-        RETURNING id, "timestamp" AS created_at
+        RETURNING id, ${timeReturning}
       `;
-      const { rows } = await pool.query(qLegacy, [room, userId, text]);
+      const { rows } = await pool.query(q, [room, userId, text]);
       return rows[0];
+    } catch (err) {
+      if (attempt === 0 && err.code === "42703") {
+        invalidateMessagesSchemaCache();
+        continue;
+      }
+      throw err;
     }
-    throw err;
   }
+  throw new Error("insertMessage: не удалось записать сообщение");
 }
 
 async function findUserByNickname(nickname) {
@@ -385,11 +437,12 @@ app.get("/api/messages/:roomSlug", requireAuth, async (req, res) => {
     res.json({ room: slug, title: GROUP_ROOMS[slug].title, messages });
   } catch (err) {
     console.error("GET /api/messages/:roomSlug", err?.message || err, err?.code || "");
-    const hint =
-      err?.code === "42703"
-        ? " Проверьте схему БД (created_at в messages) или миграцию migrations/001_rename_messages_timestamp.sql."
-        : "";
-    res.status(500).json({ error: `Не удалось загрузить сообщения.${hint}` });
+    if (err.code === "SCHEMA_MESSAGES" || err.code === "SCHEMA_MESSAGES_TIME") {
+      return res.status(500).json({ error: err.message });
+    }
+    res.status(500).json({
+      error: err.message || "Не удалось загрузить сообщения",
+    });
   }
 });
 
