@@ -5,17 +5,18 @@ export default {
     extend: {
       colors: {
         void: {
-          DEFAULT: "#030712",
-          deep: "#0a1628",
-          panel: "#0d1f35",
-          lift: "#132a45",
+          DEFAULT: "#000000",
+          deep: "#030508",
+          panel: "#060b14",
+          lift: "#0c1525",
         },
         neon: {
-          cyan: "#22d3ee",
-          bright: "#00fff5",
-          magenta: "#f472b6",
-          purple: "#a855f7",
-          amber: "#fbbf24",
+          cyan: "#00e5ff",
+          bright: "#5dffc4",
+          hot: "#ff00aa",
+          magenta: "#ff3dac",
+          purple: "#b026ff",
+          amber: "#ffee58",
         },
       },
       fontFamily: {
@@ -23,13 +24,15 @@ export default {
         mono: ['"Share Tech Mono"', "ui-monospace", "monospace"],
       },
       boxShadow: {
-        "neon-cyan": "0 0 24px rgba(34, 211, 238, 0.2), inset 0 0 20px rgba(34, 211, 238, 0.03)",
-        "neon-magenta": "0 0 20px rgba(244, 114, 182, 0.25)",
-        panel: "0 0 0 1px rgba(34, 211, 238, 0.15), 0 8px 32px rgba(0, 0, 0, 0.4)",
+        "neon-cyan":
+          "0 0 32px rgba(0, 229, 255, 0.35), 0 0 2px rgba(0, 229, 255, 0.8), inset 0 0 24px rgba(0, 229, 255, 0.06)",
+        "neon-magenta": "0 0 28px rgba(255, 61, 172, 0.45), 0 0 2px rgba(255, 0, 170, 0.7)",
+        panel:
+          "0 0 0 1px rgba(0, 229, 255, 0.25), 0 8px 40px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(0, 229, 255, 0.12)",
       },
       backgroundImage: {
         "grid-cyber":
-          "linear-gradient(rgba(34, 211, 238, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(34, 211, 238, 0.04) 1px, transparent 1px)",
+          "linear-gradient(rgba(0, 229, 255, 0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 229, 255, 0.045) 1px, transparent 1px)",
       },
     },
   },

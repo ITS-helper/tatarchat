@@ -376,9 +376,12 @@ export default function App() {
 
   if (!token) {
     return (
-      <div className="relative flex min-h-full flex-col items-center justify-center p-4">
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-neon-purple/5 via-transparent to-neon-magenta/5" />
-        <div className="cyber-panel relative w-full max-w-md rounded-2xl p-6 shadow-neon-cyan">
+      <div className="relative min-h-full">
+        <div className="cyber-vignette" aria-hidden />
+        <div className="cyber-scanlines" aria-hidden />
+        <div className="relative z-10 flex min-h-full flex-col items-center justify-center p-4">
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-neon-purple/10 via-transparent to-neon-hot/5" />
+        <div className="cyber-panel relative w-full max-w-md p-6 shadow-neon-cyan">
           <p className="mb-2 text-center font-mono text-[10px] uppercase tracking-[0.35em] text-neon-cyan/60">
             // secure uplink
           </p>
@@ -389,17 +392,17 @@ export default function App() {
             Вход по имени и паролю. Новый пользователь — сначала регистрация.
           </p>
 
-          <div className="mb-4 flex rounded-lg border border-neon-cyan/25 bg-void-deep/60 p-0.5">
+          <div className="mb-4 flex border border-neon-cyan/35 bg-black/60 p-px">
             <button
               type="button"
               onClick={() => {
                 setAuthMode("login");
                 setBanner(null);
               }}
-              className={`flex-1 rounded-md py-2 text-sm font-medium transition ${
+              className={`flex-1 py-2.5 text-sm font-medium transition ${
                 authMode === "login"
-                  ? "bg-neon-cyan/20 text-neon-bright shadow-neon-cyan ring-1 ring-neon-cyan/40"
-                  : "text-cyan-700 hover:text-cyan-500"
+                  ? "bg-neon-cyan/25 text-neon-bright shadow-neon-cyan"
+                  : "text-cyan-800 hover:text-neon-cyan"
               }`}
             >
               Вход
@@ -410,10 +413,10 @@ export default function App() {
                 setAuthMode("register");
                 setBanner(null);
               }}
-              className={`flex-1 rounded-md py-2 text-sm font-medium transition ${
+              className={`flex-1 py-2.5 text-sm font-medium transition ${
                 authMode === "register"
-                  ? "bg-neon-magenta/20 text-neon-magenta text-glow-magenta ring-1 ring-neon-magenta/35"
-                  : "text-cyan-700 hover:text-cyan-500"
+                  ? "bg-neon-hot/20 text-neon-magenta text-glow-magenta shadow-neon-magenta"
+                  : "text-cyan-800 hover:text-neon-magenta"
               }`}
             >
               Регистрация
@@ -425,7 +428,7 @@ export default function App() {
               Имя
               <input
                 type="text"
-                className="cyber-input mt-1 w-full rounded-lg"
+                className="cyber-input mt-1 w-full"
                 value={nameInput}
                 onChange={(e) => setNameInput(e.target.value)}
                 placeholder="Ваше имя в чате"
@@ -438,7 +441,7 @@ export default function App() {
               Пароль
               <input
                 type="password"
-                className="cyber-input mt-1 w-full rounded-lg"
+                className="cyber-input mt-1 w-full"
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
                 placeholder={authMode === "register" ? "Не короче 6 символов" : "••••••"}
@@ -447,34 +450,38 @@ export default function App() {
               />
             </label>
             {banner && (
-              <p className="rounded-lg border border-neon-amber/30 bg-neon-amber/10 px-3 py-2 text-sm text-neon-amber">
+              <p className="border border-neon-amber/40 bg-neon-amber/10 px-3 py-2 font-mono text-sm text-neon-amber">
                 {banner}
               </p>
             )}
             <button
               type="submit"
-              className="font-display w-full rounded-lg bg-gradient-to-r from-cyan-600 via-purple-600 to-fuchsia-600 py-2.5 font-semibold tracking-wide text-white shadow-neon-cyan transition hover:from-cyan-500 hover:via-purple-500 hover:to-fuchsia-500"
+              className="font-display w-full bg-gradient-to-r from-cyan-600 via-neon-purple to-neon-hot py-2.5 font-semibold tracking-[0.2em] text-black shadow-neon-cyan transition hover:brightness-110"
             >
               {authMode === "register" ? "Зарегистрироваться" : "Войти"}
             </button>
           </form>
+        </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-full flex-col">
+    <div className="relative min-h-full">
+      <div className="cyber-vignette" aria-hidden />
+      <div className="cyber-scanlines" aria-hidden />
+      <div className="relative z-10 flex min-h-full flex-col">
       {showFamilyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-          <div className="cyber-panel w-full max-w-sm rounded-xl p-5 shadow-neon-magenta">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-sm">
+          <div className="cyber-panel w-full max-w-sm p-5 shadow-neon-magenta">
             <p className="mb-1 font-mono text-[10px] uppercase tracking-widest text-neon-magenta/80">encrypted channel</p>
             <h3 className="font-display mb-2 text-lg font-semibold text-neon-magenta text-glow-magenta">Family</h3>
             <p className="mb-4 text-sm text-cyan-600">Введите пароль комнаты.</p>
             <form onSubmit={confirmFamilyPassword} className="space-y-3">
               <input
                 type="password"
-                className="cyber-input w-full rounded-lg"
+                className="cyber-input w-full"
                 value={familyRoomPwDraft}
                 onChange={(e) => setFamilyRoomPwDraft(e.target.value)}
                 placeholder="Пароль"
@@ -484,13 +491,13 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setShowFamilyModal(false)}
-                  className="flex-1 rounded-lg border border-neon-cyan/35 py-2 text-cyan-300 transition hover:border-neon-cyan/60 hover:bg-neon-cyan/10"
+                  className="flex-1 border border-neon-cyan/40 py-2 text-sm text-neon-cyan transition hover:bg-neon-cyan/15 hover:shadow-neon-cyan"
                 >
                   Отмена
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 rounded-lg bg-gradient-to-r from-fuchsia-600 to-purple-600 py-2 font-medium text-white shadow-neon-magenta transition hover:from-fuchsia-500 hover:to-purple-500"
+                  className="flex-1 bg-gradient-to-r from-neon-hot to-neon-purple py-2 font-display text-sm font-semibold tracking-wider text-black shadow-neon-magenta transition hover:brightness-110"
                 >
                   Войти в чат
                 </button>
@@ -500,46 +507,60 @@ export default function App() {
         </div>
       )}
 
-      <header className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-neon-cyan/20 bg-void-deep/85 px-4 py-3 shadow-[0_1px_20px_rgba(0,0,0,0.35)] backdrop-blur-md">
-        <div>
-          <h1 className="font-display text-lg font-bold tracking-wide text-neon-bright text-glow-cyan">TatarChat</h1>
-          <p className="text-xs text-cyan-600">
-            Вы: <span className="text-neon-bright">{nickname}</span>
-            {" · "}
-            <span className="text-cyan-400">{roomTitle}</span>
-            {" · "}
-            <span className={status === "online" ? "text-neon-cyan" : "text-neon-amber"}>
+      <header className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b-2 border-neon-cyan/35 bg-black/85 px-4 py-3 shadow-neon-cyan backdrop-blur-md">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-3">
+            <h1 className="font-display text-lg font-bold tracking-[0.35em] text-neon-bright text-glow-cyan md:text-xl">
+              TATARCHAT
+            </h1>
+            <span className="hidden font-mono text-[9px] uppercase tracking-widest text-cyan-900 sm:inline">v1</span>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className="hud-chip max-w-[160px] truncate border-neon-cyan/55 text-neon-cyan" title={`Вы: ${nickname}`}>
+              {nickname}
+            </span>
+            <span className="hud-chip border-neon-purple/50 text-neon-purple">{roomTitle}</span>
+            <span
+              className={`hud-chip ${
+                status === "online"
+                  ? "border-neon-bright/80 text-neon-bright text-glow-cyan"
+                  : "border-neon-amber/70 text-neon-amber"
+              }`}
+            >
               {status === "online" ? "LINK_OK" : "NO_LINK"}
             </span>
-          </p>
+          </div>
         </div>
         <button
           type="button"
           onClick={handleLogout}
-          className="rounded-lg border border-neon-magenta/40 px-3 py-1.5 text-sm text-neon-magenta transition hover:bg-neon-magenta/15 hover:shadow-neon-magenta"
+          className="hud-chip border-neon-hot/60 text-neon-hot transition hover:bg-neon-hot/15 hover:shadow-neon-magenta"
         >
           Выйти
         </button>
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:flex-row md:p-4">
-        <aside className="cyber-panel order-2 w-full flex-shrink-0 rounded-xl p-3 md:order-1 md:w-56">
-          <h2 className="mb-2 font-mono text-xs font-medium uppercase tracking-widest text-neon-cyan/70">Каналы</h2>
-          <ul className="space-y-1 text-sm">
+        <aside className="cyber-panel order-2 w-full flex-shrink-0 p-3 md:order-1 md:w-60">
+          <h2 className="mb-3 font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-neon-cyan/50">Каналы</h2>
+          <ul className="space-y-1.5 text-sm">
             {rooms.map((r) => (
               <li key={r.slug}>
                 <button
                   type="button"
                   onClick={() => selectRoom(r.slug)}
-                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition ${
+                  className={`flex w-full items-center justify-between border px-2.5 py-2 text-left font-mono transition ${
                     activeRoom === r.slug
-                      ? "bg-neon-cyan/15 text-neon-bright shadow-neon-cyan ring-1 ring-neon-cyan/45"
-                      : "text-cyan-200/80 hover:bg-void-lift/80 hover:text-neon-cyan"
+                      ? "border-neon-cyan bg-neon-cyan/10 text-neon-bright shadow-neon-cyan"
+                      : "border-transparent bg-black/40 text-cyan-600 hover:border-neon-cyan/30 hover:text-neon-cyan"
                   }`}
                 >
-                  <span className="truncate font-mono">{r.title}</span>
+                  <span className="truncate">{r.title}</span>
                   {r.requiresPassword && (
-                    <span className="ml-1 shrink-0 font-mono text-[10px] text-neon-magenta" title="С паролем">
+                    <span
+                      className="hud-chip ml-1 shrink-0 border-neon-hot/70 bg-black/60 text-[8px] text-neon-hot"
+                      title="Защищённый канал"
+                    >
                       SEC
                     </span>
                   )}
@@ -549,9 +570,9 @@ export default function App() {
           </ul>
         </aside>
 
-        <section className="cyber-panel order-1 flex min-h-0 flex-1 flex-col rounded-xl md:order-2">
+        <section className="cyber-panel order-1 flex min-h-0 flex-1 flex-col md:order-2">
           {banner && (
-            <div className="border-b border-neon-amber/25 bg-neon-amber/10 px-3 py-2 font-mono text-sm text-neon-amber">
+            <div className="border-b-2 border-neon-amber/35 bg-neon-amber/10 px-3 py-2 font-mono text-xs text-neon-amber">
               {banner}
             </div>
           )}
@@ -561,16 +582,18 @@ export default function App() {
             style={{ maxHeight: "min(60vh, 520px)" }}
           >
             {messages.length === 0 ? (
-              <p className="text-center text-sm text-cyan-800">Пока нет сообщений — напишите первым.</p>
+              <p className="text-center font-mono text-sm uppercase tracking-widest text-cyan-900">
+                Нет данных в буфере — передача открыта
+              </p>
             ) : (
               messages.map((m, i) => (
                 <div
                   key={`${m.time}-${i}-${m.user_nick}`}
-                  className="rounded-lg border border-neon-cyan/15 border-l-2 border-l-neon-magenta/60 bg-void-deep/70 px-3 py-2 shadow-[inset_0_0_20px_rgba(34,211,238,0.03)]"
+                  className="border border-neon-cyan/25 border-l-2 border-l-neon-hot bg-black/55 px-3 py-2 shadow-[inset_0_0_28px_rgba(0,229,255,0.04)]"
                 >
                   <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
                     <span className="font-medium text-neon-cyan">{m.user_nick}</span>
-                    <span className="font-mono text-[10px] uppercase tracking-wider text-cyan-700">{formatTime(m.time)}</span>
+                    <span className="font-mono text-[9px] uppercase tracking-widest text-cyan-900">{formatTime(m.time)}</span>
                   </div>
                   <p className="whitespace-pre-wrap break-words text-cyan-50/95">{m.text}</p>
                 </div>
@@ -580,10 +603,10 @@ export default function App() {
 
           <form
             onSubmit={sendMessage}
-            className="flex flex-shrink-0 gap-2 border-t border-neon-cyan/15 bg-void-deep/40 p-3"
+            className="flex flex-shrink-0 gap-2 border-t-2 border-neon-cyan/20 bg-black/50 p-3"
           >
             <input
-              className="cyber-input min-w-0 flex-1 rounded-lg"
+              className="cyber-input min-w-0 flex-1"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Сообщение…"
@@ -593,12 +616,13 @@ export default function App() {
             <button
               type="submit"
               disabled={status === "online" && !roomJoined}
-              className="font-display rounded-lg bg-gradient-to-br from-cyan-500 to-purple-600 px-4 py-2 font-semibold text-white shadow-neon-cyan transition hover:from-cyan-400 hover:to-purple-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+              className="font-display border border-neon-cyan/50 bg-gradient-to-br from-neon-cyan to-neon-purple px-4 py-2 text-sm font-bold tracking-wider text-black shadow-neon-cyan transition hover:brightness-110 disabled:cursor-not-allowed disabled:border-cyan-900 disabled:bg-cyan-950 disabled:text-cyan-800 disabled:shadow-none"
             >
-              {status === "online" && !roomJoined ? "Вход…" : "Отправить"}
+              {status === "online" && !roomJoined ? "SYNC…" : "TX"}
             </button>
           </form>
         </section>
+      </div>
       </div>
     </div>
   );

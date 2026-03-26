@@ -196,8 +196,29 @@ async function getLastMessages(room, limit = 50) {
     ORDER BY m.created_at DESC
     LIMIT $2
   `;
-  const { rows } = await pool.query(q, [room, limit]);
-  return rows.reverse();
+  try {
+    const { rows } = await pool.query(q, [room, limit]);
+    return rows.reverse();
+  } catch (err) {
+    if (err.code === "42703") {
+      const qLegacy = `
+        SELECT
+          m.id,
+          m.room,
+          m.text,
+          m."timestamp" AS time,
+          u.nickname AS user_nick
+        FROM messages m
+        JOIN users u ON u.id = m.user_id
+        WHERE m.room = $1
+        ORDER BY m."timestamp" DESC
+        LIMIT $2
+      `;
+      const { rows } = await pool.query(qLegacy, [room, limit]);
+      return rows.reverse();
+    }
+    throw err;
+  }
 }
 
 async function insertMessage(room, userId, text) {
@@ -206,8 +227,21 @@ async function insertMessage(room, userId, text) {
     VALUES ($1, $2, $3)
     RETURNING id, created_at
   `;
-  const { rows } = await pool.query(q, [room, userId, text]);
-  return rows[0];
+  try {
+    const { rows } = await pool.query(q, [room, userId, text]);
+    return rows[0];
+  } catch (err) {
+    if (err.code === "42703") {
+      const qLegacy = `
+        INSERT INTO messages (room, user_id, text)
+        VALUES ($1, $2, $3)
+        RETURNING id, "timestamp" AS created_at
+      `;
+      const { rows } = await pool.query(qLegacy, [room, userId, text]);
+      return rows[0];
+    }
+    throw err;
+  }
 }
 
 async function findUserByNickname(nickname) {
@@ -350,8 +384,12 @@ app.get("/api/messages/:roomSlug", requireAuth, async (req, res) => {
     const messages = await getLastMessages(slug, 50);
     res.json({ room: slug, title: GROUP_ROOMS[slug].title, messages });
   } catch (err) {
-    console.error("GET /api/messages/:roomSlug", err);
-    res.status(500).json({ error: "Не удалось загрузить сообщения" });
+    console.error("GET /api/messages/:roomSlug", err?.message || err, err?.code || "");
+    const hint =
+      err?.code === "42703"
+        ? " Проверьте схему БД (created_at в messages) или миграцию migrations/001_rename_messages_timestamp.sql."
+        : "";
+    res.status(500).json({ error: `Не удалось загрузить сообщения.${hint}` });
   }
 });
 
