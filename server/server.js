@@ -262,8 +262,16 @@ app.post("/api/auth/register", async (req, res) => {
     if (err.code === "23505") {
       return res.status(409).json({ error: "Такое имя уже занято" });
     }
+    if (err.code === "42703") {
+      return res.status(500).json({
+        error:
+          "В таблице users нет колонки password_hash. Выполните миграцию: migrations/002_users_password_hash.sql",
+      });
+    }
     console.error("POST /api/auth/register", err);
-    res.status(500).json({ error: "Не удалось зарегистрироваться" });
+    res.status(500).json({
+      error: "Не удалось зарегистрироваться. Проверьте лог сервера и подключение к БД.",
+    });
   }
 });
 

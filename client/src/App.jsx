@@ -159,13 +159,24 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, password }),
       });
-      const data = await res.json().catch(() => ({}));
+      const raw = await res.text();
+      let data = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        data = {};
+      }
       if (!res.ok) {
-        setBanner(data.error || "Ошибка");
+        const msg =
+          data.error ||
+          data.message ||
+          (raw && !raw.startsWith("<") && raw.length < 300 ? raw.trim() : "") ||
+          `Сервер ответил ${res.status} ${res.statusText || ""}`.trim();
+        setBanner(msg || "Неизвестная ошибка");
         return;
       }
       if (!data.token) {
-        setBanner("Неверный ответ сервера");
+        setBanner("Неверный ответ сервера (нет token)");
         return;
       }
       localStorage.setItem(LS_TOKEN, data.token);
