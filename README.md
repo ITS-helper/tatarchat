@@ -105,7 +105,19 @@ Get-Content migrations\002_users_password_hash.sql -Raw | docker exec -i tatarch
 Get-Content migrations\003_messages_user_id.sql -Raw | docker exec -i tatarchat-db psql -U postgres -d tatarchat-db
 ```
 
-На **Render**: Dashboard → PostgreSQL → **Shell** или подключитесь к `DATABASE_URL` любым клиентом и выполните содержимое `migrations/003_messages_user_id.sql`. Сообщения без сопоставимого пользователя по полям `user_nick` / `nickname` / `author` будут **удалены**; затем перезапустите веб-сервис.
+На **Render**: подключитесь к `DATABASE_URL` и выполните миграцию целиком.
+
+- Из **cmd.exe** (подставьте URL из панели Render):
+
+  `psql "postgresql://USER:PASS@HOST/DB" -f migrations/003_messages_user_id.sql`
+
+- Уже внутри **psql** флаг `-f` не работает — вставьте SQL вручную или:
+
+  `\i C:/path/to/tatarchat/migrations/003_messages_user_id.sql`
+
+  (путь к файлу на вашем ПК; или скопируйте текст файла в буфер и выполните.)
+
+Сообщения без сопоставимого пользователя (ник в `user` / `user_nick` / … не совпал с `users.nickname`) будут **удалены**. После миграции перезапустите **веб-сервис** на Render.
 
 ## API
 

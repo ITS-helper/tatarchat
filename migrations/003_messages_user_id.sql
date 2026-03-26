@@ -13,6 +13,20 @@ BEGIN
   END IF;
 END $$;
 
+-- Старая схема Render: колонка "user" (зарезервированное слово — в кавычках)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'messages' AND column_name = 'user'
+  ) THEN
+    UPDATE messages m
+    SET user_id = u.id
+    FROM users u
+    WHERE m.user_id IS NULL AND lower(trim(u.nickname)) = lower(trim(m."user"));
+  END IF;
+END $$;
+
 -- Подстановка из текстового поля автора (если было в старой схеме)
 DO $$
 BEGIN
@@ -71,3 +85,6 @@ BEGIN
 END $$;
 
 CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages (user_id);
+
+-- Иначе INSERT из приложения (room, user_id, text) падает: колонка user NOT NULL без значения
+ALTER TABLE messages DROP COLUMN IF EXISTS "user";
