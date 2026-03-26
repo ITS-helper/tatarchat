@@ -1,6 +1,6 @@
 /**
  * TatarChat: Express + Socket.io + PostgreSQL.
- * Порт по умолчанию 3001.
+ * Вход: регистрация (имя + пароль), JWT. Сокет только с валидным токеном.
  */
 require("dotenv").config();
 const http = require("http");
@@ -8,6 +8,8 @@ const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 const { Pool } = require("pg");
 const { Server } = require("socket.io");
 
@@ -15,18 +17,30 @@ const PORT = Number(process.env.PORT) || 3001;
 const ROOM_FAMILY = "family";
 const MAX_MESSAGE_LEN = 2000;
 const MAX_NICK_LEN = 64;
+const MIN_PASSWORD_LEN = 6;
+const MAX_PASSWORD_LEN = 128;
 const MESSAGES_PER_MINUTE = 30;
+const BCRYPT_ROUNDS = 10;
+const JWT_EXPIRES = "7d";
+
+const JWT_SECRET =
+  process.env.JWT_SECRET ||
+  (process.env.NODE_ENV === "production" ? null : "dev-tatarchat-jwt-secret-do-not-use-in-prod");
+
+if (!JWT_SECRET) {
+  console.error("Задайте JWT_SECRET в переменных окружения (обязательно в production).");
+  process.exit(1);
+}
 
 const DATABASE_URL =
   process.env.DATABASE_URL ||
-  "postgres://postgres:password@localhost:5432/tatarchat";
+  "postgres://postgres:password@localhost:5432/tatarchat-db";
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
   max: 20,
 });
 
-/** Разрешённые origins: localhost, Render (*.onrender.com), плюс CLIENT_ORIGIN через env */
 const EXTRA_ORIGINS = (process.env.CLIENT_ORIGIN || "")
   .split(",")
   .map((s) => s.trim())
@@ -71,7 +85,6 @@ app.use(
 );
 app.use(express.json({ limit: "64kb" }));
 
-/** Убираем опасные символы из текста сообщения */
 function sanitizeText(input) {
   const s = String(input ?? "")
     .replace(/[\u0000-\u001F\u007F]/g, "")
@@ -81,7 +94,6 @@ function sanitizeText(input) {
   return s;
 }
 
-/** Ник: буквы/цифры/пробелы/дефис/подчёркивание */
 function sanitizeNickname(input) {
   const raw = String(input ?? "").trim().slice(0, MAX_NICK_LEN);
   if (!raw) return "";
@@ -89,17 +101,20 @@ function sanitizeNickname(input) {
   return raw;
 }
 
-/**
- * Сколько активных сокетов на пользователя (несколько вкладок).
- * В БД online=false только когда счётчик обнуляется.
- */
+function sanitizePassword(input) {
+  const s = String(input ?? "");
+  if (s.length < MIN_PASSWORD_LEN || s.length > MAX_PASSWORD_LEN) return null;
+  return s;
+}
+
 const presenceByUserId = new Map();
 function incPresence(userId) {
   presenceByUserId.set(userId, (presenceByUserId.get(userId) || 0) + 1);
 }
-/** @returns {boolean} true — последний сокет, нужно выставить offline в БД */
 function decPresence(userId) {
-  const next = (presenceByUserId.get(userId) || 0) - 1;
+  const cur = presenceByUserId.get(userId) || 0;
+  if (cur <= 0) return false;
+  const next = cur - 1;
   if (next <= 0) {
     presenceByUserId.delete(userId);
     return true;
@@ -108,7 +123,6 @@ function decPresence(userId) {
   return false;
 }
 
-/** Простой in-memory rate limit по userId */
 const rateBuckets = new Map();
 function checkRateLimit(userId) {
   const now = Date.now();
@@ -125,15 +139,17 @@ function checkRateLimit(userId) {
   return true;
 }
 
-async function upsertUserOnline(nickname) {
-  const q = `
-    INSERT INTO users (nickname, online)
-    VALUES ($1, TRUE)
-    ON CONFLICT (nickname) DO UPDATE SET online = TRUE
-    RETURNING id, nickname, created_at
-  `;
-  const { rows } = await pool.query(q, [nickname]);
-  return rows[0];
+const regBuckets = new Map();
+function checkRegRateLimit(ip) {
+  const now = Date.now();
+  const windowMs = 60_000;
+  let b = regBuckets.get(ip);
+  if (!b || now > b.resetAt) {
+    b = { count: 0, resetAt: now + windowMs };
+    regBuckets.set(ip, b);
+  }
+  b.count += 1;
+  return b.count <= 5;
 }
 
 async function setUserOffline(userId) {
@@ -177,16 +193,103 @@ async function getOnlineUsers() {
 
 async function findUserByNickname(nickname) {
   const { rows } = await pool.query(
-    `SELECT id, nickname FROM users WHERE nickname = $1`,
+    `SELECT id, nickname, password_hash FROM users WHERE nickname = $1`,
     [nickname]
   );
   return rows[0] || null;
+}
+
+function signToken(userId) {
+  return jwt.sign({ userId }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+}
+
+async function requireAuth(req, res, next) {
+  try {
+    const h = req.headers.authorization;
+    if (!h || !h.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Требуется вход" });
+    }
+    const token = h.slice(7);
+    const payload = jwt.verify(token, JWT_SECRET);
+    const { rows } = await pool.query(
+      `SELECT id, nickname, password_hash FROM users WHERE id = $1`,
+      [payload.userId]
+    );
+    const user = rows[0];
+    if (!user?.password_hash) {
+      return res.status(401).json({ error: "Требуется вход" });
+    }
+    req.user = { userId: user.id, nickname: user.nickname };
+    next();
+  } catch {
+    return res.status(401).json({ error: "Сессия устарела, войдите снова" });
+  }
 }
 
 // --- REST ---
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
+});
+
+app.post("/api/auth/register", async (req, res) => {
+  try {
+    const ip = req.ip || "unknown";
+    if (!checkRegRateLimit(ip)) {
+      return res.status(429).json({ error: "Слишком много попыток регистрации" });
+    }
+
+    const name = sanitizeNickname(req.body?.name ?? req.body?.nickname);
+    const password = sanitizePassword(req.body?.password);
+    if (!name) {
+      return res.status(400).json({ error: "Некорректное имя (буквы, цифры, до 64 символов)" });
+    }
+    if (!password) {
+      return res.status(400).json({
+        error: `Пароль: от ${MIN_PASSWORD_LEN} до ${MAX_PASSWORD_LEN} символов`,
+      });
+    }
+
+    const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const { rows } = await pool.query(
+      `INSERT INTO users (nickname, password_hash, online) VALUES ($1, $2, FALSE) RETURNING id, nickname`,
+      [name, hash]
+    );
+    const user = rows[0];
+    const token = signToken(user.id);
+    res.status(201).json({ token, user: { id: user.id, nickname: user.nickname } });
+  } catch (err) {
+    if (err.code === "23505") {
+      return res.status(409).json({ error: "Такое имя уже занято" });
+    }
+    console.error("POST /api/auth/register", err);
+    res.status(500).json({ error: "Не удалось зарегистрироваться" });
+  }
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const name = sanitizeNickname(req.body?.name ?? req.body?.nickname);
+    const password = String(req.body?.password ?? "");
+    if (!name || !password) {
+      return res.status(400).json({ error: "Укажите имя и пароль" });
+    }
+
+    const user = await findUserByNickname(name);
+    if (!user?.password_hash) {
+      return res.status(401).json({ error: "Неверное имя или пароль" });
+    }
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) {
+      return res.status(401).json({ error: "Неверное имя или пароль" });
+    }
+
+    const token = signToken(user.id);
+    res.json({ token, user: { id: user.id, nickname: user.nickname } });
+  } catch (err) {
+    console.error("POST /api/auth/login", err);
+    res.status(500).json({ error: "Ошибка входа" });
+  }
 });
 
 app.get("/api/messages/family", async (_req, res) => {
@@ -208,32 +311,73 @@ const io = new Server(server, {
   transports: ["websocket", "polling"],
 });
 
-app.post("/api/messages", async (req, res) => {
+io.use(async (socket, next) => {
   try {
-    const { room = ROOM_FAMILY, text, nickname } = req.body || {};
+    const token = socket.handshake.auth?.token;
+    if (!token || typeof token !== "string") {
+      return next(new Error("Требуется вход"));
+    }
+    const payload = jwt.verify(token, JWT_SECRET);
+    const { rows } = await pool.query(
+      `SELECT id, nickname, password_hash FROM users WHERE id = $1`,
+      [payload.userId]
+    );
+    const user = rows[0];
+    if (!user?.password_hash) {
+      return next(new Error("Пользователь не найден"));
+    }
+    socket.data.userId = user.id;
+    socket.data.nickname = user.nickname;
+    next();
+  } catch {
+    next(new Error("Недействительный токен"));
+  }
+});
+
+async function joinFamilyRoom(socket) {
+  const userId = socket.data.userId;
+  const nickname = socket.data.nickname;
+  if (!userId) return;
+
+  if (socket.data.joinedFamily) {
+    const history = await getLastMessages(ROOM_FAMILY, 50);
+    const online = await getOnlineUsers();
+    socket.emit("history", history);
+    socket.emit("online-users", online);
+    return;
+  }
+
+  await pool.query("UPDATE users SET online = TRUE WHERE id = $1", [userId]);
+  incPresence(userId);
+  socket.data.joinedFamily = true;
+  await socket.join(ROOM_FAMILY);
+
+  const history = await getLastMessages(ROOM_FAMILY, 50);
+  const online = await getOnlineUsers();
+  io.to(ROOM_FAMILY).emit("online-users", online);
+  socket.emit("history", history);
+  socket.emit("online-users", online);
+}
+
+app.post("/api/messages", requireAuth, async (req, res) => {
+  try {
+    const { room = ROOM_FAMILY, text } = req.body || {};
     if (room !== ROOM_FAMILY) {
       return res.status(400).json({ error: "Неподдерживаемая комната" });
-    }
-    const nick = sanitizeNickname(nickname);
-    if (!nick) {
-      return res.status(400).json({ error: "Некорректный nickname" });
     }
     const body = sanitizeText(text);
     if (!body) {
       return res.status(400).json({ error: "Пустое сообщение" });
     }
 
-    let user = await findUserByNickname(nick);
-    if (!user) {
-      user = await upsertUserOnline(nick);
-    }
-    if (!checkRateLimit(user.id)) {
+    const userId = req.user.userId;
+    if (!checkRateLimit(userId)) {
       return res.status(429).json({ error: "Слишком много сообщений в минуту" });
     }
 
-    const row = await insertMessage(ROOM_FAMILY, user.id, body);
+    const row = await insertMessage(ROOM_FAMILY, userId, body);
     const payload = {
-      user_nick: user.nickname,
+      user_nick: req.user.nickname,
       text: body,
       time: row.created_at,
     };
@@ -245,7 +389,6 @@ app.post("/api/messages", async (req, res) => {
   }
 });
 
-// Статика: production — client/dist рядом с server (../client/dist)
 if (process.env.NODE_ENV === "production") {
   const staticDir = path.join(__dirname, "..", "client", "dist");
   app.use(express.static(staticDir));
@@ -254,76 +397,26 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-io.on("connection", (socket) => {
-  socket.on("join-family", async (payload, ack) => {
-    try {
-      const nick = sanitizeNickname(
-        typeof payload === "string" ? payload : payload?.nickname
-      );
-      if (!nick) {
-        const err = { ok: false, error: "Укажите корректный ник" };
-        if (typeof ack === "function") ack(err);
-        return socket.emit("error-toast", err);
-      }
-
-      /** Повторный join на том же сокете — не увеличиваем presence */
-      if (socket.data.userId) {
-        const history = await getLastMessages(ROOM_FAMILY, 50);
-        const online = await getOnlineUsers();
-        socket.emit("history", history);
-        socket.emit("online-users", online);
-        if (typeof ack === "function") {
-          ack({
-            ok: true,
-            userId: socket.data.userId,
-            nickname: socket.data.nickname,
-            history,
-            online,
-          });
-        }
-        return;
-      }
-
-      const user = await upsertUserOnline(nick);
-      socket.data.userId = user.id;
-      socket.data.nickname = user.nickname;
-      incPresence(user.id);
-      await socket.join(ROOM_FAMILY);
-
-      const history = await getLastMessages(ROOM_FAMILY, 50);
-      const online = await getOnlineUsers();
-
-      io.to(ROOM_FAMILY).emit("online-users", online);
-
-      const ok = {
-        ok: true,
-        userId: user.id,
-        nickname: user.nickname,
-        history,
-        online,
-      };
-      socket.emit("history", history);
-      socket.emit("online-users", online);
-      if (typeof ack === "function") ack(ok);
-    } catch (err) {
-      console.error("join-family", err);
-      const e = { ok: false, error: "Ошибка входа в комнату" };
-      if (typeof ack === "function") ack(e);
-      socket.emit("error-toast", e);
-    }
-  });
+io.on("connection", async (socket) => {
+  try {
+    await joinFamilyRoom(socket);
+  } catch (err) {
+    console.error("socket join", err);
+    socket.emit("error-toast", { error: "Не удалось войти в комнату" });
+    socket.disconnect(true);
+    return;
+  }
 
   socket.on("message", async (payload, ack) => {
     try {
       const uid = socket.data.userId;
       if (!uid) {
-        const e = { ok: false, error: "Сначала войдите в комнату (join-family)" };
+        const e = { ok: false, error: "Нет авторизации" };
         if (typeof ack === "function") ack(e);
         return;
       }
 
-      const raw =
-        typeof payload === "string" ? payload : payload?.text ?? "";
+      const raw = typeof payload === "string" ? payload : payload?.text ?? "";
       const body = sanitizeText(raw);
       if (!body) {
         const e = { ok: false, error: "Пустое сообщение" };
@@ -361,6 +454,7 @@ io.on("connection", (socket) => {
       }
       socket.data.userId = undefined;
       socket.data.nickname = undefined;
+      socket.data.joinedFamily = false;
       await socket.leave(ROOM_FAMILY);
       const online = await getOnlineUsers();
       io.to(ROOM_FAMILY).emit("online-users", online);

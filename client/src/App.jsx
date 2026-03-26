@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 
-const LS_NICK = "tatarchat_nickname";
-const LS_USER_ID = "tatarchat_user_id";
+const LS_TOKEN = "tatarchat_token";
+const LS_NICKNAME = "tatarchat_nickname";
 
-/** Render Web Service. Переопределение: VITE_SOCKET_URL / VITE_API_URL */
 const PRODUCTION_API_ORIGIN = "https://tatarchat-server.onrender.com";
 
 function getApiBase() {
@@ -14,12 +13,15 @@ function getApiBase() {
   return PRODUCTION_API_ORIGIN;
 }
 
-/** В dev — :3001 напрямую; в prod — тот же хост, что REST */
 function getSocketUrl() {
   const fromEnv = import.meta.env.VITE_SOCKET_URL;
   if (fromEnv) return fromEnv;
   if (import.meta.env.DEV) return "http://127.0.0.1:3001";
   return PRODUCTION_API_ORIGIN;
+}
+
+function getStoredToken() {
+  return localStorage.getItem(LS_TOKEN) || "";
 }
 
 function formatTime(iso) {
@@ -38,13 +40,15 @@ function formatTime(iso) {
 }
 
 export default function App() {
-  const [nickname, setNickname] = useState(() => localStorage.getItem(LS_NICK) || "");
-  const [draftNick, setDraftNick] = useState(() => localStorage.getItem(LS_NICK) || "");
+  const [token, setToken] = useState(() => getStoredToken());
+  const [nickname, setNickname] = useState(() => localStorage.getItem(LS_NICKNAME) || "");
+  const [authMode, setAuthMode] = useState("login");
+  const [nameInput, setNameInput] = useState("");
+  const [passwordInput, setPasswordInput] = useState("");
   const [messages, setMessages] = useState([]);
   const [online, setOnline] = useState([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState("offline");
-  /** Сервер выставляет userId только после async join-family — без этого флага возможна гонка «отправил раньше, чем вошёл в комнату». */
   const [roomJoined, setRoomJoined] = useState(false);
   const [banner, setBanner] = useState(null);
   const listRef = useRef(null);
@@ -53,16 +57,13 @@ export default function App() {
 
   const scrollToBottom = useCallback(() => {
     const el = listRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-    }
+    if (el) el.scrollTop = el.scrollHeight;
   }, []);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
-  /** Загрузка истории по REST (до сокета / при перезагрузке) */
   const loadHistory = useCallback(async () => {
     try {
       const base = getApiBase();
@@ -77,41 +78,22 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!nickname.trim()) return;
+    if (!token.trim()) return;
 
     const socketUrl = getSocketUrl();
     const socket = io(socketUrl, {
       path: "/socket.io",
       transports: ["websocket", "polling"],
-      // cross-origin (3000→3001) в dev: без credentials проще с CORS
+      auth: { token },
       withCredentials: import.meta.env.PROD,
     });
     socketRef.current = socket;
-
-    const markJoined = (ack) => {
-      if (ack?.ok && ack.userId != null) {
-        localStorage.setItem(LS_USER_ID, String(ack.userId));
-      }
-      if (ack && !ack.ok) {
-        setRoomJoined(false);
-        roomJoinedRef.current = false;
-        setBanner(ack.error || "Не удалось войти");
-        return;
-      }
-      if (ack?.ok) {
-        setRoomJoined(true);
-        roomJoinedRef.current = true;
-      }
-    };
 
     socket.on("connect", () => {
       setStatus("online");
       setRoomJoined(false);
       roomJoinedRef.current = false;
       setBanner(null);
-      socket.emit("join-family", { nickname }, (ack) => {
-        markJoined(ack);
-      });
     });
 
     socket.on("disconnect", () => {
@@ -122,12 +104,18 @@ export default function App() {
 
     socket.on("connect_error", (err) => {
       console.error(err);
-      setBanner("Нет соединения с сервером (Socket.io).");
+      const msg = err?.message || "";
+      if (/токен|вход|Unauthorized|invalid/i.test(msg)) {
+        setBanner("Сессия недействительна. Войдите снова.");
+        localStorage.removeItem(LS_TOKEN);
+        setToken("");
+      } else {
+        setBanner("Нет соединения с сервером (Socket.io).");
+      }
     });
 
     socket.on("history", (rows) => {
       if (Array.isArray(rows)) setMessages(rows);
-      /** Если ack не дошёл через прокси — считаем вход успешным по событию с сервера */
       setRoomJoined(true);
       roomJoinedRef.current = true;
     });
@@ -151,22 +139,45 @@ export default function App() {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [nickname, loadHistory]);
+  }, [token, loadHistory]);
 
-  const handleJoin = (e) => {
+  const submitAuth = async (e) => {
     e.preventDefault();
-    const n = draftNick.trim();
-    if (!n) {
-      setBanner("Введите ник");
-      return;
-    }
-    if (n.length > 64) {
-      setBanner("Ник слишком длинный (макс. 64 символа)");
-      return;
-    }
-    localStorage.setItem(LS_NICK, n);
-    setNickname(n);
     setBanner(null);
+    const name = nameInput.trim();
+    const password = passwordInput;
+    if (!name || !password) {
+      setBanner("Введите имя и пароль");
+      return;
+    }
+
+    const base = getApiBase();
+    const path = authMode === "register" ? "/api/auth/register" : "/api/auth/login";
+    try {
+      const res = await fetch(`${base}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBanner(data.error || "Ошибка");
+        return;
+      }
+      if (!data.token) {
+        setBanner("Неверный ответ сервера");
+        return;
+      }
+      localStorage.setItem(LS_TOKEN, data.token);
+      localStorage.setItem(LS_NICKNAME, data.user?.nickname || name);
+      setNickname(data.user?.nickname || name);
+      setToken(data.token);
+      setPasswordInput("");
+      setBanner(null);
+    } catch (err) {
+      console.error(err);
+      setBanner("Сеть: не удалось связаться с сервером");
+    }
   };
 
   const handleLogout = () => {
@@ -175,10 +186,12 @@ export default function App() {
       s.emit("leave");
       s.disconnect();
     }
-    localStorage.removeItem(LS_NICK);
-    localStorage.removeItem(LS_USER_ID);
+    localStorage.removeItem(LS_TOKEN);
+    localStorage.removeItem(LS_NICKNAME);
+    setToken("");
     setNickname("");
-    setDraftNick("");
+    setNameInput("");
+    setPasswordInput("");
     setMessages([]);
     setOnline([]);
     setStatus("offline");
@@ -204,13 +217,15 @@ export default function App() {
       return;
     }
 
-    /** Fallback: REST, если сокет недоступен */
     try {
       const base = getApiBase();
       const res = await fetch(`${base}/api/messages`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ room: "family", text, nickname }),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ room: "family", text }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -227,22 +242,66 @@ export default function App() {
     }
   };
 
-  if (!nickname) {
+  if (!token) {
     return (
       <div className="flex min-h-full flex-col items-center justify-center p-4">
         <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl backdrop-blur">
           <h1 className="mb-1 text-center text-2xl font-semibold text-white">TatarChat</h1>
-          <p className="mb-6 text-center text-sm text-slate-400">Общий чат. Введите ник — он сохранится в этом браузере.</p>
-          <form onSubmit={handleJoin} className="space-y-4">
+          <p className="mb-4 text-center text-sm text-slate-400">
+            Вход по имени и паролю. Новый пользователь — сначала регистрация.
+          </p>
+
+          <div className="mb-4 flex rounded-lg border border-slate-700 p-0.5">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode("login");
+                setBanner(null);
+              }}
+              className={`flex-1 rounded-md py-2 text-sm font-medium transition ${
+                authMode === "login" ? "bg-emerald-600 text-white" : "text-slate-400"
+              }`}
+            >
+              Вход
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode("register");
+                setBanner(null);
+              }}
+              className={`flex-1 rounded-md py-2 text-sm font-medium transition ${
+                authMode === "register" ? "bg-emerald-600 text-white" : "text-slate-400"
+              }`}
+            >
+              Регистрация
+            </button>
+          </div>
+
+          <form onSubmit={submitAuth} className="space-y-4">
             <label className="block text-sm text-slate-300">
-              Ваш ник
+              Имя
               <input
+                type="text"
                 className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none ring-emerald-500/40 focus:ring-2"
-                value={draftNick}
-                onChange={(e) => setDraftNick(e.target.value)}
-                placeholder="Например, Мама"
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                placeholder="Ваше имя в чате"
                 maxLength={64}
+                autoComplete="username"
                 autoFocus
+              />
+            </label>
+            <label className="block text-sm text-slate-300">
+              Пароль
+              <input
+                type="password"
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none ring-emerald-500/40 focus:ring-2"
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                placeholder={authMode === "register" ? "Не короче 6 символов" : "••••••"}
+                maxLength={128}
+                autoComplete={authMode === "register" ? "new-password" : "current-password"}
               />
             </label>
             {banner && (
@@ -252,7 +311,7 @@ export default function App() {
               type="submit"
               className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white transition hover:bg-emerald-500"
             >
-              Войти в чат
+              {authMode === "register" ? "Зарегистрироваться" : "Войти"}
             </button>
           </form>
         </div>
@@ -278,7 +337,7 @@ export default function App() {
           onClick={handleLogout}
           className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800"
         >
-          Сменить ник
+          Выйти
         </button>
       </header>
 

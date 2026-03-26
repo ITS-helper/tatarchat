@@ -34,7 +34,7 @@ docker compose up -d
 
 Если команда не найдена, попробуйте `docker-compose up -d`.
 
-Имя БД в Docker — **`tatarchat`** (как в `DATABASE_URL`). Если у вас остался старый том с базой `messenger_family`, удалите том и поднимите заново: `docker compose down -v`, затем снова `docker compose up -d` и `npm run db:init` (данные в Postgres будут сброшены).
+Имя контейнера и базы в Docker — **`tatarchat-db`** (см. `docker-compose.yml` и `DATABASE_URL`). Если нужно пересоздать том: `docker compose down -v`, затем `docker compose up -d` и `npm run db:init`.
 
 Скопируйте переменные окружения и при необходимости поправьте URL:
 
@@ -47,9 +47,10 @@ copy server\.env.example server\.env
 Пример для локального Docker:
 
 ```env
-DATABASE_URL=postgres://postgres:password@localhost:5432/tatarchat
+DATABASE_URL=postgres://postgres:password@localhost:5432/tatarchat-db
 PORT=3001
 NODE_ENV=development
+JWT_SECRET=любая-длинная-случайная-строка-для-локальной-разработки
 ```
 
 Инициализация схемы (скрипт ждёт готовность БД и применяет `init.sql`):
@@ -62,13 +63,13 @@ npm run db:init
 
 ```bash
 # Linux / Git Bash
-docker exec -i tatar-chat-db psql -U postgres -d messenger_family < migrations/001_rename_messages_timestamp.sql
+docker exec -i tatarchat-db psql -U postgres -d tatarchat-db < migrations/001_rename_messages_timestamp.sql
 ```
 
 В PowerShell:
 
 ```powershell
-Get-Content migrations\001_rename_messages_timestamp.sql -Raw | docker exec -i tatar-chat-db psql -U postgres -d messenger_family
+Get-Content migrations\001_rename_messages_timestamp.sql -Raw | docker exec -i tatarchat-db psql -U postgres -d tatarchat-db
 ```
 
 Вручную через `psql` (если установлен):
@@ -88,21 +89,31 @@ npm run dev
 - Фронтенд: [http://localhost:5173](http://localhost:5173) (Vite, `npm run dev` в `client/`)
 - API и Socket.io: [http://localhost:3001](http://localhost:3001)
 
-Откройте два браузера или окна инкогнито с разными никами — проверьте онлайн и сообщения. После перезагрузки страницы история подтягивается из API.
+Сначала **зарегистрируйте** пользователя (имя + пароль), затем войдите. История чата по-прежнему доступна без входа только на чтение (`GET /api/messages/family`).
+
+В **production** на Render задайте **`JWT_SECRET`** (длинная случайная строка), иначе сервер не запустится.
+
+Если база создана до появления паролей, примените миграцию:
+
+```powershell
+Get-Content migrations\002_users_password_hash.sql -Raw | docker exec -i tatarchat-db psql -U postgres -d tatarchat-db
+```
 
 ## API
 
 | Метод | Путь | Описание |
 |--------|------|----------|
 | `GET` | `/api/health` | Проверка сервера |
-| `GET` | `/api/messages/family` | Последние 50 сообщений (JOIN с `users`) |
-| `POST` | `/api/messages` | Тело: `{ "room": "family", "text": "...", "nickname": "..." }` (запасной канал без сокета) |
+| `POST` | `/api/auth/register` | `{ "name", "password" }` — пароль от 6 символов; ответ `{ token, user }` |
+| `POST` | `/api/auth/login` | `{ "name", "password" }` — ответ `{ token, user }` |
+| `GET` | `/api/messages/family` | Последние 50 сообщений (без авторизации) |
+| `POST` | `/api/messages` | Заголовок `Authorization: Bearer <token>`, тело `{ "room": "family", "text": "..." }` |
 
 ## Socket.io
 
-- `join-family` — `{ nickname }` (или строка-ник); upsert пользователя, `online=true`, рассылка списка онлайн и истории.
-- `message` — `{ text }` после join; запись в БД и broadcast.
-- `leave` — снятие с онлайн (с учётом нескольких вкладок).
+- Подключение только с **`auth: { token }`** (JWT после логина). После connect сервер сам подключает к комнате `family`.
+- `message` — `{ text }`; запись в БД и broadcast.
+- `leave` — выход из комнаты и снятие с онлайн (с учётом нескольких вкладок).
 
 Ограничения: санитизация текста, не более **30 сообщений в минуту** на пользователя (in-memory).
 
