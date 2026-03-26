@@ -189,6 +189,94 @@ function invalidateMessagesSchemaCache() {
   messagesSchemaCache = null;
 }
 
+/**
+ * Старая БД (колонка "user" text вместо user_id): приводим к init.sql без ручного psql.
+ * Идемпотентно; при успехе сбрасывает кэш схемы сообщений.
+ */
+async function ensureMessagesUserIdSchema() {
+  const { rows } = await pool.query(
+    `
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'messages'
+    `
+  );
+  if (rows.length === 0) {
+    console.warn("[schema] Таблица messages не найдена — пропуск автомиграции user_id.");
+    return;
+  }
+  const cols = new Set(rows.map((r) => r.column_name));
+  const hasUser = cols.has("user");
+  const hasUserId = cols.has("user_id");
+
+  if (hasUserId && !hasUser) {
+    return;
+  }
+
+  console.warn("[schema] messages: автомиграция user_id (старая схема или колонка user)…");
+
+  if (!hasUserId) {
+    await pool.query("ALTER TABLE messages ADD COLUMN user_id INTEGER");
+  }
+
+  if (hasUser) {
+    await pool.query(`
+      UPDATE messages m
+      SET user_id = u.id
+      FROM users u
+      WHERE m.user_id IS NULL AND lower(trim(u.nickname)) = lower(trim(m."user"))
+    `);
+  }
+  if (cols.has("user_nick")) {
+    await pool.query(`
+      UPDATE messages m
+      SET user_id = u.id
+      FROM users u
+      WHERE m.user_id IS NULL AND u.nickname = m.user_nick
+    `);
+  }
+  if (cols.has("nickname")) {
+    await pool.query(`
+      UPDATE messages m
+      SET user_id = u.id
+      FROM users u
+      WHERE m.user_id IS NULL AND u.nickname = m.nickname
+    `);
+  }
+  if (cols.has("author")) {
+    await pool.query(`
+      UPDATE messages m
+      SET user_id = u.id
+      FROM users u
+      WHERE m.user_id IS NULL AND u.nickname = m.author
+    `);
+  }
+
+  await pool.query("DELETE FROM messages WHERE user_id IS NULL");
+  await pool.query("ALTER TABLE messages ALTER COLUMN user_id SET NOT NULL");
+
+  try {
+    await pool.query(`
+      ALTER TABLE messages
+      ADD CONSTRAINT messages_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    `);
+  } catch (e) {
+    if (e.code !== "42710" && e.code !== "42P16") {
+      throw e;
+    }
+  }
+
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages (user_id)");
+
+  if (hasUser) {
+    await pool.query('ALTER TABLE messages DROP COLUMN IF EXISTS "user"');
+  }
+
+  invalidateMessagesSchemaCache();
+  console.warn("[schema] messages: готово (user_id, лишняя колонка user удалена при наличии).");
+}
+
 async function loadMessagesSchema() {
   const { rows } = await pool.query(
     `
@@ -211,7 +299,7 @@ async function loadMessagesSchema() {
     let hint = " Сверьте схему с init.sql.";
     if (missing.includes("user_id")) {
       hint =
-        " Выполните на базе migrations/003_messages_user_id.sql (Render: Shell → psql $DATABASE_URL -f …) или см. README.";
+        " Перезапустите сервер — при старте выполняется автомиграция; либо migrations/003_messages_user_id.sql вручную.";
     }
     const e = new Error(`В messages не хватает колонок: ${missing.join(", ")}.${hint}`);
     e.code = "SCHEMA_MESSAGES";
@@ -660,6 +748,14 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Сервер: http://localhost:${PORT}`);
+async function start() {
+  await ensureMessagesUserIdSchema();
+  server.listen(PORT, () => {
+    console.log(`Сервер: http://localhost:${PORT}`);
+  });
+}
+
+start().catch((err) => {
+  console.error("Не удалось запустить сервер:", err);
+  process.exit(1);
 });

@@ -119,6 +119,8 @@ Get-Content migrations\003_messages_user_id.sql -Raw | docker exec -i tatarchat-
 
 Сообщения без сопоставимого пользователя (ник в `user` / `user_nick` / … не совпал с `users.nickname`) будут **удалены**. После миграции перезапустите **веб-сервис** на Render.
 
+**Автоматически:** при старте `server.js` выполняется `ensureMessagesUserIdSchema()` (колонка `user` → `user_id`, затем `DROP "user"`). Достаточно задеплоить новую версию и перезапустить сервис — ручной `psql` не обязателен.
+
 ## API
 
 | Метод | Путь | Описание |
