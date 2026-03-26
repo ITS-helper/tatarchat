@@ -4,12 +4,22 @@ import { io } from "socket.io-client";
 const LS_NICK = "tatarchat_nickname";
 const LS_USER_ID = "tatarchat_user_id";
 
-/** В dev Vite-прокси часто ломает ack у Socket.io — подключаемся к API напрямую. В prod — тот же origin, что и фронт. */
+/** Render Web Service. Переопределение: VITE_SOCKET_URL / VITE_API_URL */
+const PRODUCTION_API_ORIGIN = "https://tatarchat-server.onrender.com";
+
+function getApiBase() {
+  const fromEnv = import.meta.env.VITE_API_URL;
+  if (fromEnv) return String(fromEnv).replace(/\/$/, "");
+  if (import.meta.env.DEV) return "";
+  return PRODUCTION_API_ORIGIN;
+}
+
+/** В dev — :3001 напрямую; в prod — тот же хост, что REST */
 function getSocketUrl() {
   const fromEnv = import.meta.env.VITE_SOCKET_URL;
   if (fromEnv) return fromEnv;
   if (import.meta.env.DEV) return "http://127.0.0.1:3001";
-  return typeof window !== "undefined" ? window.location.origin : undefined;
+  return PRODUCTION_API_ORIGIN;
 }
 
 function formatTime(iso) {
@@ -55,7 +65,8 @@ export default function App() {
   /** Загрузка истории по REST (до сокета / при перезагрузке) */
   const loadHistory = useCallback(async () => {
     try {
-      const res = await fetch("/api/messages/family");
+      const base = getApiBase();
+      const res = await fetch(`${base}/api/messages/family`);
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
       setMessages(data.messages || []);
@@ -195,7 +206,8 @@ export default function App() {
 
     /** Fallback: REST, если сокет недоступен */
     try {
-      const res = await fetch("/api/messages", {
+      const base = getApiBase();
+      const res = await fetch(`${base}/api/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ room: "family", text, nickname }),

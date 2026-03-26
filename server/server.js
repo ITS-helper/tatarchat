@@ -26,17 +26,31 @@ const pool = new Pool({
   max: 20,
 });
 
-/** Разрешённые origins: localhost / 127.0.0.1 с любым портом (Vite и др.) */
+/** Разрешённые origins: localhost, Render (*.onrender.com), плюс CLIENT_ORIGIN через env */
+const EXTRA_ORIGINS = (process.env.CLIENT_ORIGIN || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 function corsOrigin(origin, callback) {
   if (!origin) {
     return callback(null, true);
   }
   try {
     const u = new URL(origin);
-    const ok =
+    if (
       (u.hostname === "localhost" || u.hostname === "127.0.0.1") &&
-      (u.protocol === "http:" || u.protocol === "https:");
-    return callback(null, ok);
+      (u.protocol === "http:" || u.protocol === "https:")
+    ) {
+      return callback(null, true);
+    }
+    if (u.protocol === "https:" && u.hostname.endsWith(".onrender.com")) {
+      return callback(null, true);
+    }
+    if (EXTRA_ORIGINS.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(null, false);
   } catch {
     return callback(null, false);
   }
