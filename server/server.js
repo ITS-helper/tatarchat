@@ -25,8 +25,8 @@ const JWT_EXPIRES = "7d";
 /** slug → отображаемое имя и пароль комнаты (null = без пароля) */
 const GROUP_ROOMS = {
   dreamteamdauns: {
-    title: "DreamTeamDauns",
-    roomPassword: null,
+    title: "DTD",
+    roomPassword: process.env.DTD_ROOM_PASSWORD || "1488",
   },
   family: {
     title: "Family",

@@ -1,16 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
 
 const LS_TOKEN = "tatarchat_token";
 const LS_NICKNAME = "tatarchat_nickname";
 const LS_LAST_ROOM = "tatarchat_last_room";
-/** sessionStorage: пароль комнаты Family (не путать с паролем аккаунта) */
+/** sessionStorage: выбранный раздел и пароли комнат (не путать с паролем аккаунта) */
+const SS_SITE_ROOM = "tatarchat_site_room";
+const SS_DTD_ROOM_PW = "tatarchat_room_pw_dreamteamdauns";
 const SS_FAMILY_ROOM_PW = "tatarchat_room_pw_family";
+
+const GATE_PASSWORD_DTD = "1488";
+const GATE_PASSWORD_FAMILY = "777";
 
 const PRODUCTION_API_ORIGIN = "https://tatarchat-server.onrender.com";
 
 const DEFAULT_ROOMS = [
-  { slug: "dreamteamdauns", title: "DreamTeamDauns", requiresPassword: false },
+  { slug: "dreamteamdauns", title: "DTD", requiresPassword: true },
   { slug: "family", title: "Family", requiresPassword: true },
 ];
 
@@ -38,6 +43,22 @@ function getInitialRoom() {
   return "dreamteamdauns";
 }
 
+function readSiteRoomFromSession() {
+  const slug = sessionStorage.getItem(SS_SITE_ROOM);
+  if (slug !== "dreamteamdauns" && slug !== "family") return null;
+  const pw =
+    slug === "family"
+      ? sessionStorage.getItem(SS_FAMILY_ROOM_PW)
+      : sessionStorage.getItem(SS_DTD_ROOM_PW);
+  return pw ? slug : null;
+}
+
+function clearGateSession() {
+  sessionStorage.removeItem(SS_SITE_ROOM);
+  sessionStorage.removeItem(SS_DTD_ROOM_PW);
+  sessionStorage.removeItem(SS_FAMILY_ROOM_PW);
+}
+
 function formatTime(iso) {
   if (!iso) return "";
   try {
@@ -59,11 +80,27 @@ export default function App() {
   const [authMode, setAuthMode] = useState("login");
   const [nameInput, setNameInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
-  const [rooms] = useState(DEFAULT_ROOMS);
-  const [activeRoom, setActiveRoom] = useState(getInitialRoom);
-  const [roomTitle, setRoomTitle] = useState("DreamTeamDauns");
-  const [showFamilyModal, setShowFamilyModal] = useState(false);
-  const [familyRoomPwDraft, setFamilyRoomPwDraft] = useState("");
+  const [siteRoom, setSiteRoom] = useState(() => readSiteRoomFromSession());
+  const [gateSectionDraft, setGateSectionDraft] = useState(() => {
+    const unlocked = readSiteRoomFromSession();
+    if (unlocked) return unlocked;
+    const last = localStorage.getItem(LS_LAST_ROOM);
+    if (last === "dreamteamdauns" || last === "family") return last;
+    return "dreamteamdauns";
+  });
+  const [gatePasswordDraft, setGatePasswordDraft] = useState("");
+  const rooms = useMemo(
+    () => (siteRoom ? DEFAULT_ROOMS.filter((r) => r.slug === siteRoom) : []),
+    [siteRoom]
+  );
+  const [activeRoom, setActiveRoom] = useState(
+    () => readSiteRoomFromSession() || getInitialRoom()
+  );
+  const [roomTitle, setRoomTitle] = useState(() => {
+    const slug = readSiteRoomFromSession() || getInitialRoom();
+    const m = DEFAULT_ROOMS.find((r) => r.slug === slug);
+    return m?.title || "DTD";
+  });
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState("offline");
@@ -94,8 +131,11 @@ export default function App() {
       try {
         const base = getApiBase();
         const headers = { Authorization: `Bearer ${token}` };
-        if (room === "family") {
-          const pw = sessionStorage.getItem(SS_FAMILY_ROOM_PW);
+        if (room === "family" || room === "dreamteamdauns") {
+          const pw =
+            room === "family"
+              ? sessionStorage.getItem(SS_FAMILY_ROOM_PW)
+              : sessionStorage.getItem(SS_DTD_ROOM_PW);
           if (pw) headers["X-Room-Password"] = pw;
         }
         const res = await fetch(`${base}/api/messages/${room}`, { headers });
@@ -131,7 +171,12 @@ export default function App() {
   const emitJoinRoom = useCallback((socket) => {
     const gen = ++joinGenRef.current;
     const r = activeRoomRef.current;
-    const pw = r === "family" ? sessionStorage.getItem(SS_FAMILY_ROOM_PW) || "" : undefined;
+    const pw =
+      r === "family"
+        ? sessionStorage.getItem(SS_FAMILY_ROOM_PW) || ""
+        : r === "dreamteamdauns"
+          ? sessionStorage.getItem(SS_DTD_ROOM_PW) || ""
+          : undefined;
     setRoomJoined(false);
     roomJoinedRef.current = false;
     socket.emit("join-room", { room: r, roomPassword: pw || undefined }, (ack) => {
@@ -230,6 +275,41 @@ export default function App() {
     emitJoinRoom(s);
   }, [activeRoom, token, emitJoinRoom]);
 
+  useEffect(() => {
+    if (siteRoom && activeRoom !== siteRoom) setActiveRoom(siteRoom);
+  }, [siteRoom, activeRoom]);
+
+  const submitGate = (e) => {
+    e.preventDefault();
+    setBanner(null);
+    const slug = gateSectionDraft;
+    const p = gatePasswordDraft.trim();
+    const expected = slug === "family" ? GATE_PASSWORD_FAMILY : GATE_PASSWORD_DTD;
+    if (!p) {
+      setBanner("Введите пароль раздела");
+      return;
+    }
+    if (p !== expected) {
+      setBanner("Неверный пароль раздела");
+      return;
+    }
+    sessionStorage.setItem(SS_SITE_ROOM, slug);
+    if (slug === "family") {
+      sessionStorage.setItem(SS_FAMILY_ROOM_PW, p);
+      sessionStorage.removeItem(SS_DTD_ROOM_PW);
+    } else {
+      sessionStorage.setItem(SS_DTD_ROOM_PW, p);
+      sessionStorage.removeItem(SS_FAMILY_ROOM_PW);
+    }
+    setSiteRoom(slug);
+    setActiveRoom(slug);
+    const meta = DEFAULT_ROOMS.find((r) => r.slug === slug);
+    if (meta) setRoomTitle(meta.title);
+    localStorage.setItem(LS_LAST_ROOM, slug);
+    setGatePasswordDraft("");
+    setBanner(null);
+  };
+
   const submitAuth = async (e) => {
     e.preventDefault();
     setBanner(null);
@@ -289,7 +369,9 @@ export default function App() {
     localStorage.removeItem(LS_TOKEN);
     localStorage.removeItem(LS_NICKNAME);
     localStorage.removeItem(LS_LAST_ROOM);
-    sessionStorage.removeItem(SS_FAMILY_ROOM_PW);
+    clearGateSession();
+    setSiteRoom(null);
+    setGateSectionDraft("dreamteamdauns");
     setToken("");
     setNickname("");
     setNameInput("");
@@ -303,27 +385,7 @@ export default function App() {
 
   const selectRoom = (slug) => {
     setBanner(null);
-    if (slug === "family") {
-      if (!sessionStorage.getItem(SS_FAMILY_ROOM_PW)) {
-        setFamilyRoomPwDraft("");
-        setShowFamilyModal(true);
-        return;
-      }
-    }
-    setActiveRoom(slug);
-  };
-
-  const confirmFamilyPassword = (e) => {
-    e.preventDefault();
-    const p = familyRoomPwDraft.trim();
-    if (!p) {
-      setBanner("Введите пароль комнаты");
-      return;
-    }
-    sessionStorage.setItem(SS_FAMILY_ROOM_PW, p);
-    setShowFamilyModal(false);
-    setActiveRoom("family");
-    setBanner(null);
+    if (slug === siteRoom) setActiveRoom(slug);
   };
 
   const sendMessage = async (e) => {
@@ -350,8 +412,11 @@ export default function App() {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       };
-      if (activeRoom === "family") {
-        const pw = sessionStorage.getItem(SS_FAMILY_ROOM_PW);
+      if (activeRoom === "family" || activeRoom === "dreamteamdauns") {
+        const pw =
+          activeRoom === "family"
+            ? sessionStorage.getItem(SS_FAMILY_ROOM_PW)
+            : sessionStorage.getItem(SS_DTD_ROOM_PW);
         if (pw) headers["X-Room-Password"] = pw;
       }
       const res = await fetch(`${base}/api/messages`, {
@@ -374,6 +439,90 @@ export default function App() {
     }
   };
 
+  if (!siteRoom) {
+    return (
+      <div className="relative min-h-full">
+        <div className="cyber-vignette" aria-hidden />
+        <div className="cyber-scanlines" aria-hidden />
+        <div className="relative z-10 flex min-h-full flex-col items-center justify-center p-4">
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-neon-purple/10 via-transparent to-neon-hot/5" />
+          <div className="cyber-panel relative w-full max-w-md p-6 shadow-neon-cyan">
+            <p className="mb-2 text-center font-mono text-[10px] uppercase tracking-[0.35em] text-neon-cyan/60">
+              // choose uplink
+            </p>
+            <h1 className="font-display mb-1 text-center text-2xl font-bold tracking-wide text-neon-bright text-glow-cyan">
+              TatarChat
+            </h1>
+            <p className="mb-4 text-center text-sm text-cyan-600/90">
+              Выберите раздел и введите его пароль. Дальше — вход в аккаунт.
+              {getStoredToken().trim() ? (
+                <span className="mt-2 block text-cyan-500/90">Аккаунт уже сохранён — после пароля раздела откроется чат.</span>
+              ) : null}
+            </p>
+
+            <div className="mb-4 flex border border-neon-cyan/35 bg-black/60 p-px">
+              <button
+                type="button"
+                onClick={() => {
+                  setGateSectionDraft("dreamteamdauns");
+                  setBanner(null);
+                }}
+                className={`flex-1 py-2.5 text-sm font-medium transition ${
+                  gateSectionDraft === "dreamteamdauns"
+                    ? "bg-neon-cyan/25 text-neon-bright shadow-neon-cyan"
+                    : "text-cyan-800 hover:text-neon-cyan"
+                }`}
+              >
+                DTD
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setGateSectionDraft("family");
+                  setBanner(null);
+                }}
+                className={`flex-1 py-2.5 text-sm font-medium transition ${
+                  gateSectionDraft === "family"
+                    ? "bg-neon-hot/20 text-neon-magenta text-glow-magenta shadow-neon-magenta"
+                    : "text-cyan-800 hover:text-neon-magenta"
+                }`}
+              >
+                Family
+              </button>
+            </div>
+
+            <form onSubmit={submitGate} className="space-y-4">
+              <label className="block text-sm text-cyan-400/90">
+                Пароль раздела
+                <input
+                  type="password"
+                  className="cyber-input mt-1 w-full"
+                  value={gatePasswordDraft}
+                  onChange={(e) => setGatePasswordDraft(e.target.value)}
+                  placeholder={gateSectionDraft === "family" ? "Family" : "DTD"}
+                  maxLength={64}
+                  autoComplete="off"
+                  autoFocus
+                />
+              </label>
+              {banner && (
+                <p className="border border-neon-amber/40 bg-neon-amber/10 px-3 py-2 font-mono text-sm text-neon-amber">
+                  {banner}
+                </p>
+              )}
+              <button
+                type="submit"
+                className="font-display w-full bg-gradient-to-r from-cyan-600 via-neon-purple to-neon-hot py-2.5 font-semibold tracking-[0.2em] text-black shadow-neon-cyan transition hover:brightness-110"
+              >
+                Продолжить
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!token) {
     return (
       <div className="relative min-h-full">
@@ -389,8 +538,25 @@ export default function App() {
             TatarChat
           </h1>
           <p className="mb-4 text-center text-sm text-cyan-600/90">
-            Вход по имени и паролю. Новый пользователь — сначала регистрация.
+            Раздел:{" "}
+            <span className="font-semibold text-neon-cyan">
+              {siteRoom === "family" ? "Family" : "DTD"}
+            </span>
+            . Вход по имени и паролю. Новый пользователь — регистрация.
           </p>
+          <button
+            type="button"
+            onClick={() => {
+              clearGateSession();
+              setSiteRoom(null);
+              setGateSectionDraft(siteRoom || "dreamteamdauns");
+              setGatePasswordDraft("");
+              setBanner(null);
+            }}
+            className="mb-4 w-full border border-cyan-800/60 py-2 text-xs font-mono uppercase tracking-widest text-cyan-700 transition hover:border-neon-cyan/50 hover:text-neon-cyan"
+          >
+            Сменить раздел
+          </button>
 
           <div className="mb-4 flex border border-neon-cyan/35 bg-black/60 p-px">
             <button
@@ -472,41 +638,6 @@ export default function App() {
       <div className="cyber-vignette" aria-hidden />
       <div className="cyber-scanlines" aria-hidden />
       <div className="relative z-10 flex min-h-full flex-col">
-      {showFamilyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-sm">
-          <div className="cyber-panel w-full max-w-sm p-5 shadow-neon-magenta">
-            <p className="mb-1 font-mono text-[10px] uppercase tracking-widest text-neon-magenta/80">encrypted channel</p>
-            <h3 className="font-display mb-2 text-lg font-semibold text-neon-magenta text-glow-magenta">Family</h3>
-            <p className="mb-4 text-sm text-cyan-600">Введите пароль комнаты.</p>
-            <form onSubmit={confirmFamilyPassword} className="space-y-3">
-              <input
-                type="password"
-                className="cyber-input w-full"
-                value={familyRoomPwDraft}
-                onChange={(e) => setFamilyRoomPwDraft(e.target.value)}
-                placeholder="Пароль"
-                autoFocus
-              />
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowFamilyModal(false)}
-                  className="flex-1 border border-neon-cyan/40 py-2 text-sm text-neon-cyan transition hover:bg-neon-cyan/15 hover:shadow-neon-cyan"
-                >
-                  Отмена
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 bg-gradient-to-r from-neon-hot to-neon-purple py-2 font-display text-sm font-semibold tracking-wider text-black shadow-neon-magenta transition hover:brightness-110"
-                >
-                  Войти в чат
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       <header className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b-2 border-neon-cyan/35 bg-black/85 px-4 py-3 shadow-neon-cyan backdrop-blur-md">
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-3">
