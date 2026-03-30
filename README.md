@@ -156,8 +156,15 @@ cd server && npm start
 
 ## Деплой (кратко)
 
-1. **Render (или аналог):** отдельно **Web Service** (Node, старт `node server.js` из `server`) и **Managed Postgres**; в env задать `DATABASE_URL` и `NODE_ENV=production`; после депоя выполнить применение `init.sql` к облачной БД.
-2. **Статика:** либо собрать клиент и раздавать с того же Express (как выше), либо **Static Site** на CDN + отдельный URL API (тогда в клиенте понадобится `VITE_*` для базового URL API и сокета — при необходимости добавьте сами).
+1. **Render (или аналог):** **Web Service** (Node) и **Managed Postgres**; `DATABASE_URL`, `NODE_ENV=production`, `JWT_SECRET`. Папка сервиса — **`server`**.
+2. **Обязательная сборка фронта:** каталог `client/dist` не в git (см. `.gitignore`). В **Build Command** должно быть не только `npm install`, но и сборка клиента, например:
+   - **Root Directory = `server`:** `npm install && npm run build`  
+     (в `server/package.json` скрипт `build` ставит зависимости клиента и вызывает `vite build`).
+   - Либо из корня репозитория: `npm ci --prefix client && npm run build --prefix client && npm ci --prefix server`, **Start:** `npm start --prefix server`.
+3. После пуша в `main` дождитесь успешного деплоя; при «старый сайт» — **Manual Deploy** в Render и жёсткое обновление страницы (**Ctrl+Shift+R** / без кэша).
+4. **Статика отдельно:** если фронт на CDN, задайте `VITE_API_URL` / `VITE_SOCKET_URL` под ваш API.
+
+В репозитории есть **`render.yaml`** (пример с `rootDir: server` и `buildCommand: npm install && npm run build`).
 
 ## Миграция БД на свой сервер
 

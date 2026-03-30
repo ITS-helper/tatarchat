@@ -1,0 +1,13 @@
+# Blueprint для Render: один Web Service, статика из client/dist после сборки.
+# В панели Render укажите Root Directory = server (как сейчас), либо оставьте пустым и используйте команды из корня — см. README.
+
+services:
+  - type: web
+    name: tatarchat
+    runtime: node
+    rootDir: server
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
