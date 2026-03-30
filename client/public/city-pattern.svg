@@ -1,258 +1,206 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400">
-  <rect width="600" height="400" fill="#141c2e"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420" viewBox="0 0 640 420">
+  <rect width="640" height="420" fill="#121a28"/>
 
-  <g fill="none" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Только бутылки с лейблами; чуть крупнее и ярче неон -->
+  <defs>
+    <style type="text/css"><![CDATA[
+      .lbl { font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif; font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-anchor: middle; dominant-baseline: middle; }
+    ]]></style>
+  </defs>
 
-    <!-- Bottle 1 (wine) — violet -->
-    <g transform="translate(18,12) rotate(-6 11 38)" stroke="#b07ce8" opacity="0.18">
-      <rect x="8" y="0" width="6" height="8" rx="2"/>
-      <path d="M6 8 L6 18 Q0 28 0 40 L0 70 Q0 75 5 75 L17 75 Q22 75 22 70 L22 40 Q22 28 16 18 L16 8"/>
+  <g fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+
+    <!-- VODKA — tall -->
+    <g transform="translate(28,24) rotate(-8 15 52)" stroke="#6ec8ff" opacity="0.32">
+      <rect x="10" y="0" width="10" height="14" rx="2"/>
+      <path d="M7 14 L7 22 Q0 36 0 54 L0 92 Q0 100 15 100 Q30 100 30 92 L30 54 Q30 36 23 22 L23 14"/>
+      <rect x="5" y="40" width="20" height="22" rx="2"/>
+      <text class="lbl" x="15" y="72" fill="#9ad8ff">VODKA</text>
     </g>
 
-    <!-- Lemon slice — yellow-green -->
-    <g transform="translate(82,58) rotate(15 15 15)" stroke="#d4c438" opacity="0.20">
-      <circle cx="15" cy="15" r="14"/>
-      <circle cx="15" cy="15" r="10"/>
-      <line x1="15" y1="5" x2="15" y2="25"/>
-      <line x1="5" y1="15" x2="25" y2="15"/>
-      <line x1="8" y1="8" x2="22" y2="22"/>
-      <line x1="22" y1="8" x2="8" y2="22"/>
+    <!-- COGNAC -->
+    <g transform="translate(118,8) rotate(11 17 55)" stroke="#e8a050" opacity="0.34">
+      <rect x="11" y="0" width="12" height="16" rx="2"/>
+      <path d="M8 16 L8 26 Q2 40 2 58 L2 96 Q2 104 17 104 Q32 104 32 96 L32 58 Q32 40 26 26 L26 16"/>
+      <ellipse cx="17" cy="52" rx="12" ry="18"/>
+      <text class="lbl" x="17" y="78" fill="#ffd090">COGNAC</text>
     </g>
 
-    <!-- Shaker — teal -->
-    <g transform="translate(158,5) rotate(4 10 30)" stroke="#3dd6c8" opacity="0.18">
-      <path d="M5 0 L15 0 L15 8 L18 8 L18 15 L2 15 L2 8 L5 8Z"/>
-      <rect x="2" y="15" width="16" height="45" rx="2"/>
-      <line x1="2" y1="25" x2="18" y2="25"/>
+    <!-- MARTINI (bottle style) -->
+    <g transform="translate(210,32) rotate(-14 16 48)" stroke="#ff7eb8" opacity="0.33">
+      <rect x="12" y="0" width="8" height="12" rx="2"/>
+      <path d="M8 12 L8 20 L4 28 L4 94 Q4 100 16 100 Q28 100 28 94 L28 28 L24 20 L24 12"/>
+      <line x1="10" y1="38" x2="22" y2="38"/>
+      <text class="lbl" x="16" y="72" fill="#ffb8d8">MARTINI</text>
     </g>
 
-    <!-- Cherry — red -->
-    <g transform="translate(230,72) rotate(-10 13 8)" stroke="#ff6b6b" opacity="0.20">
-      <circle cx="8" cy="12" r="7"/>
-      <path d="M8 5 Q10 -5 18 -2"/>
-      <circle cx="18" cy="12" r="7"/>
-      <path d="M18 5 Q16 -5 8 -2"/>
+    <!-- WHISKY -->
+    <g transform="translate(295,12) rotate(6 14 50)" stroke="#d4a045" opacity="0.34">
+      <rect x="9" y="0" width="10" height="13" rx="2"/>
+      <path d="M6 13 L6 22 Q1 34 1 52 L1 94 Q1 100 14 100 Q27 100 27 94 L27 52 Q27 34 22 22 L22 13"/>
+      <text class="lbl" x="14" y="68" fill="#f0c870">WHISKY</text>
     </g>
 
-    <!-- Cocktail glass (martini) — pink -->
-    <g transform="translate(295,18) rotate(8 12 22)" stroke="#e8679a" opacity="0.18">
-      <path d="M0 0 L24 0 L12 25 L12 45"/>
-      <line x1="4" y1="45" x2="20" y2="45"/>
-      <circle cx="20" cy="3" r="4"/>
+    <!-- RUM -->
+    <g transform="translate(378,42) rotate(-18 15 45)" stroke="#ff8f6e" opacity="0.33">
+      <rect x="10" y="0" width="10" height="12" rx="2"/>
+      <path d="M7 12 L7 22 Q2 34 2 50 L2 88 Q2 96 15 96 Q28 96 28 88 L28 50 Q28 34 23 22 L23 12"/>
+      <rect x="6" y="36" width="18" height="16" rx="2"/>
+      <text class="lbl" x="15" y="74" fill="#ffc0a0">RUM</text>
     </g>
 
-    <!-- Ice cubes — ice blue -->
-    <g transform="translate(375,52) rotate(22 11 9)" stroke="#74b9ff" opacity="0.20">
-      <rect x="0" y="0" width="12" height="12" rx="2" transform="rotate(10 6 6)"/>
-      <rect x="10" y="5" width="12" height="12" rx="2" transform="rotate(-5 16 11)"/>
+    <!-- GIN -->
+    <g transform="translate(455,18) rotate(9 14 48)" stroke="#7cf0c8" opacity="0.32">
+      <rect x="9" y="0" width="10" height="15" rx="2"/>
+      <path d="M6 15 L6 24 Q1 38 1 56 L1 92 Q1 98 14 98 Q27 98 27 92 L27 56 Q27 38 22 24 L22 15"/>
+      <line x1="8" y1="44" x2="20" y2="44"/>
+      <line x1="8" y1="52" x2="20" y2="52"/>
+      <text class="lbl" x="14" y="78" fill="#b0ffe8">GIN</text>
     </g>
 
-    <!-- Bottle 2 (tall) — soft blue -->
-    <g transform="translate(420,8) rotate(-3 10 40)" stroke="#5b9bd5" opacity="0.18">
-      <rect x="7" y="0" width="6" height="10" rx="1"/>
-      <path d="M5 10 L5 15 Q2 20 2 30 L2 75 Q2 80 6 80 L14 80 Q18 80 18 75 L18 30 Q18 20 15 15 L15 10"/>
-      <rect x="3" y="28" width="14" height="20" rx="1"/>
+    <!-- TEQUILA -->
+    <g transform="translate(538,28) rotate(-5 16 50)" stroke="#e8e050" opacity="0.35">
+      <rect x="11" y="0" width="10" height="14" rx="2"/>
+      <path d="M8 14 L8 24 Q3 36 3 54 L3 96 Q3 102 16 102 Q29 102 29 96 L29 54 Q29 36 24 24 L24 14"/>
+      <text class="lbl" x="16" y="72" fill="#fff898">TEQUILA</text>
     </g>
 
-    <!-- Lemon wedge — lime -->
-    <g transform="translate(490,40) rotate(12 15 10)" stroke="#a8d848" opacity="0.20">
-      <path d="M0 20 Q15 -5 30 20Z"/>
-      <path d="M5 18 Q15 5 25 18"/>
-      <line x1="15" y1="5" x2="15" y2="18"/>
-      <line x1="10" y1="8" x2="12" y2="18"/>
-      <line x1="20" y1="8" x2="18" y2="18"/>
+    <!-- BRANDY -->
+    <g transform="translate(48,145) rotate(12 15 48)" stroke="#c97cff" opacity="0.33">
+      <rect x="10" y="0" width="10" height="13" rx="2"/>
+      <path d="M7 13 L7 24 Q1 38 1 56 L1 92 Q1 98 15 98 Q29 98 29 92 L29 56 Q29 38 23 24 L23 13"/>
+      <ellipse cx="15" cy="50" rx="10" ry="16"/>
+      <text class="lbl" x="15" y="76" fill="#e8c0ff">BRANDY</text>
     </g>
 
-    <!-- Shot glass — orange -->
-    <g transform="translate(555,22) rotate(-8 10 18)" stroke="#e8985b" opacity="0.18">
-      <path d="M0 0 L20 0 L17 30 Q17 35 10 35 Q3 35 3 30Z"/>
-      <line x1="2" y1="10" x2="18" y2="10"/>
+    <!-- ABSINTHE -->
+    <g transform="translate(142,158) rotate(-11 15 45)" stroke="#6dff9a" opacity="0.34">
+      <rect x="9" y="0" width="12" height="16" rx="2"/>
+      <path d="M6 16 L6 26 Q1 40 1 58 L1 90 Q1 96 15 96 Q29 96 29 90 L29 58 Q29 40 24 26 L24 16"/>
+      <line x1="7" y1="40" x2="23" y2="40"/>
+      <text class="lbl" x="15" y="72" fill="#c0ffd8">ABSINTHE</text>
     </g>
 
-    <!-- Wine glass — magenta -->
-    <g transform="translate(35,115) rotate(5 12 25)" stroke="#c86ddf" opacity="0.18">
-      <ellipse cx="12" cy="5" rx="12" ry="5"/>
-      <path d="M0 5 Q0 25 12 30 Q24 25 24 5"/>
-      <line x1="12" y1="30" x2="12" y2="48"/>
-      <line x1="4" y1="48" x2="20" y2="48"/>
+    <!-- LIQUEUR -->
+    <g transform="translate(245,138) rotate(7 14 46)" stroke="#ff66aa" opacity="0.32">
+      <rect x="8" y="0" width="12" height="14" rx="2"/>
+      <path d="M5 14 L5 24 Q0 36 0 52 L0 88 Q0 94 14 94 Q28 94 28 88 L28 52 Q28 36 23 24 L23 14"/>
+      <text class="lbl" x="14" y="66" fill="#ffa8d0">LIQUEUR</text>
     </g>
 
-    <!-- Highball glass — cyan -->
-    <g transform="translate(110,128) rotate(-7 11 30)" stroke="#50c8e8" opacity="0.18">
-      <path d="M0 0 L22 0 L20 55 Q20 60 11 60 Q2 60 2 55Z"/>
-      <line x1="1" y1="20" x2="21" y2="20"/>
-      <circle cx="8" cy="35" r="3"/>
-      <circle cx="15" cy="30" r="3"/>
+    <!-- CHAMPAGNE -->
+    <g transform="translate(338,152) rotate(-16 14 52)" stroke="#f0e8ff" opacity="0.30">
+      <rect x="8" y="0" width="8" height="22" rx="2"/>
+      <path d="M5 22 L5 30 Q0 42 0 58 L0 100 Q0 108 12 108 Q24 108 24 100 L24 58 Q24 42 19 30 L19 22"/>
+      <path d="M10 6 Q12 -2 14 6"/>
+      <text class="lbl" x="12" y="78" fill="#ffffff">CHAMPAGNE</text>
     </g>
 
-    <!-- Cocktail umbrella — pink -->
-    <g transform="translate(188,100) rotate(14 15 25)" stroke="#e86790" opacity="0.20">
-      <path d="M0 20 Q15 -5 30 20"/>
-      <line x1="15" y1="-2" x2="15" y2="50"/>
-      <line x1="5" y1="15" x2="10" y2="20"/>
-      <line x1="15" y1="5" x2="15" y2="20"/>
-      <line x1="25" y1="15" x2="20" y2="20"/>
+    <!-- SCOTCH -->
+    <g transform="translate(428,140) rotate(14 15 48)" stroke="#8acbff" opacity="0.33">
+      <rect x="10" y="0" width="10" height="13" rx="2"/>
+      <path d="M7 13 L7 24 Q2 36 2 54 L2 94 Q2 100 15 100 Q28 100 28 94 L28 54 Q28 36 23 24 L23 13"/>
+      <rect x="5" y="38" width="20" height="18" rx="2"/>
+      <text class="lbl" x="15" y="76" fill="#d0e8ff">SCOTCH</text>
     </g>
 
-    <!-- Bottle 3 (flask) — violet -->
-    <g transform="translate(268,110) rotate(-4 12 30)" stroke="#9b7ed8" opacity="0.18">
-      <rect x="8" y="0" width="8" height="7" rx="2"/>
-      <path d="M4 7 Q0 12 0 20 L0 55 Q0 60 5 60 L19 60 Q24 60 24 55 L24 20 Q24 12 20 7Z"/>
-      <ellipse cx="12" cy="35" rx="7" ry="10"/>
+    <!-- BOURBON -->
+    <g transform="translate(522,148) rotate(-9 14 46)" stroke="#ffaa55" opacity="0.34">
+      <rect x="9" y="0" width="10" height="14" rx="2"/>
+      <path d="M6 14 L6 24 Q1 38 1 56 L1 92 Q1 98 14 98 Q27 98 27 92 L27 56 Q27 38 22 24 L22 14"/>
+      <text class="lbl" x="14" y="72" fill="#ffd498">BOURBON</text>
     </g>
 
-    <!-- Pineapple slice — gold -->
-    <g transform="translate(345,135) rotate(18 12 12)" stroke="#e8c838" opacity="0.20">
-      <ellipse cx="12" cy="12" rx="12" ry="10"/>
-      <path d="M6 0 L8 -8 M12 0 L12 -10 M18 0 L16 -8"/>
-      <line x1="4" y1="8" x2="20" y2="8"/>
-      <line x1="3" y1="14" x2="21" y2="14"/>
+    <!-- VODKA 2 -->
+    <g transform="translate(595,165) rotate(18 14 44)" stroke="#55d0ff" opacity="0.32">
+      <rect x="9" y="0" width="10" height="12" rx="2"/>
+      <path d="M6 12 L6 22 Q1 34 1 52 L1 88 Q1 94 14 94 Q27 94 27 88 L27 52 Q27 34 22 22 L22 12"/>
+      <text class="lbl" x="14" y="64" fill="#a8ecff">VODKA</text>
     </g>
 
-    <!-- Beer mug — amber -->
-    <g transform="translate(408,105) rotate(3 11 25)" stroke="#e8a848" opacity="0.18">
-      <rect x="0" y="0" width="22" height="50" rx="3"/>
-      <path d="M22 10 Q32 10 32 20 L32 30 Q32 40 22 40"/>
-      <line x1="3" y1="15" x2="19" y2="15"/>
-      <path d="M5 5 Q8 -2 11 5 Q14 -2 17 5" fill="none"/>
+    <!-- VERMOUTH -->
+    <g transform="translate(12,268) rotate(-6 15 48)" stroke="#b888ff" opacity="0.33">
+      <rect x="10" y="0" width="10" height="15" rx="2"/>
+      <path d="M7 15 L7 26 Q2 40 2 58 L2 94 Q2 100 15 100 Q28 100 28 94 L28 58 Q28 40 23 26 L23 15"/>
+      <text class="lbl" x="15" y="72" fill="#dcc8ff">VERMOUTH</text>
     </g>
 
-    <!-- Shaker 2 — teal -->
-    <g transform="translate(498,115) rotate(-11 10 32)" stroke="#3dd6c8" opacity="0.18">
-      <ellipse cx="10" cy="5" rx="10" ry="5"/>
-      <path d="M0 5 L0 10 Q0 15 3 15 L17 15 Q20 15 20 10 L20 5"/>
-      <rect x="2" y="15" width="16" height="50" rx="3"/>
+    <!-- COGNAC 2 -->
+    <g transform="translate(108,258) rotate(20 16 50)" stroke="#ffb040" opacity="0.34">
+      <rect x="11" y="0" width="10" height="14" rx="2"/>
+      <path d="M8 14 L8 24 Q3 38 3 56 L3 96 Q3 102 16 102 Q29 102 29 96 L29 56 Q29 38 24 24 L24 14"/>
+      <ellipse cx="16" cy="50" rx="11" ry="17"/>
+      <text class="lbl" x="16" y="78" fill="#ffe0a0">COGNAC</text>
     </g>
 
-    <!-- Lemon slice 2 — yellow -->
-    <g transform="translate(562,145) rotate(-20 12 12)" stroke="#e8d44d" opacity="0.20">
-      <circle cx="12" cy="12" r="11"/>
-      <circle cx="12" cy="12" r="7"/>
-      <line x1="12" y1="1" x2="12" y2="23"/>
-      <line x1="1" y1="12" x2="23" y2="12"/>
-      <line x1="4" y1="4" x2="20" y2="20"/>
-      <line x1="20" y1="4" x2="4" y2="20"/>
+    <!-- MARTINI 2 -->
+    <g transform="translate(210,285) rotate(-12 15 46)" stroke="#ff6ec0" opacity="0.33">
+      <rect x="10" y="0" width="9" height="13" rx="2"/>
+      <path d="M7 13 L7 22 L3 30 L3 92 Q3 98 14.5 98 Q26 98 26 92 L26 30 L22 22 L22 13"/>
+      <text class="lbl" x="14.5" y="70" fill="#ffc8e8">MARTINI</text>
     </g>
 
-    <!-- Corkscrew — mint -->
-    <g transform="translate(22,215) rotate(10 10 26)" stroke="#48d8b0" opacity="0.18">
-      <line x1="10" y1="0" x2="10" y2="15"/>
-      <line x1="3" y1="0" x2="17" y2="0"/>
-      <path d="M10 15 Q5 22 10 28 Q15 34 10 40 Q5 46 10 52"/>
+    <!-- GRAPPA -->
+    <g transform="translate(308,268) rotate(8 13 44)" stroke="#88ffcc" opacity="0.32">
+      <rect x="8" y="0" width="10" height="18" rx="2"/>
+      <path d="M5 18 L5 28 Q0 40 0 56 L0 86 Q0 92 13 92 Q26 92 26 86 L26 56 Q26 40 21 28 L21 18"/>
+      <text class="lbl" x="13" y="66" fill="#c0ffe8">GRAPPA</text>
     </g>
 
-    <!-- Martini glass 2 — pink -->
-    <g transform="translate(88,232) rotate(-12 13 21)" stroke="#e8679a" opacity="0.18">
-      <path d="M0 0 L26 0 L13 22 L13 42"/>
-      <line x1="5" y1="42" x2="21" y2="42"/>
-      <line x1="4" y1="8" x2="22" y2="8"/>
+    <!-- SAKÉ -->
+    <g transform="translate(395,278) rotate(-15 13 42)" stroke="#ff8899" opacity="0.33">
+      <rect x="8" y="0" width="10" height="12" rx="2"/>
+      <path d="M5 12 L5 22 Q0 34 0 50 L0 82 Q0 88 13 88 Q26 88 26 82 L26 50 Q26 34 21 22 L21 12"/>
+      <text class="lbl" x="13" y="62" fill="#ffc8d0">SAKÉ</text>
     </g>
 
-    <!-- Rocks glass — orange -->
-    <g transform="translate(165,248) rotate(7 12 20)" stroke="#e8985b" opacity="0.18">
-      <path d="M2 0 L22 0 L20 35 Q20 40 12 40 Q4 40 4 35Z"/>
-      <rect x="5" y="8" width="8" height="8" rx="1" transform="rotate(8 9 12)"/>
-      <rect x="11" y="12" width="8" height="8" rx="1" transform="rotate(-5 15 16)"/>
+    <!-- PORT -->
+    <g transform="translate(478,262) rotate(11 14 46)" stroke="#cc77ff" opacity="0.34">
+      <rect x="9" y="0" width="10" height="14" rx="2"/>
+      <path d="M6 14 L6 26 Q1 40 1 58 L1 92 Q1 98 14 98 Q27 98 27 92 L27 58 Q27 40 22 26 L22 14"/>
+      <text class="lbl" x="14" y="72" fill="#e8c0ff">PORT</text>
     </g>
 
-    <!-- Bottle 4 — soft blue -->
-    <g transform="translate(240,205) rotate(-5 8 35)" stroke="#5b9bd5" opacity="0.18">
-      <rect x="6" y="0" width="5" height="6" rx="1"/>
-      <path d="M4 6 L4 12 L0 18 L0 65 Q0 70 4 70 L13 70 Q17 70 17 65 L17 18 L13 12 L13 6"/>
+    <!-- ARMAGNAC -->
+    <g transform="translate(556,275) rotate(-7 15 48)" stroke="#ffcc55" opacity="0.33">
+      <rect x="10" y="0" width="10" height="13" rx="2"/>
+      <path d="M7 13 L7 24 Q2 38 2 56 L2 96 Q2 102 15 102 Q28 102 28 96 L28 56 Q28 38 23 24 L23 13"/>
+      <text class="lbl" x="15" y="76" fill="#fff0a8">ARMAGNAC</text>
     </g>
 
-    <!-- Straw + cherry — coral -->
-    <g transform="translate(310,240) rotate(16 11 28)" stroke="#f07070" opacity="0.18">
-      <line x1="5" y1="0" x2="12" y2="55"/>
-      <line x1="5" y1="0" x2="0" y2="5"/>
-      <circle cx="16" cy="50" r="5"/>
-      <path d="M16 45 Q18 38 22 40"/>
+    <!-- MEZCAL -->
+    <g transform="translate(75,365) rotate(15 13 40)" stroke="#a0f060" opacity="0.34">
+      <rect x="8" y="0" width="10" height="12" rx="2"/>
+      <path d="M5 12 L5 22 Q0 32 0 48 L0 78 Q0 84 13 84 Q26 84 26 78 L26 48 Q26 32 21 22 L21 12"/>
+      <text class="lbl" x="13" y="58" fill="#d8ffa8">MEZCAL</text>
     </g>
 
-    <!-- Lime half — lime -->
-    <g transform="translate(378,265) rotate(-15 15 8)" stroke="#a8d848" opacity="0.20">
-      <path d="M0 15 A15 15 0 0 1 30 15Z"/>
-      <line x1="15" y1="0" x2="15" y2="15"/>
-      <line x1="7" y1="2" x2="10" y2="13"/>
-      <line x1="23" y1="2" x2="20" y2="13"/>
+    <!-- ARAK -->
+    <g transform="translate(175,355) rotate(-14 13 42)" stroke="#66c8ff" opacity="0.32">
+      <rect x="8" y="0" width="10" height="14" rx="2"/>
+      <path d="M5 14 L5 24 Q0 36 0 52 L0 84 Q0 90 13 90 Q26 90 26 84 L26 52 Q26 36 21 24 L21 14"/>
+      <text class="lbl" x="13" y="64" fill="#b8e8ff">ARAK</text>
     </g>
 
-    <!-- Jigger — steel -->
-    <g transform="translate(435,225) rotate(9 10 20)" stroke="#7898b8" opacity="0.18">
-      <path d="M4 0 L16 0 L14 20 L6 20Z"/>
-      <path d="M6 20 L16 20 L18 40 L2 40Z"/>
+    <!-- CALVADOS -->
+    <g transform="translate(275,348) rotate(6 15 44)" stroke="#ff9955" opacity="0.33">
+      <rect x="10" y="0" width="10" height="13" rx="2"/>
+      <path d="M7 13 L7 24 Q2 38 2 54 L2 88 Q2 94 15 94 Q28 94 28 88 L28 54 Q28 38 23 24 L23 13"/>
+      <text class="lbl" x="15" y="68" fill="#ffd8b8">CALVADOS</text>
     </g>
 
-    <!-- Bottle 5 (round) — violet -->
-    <g transform="translate(502,210) rotate(-8 10 32)" stroke="#b07ce8" opacity="0.18">
-      <rect x="7" y="0" width="6" height="8" rx="2"/>
-      <path d="M5 8 Q0 16 0 28 L0 55 Q0 65 10 65 Q20 65 20 55 L20 28 Q20 16 15 8Z"/>
-      <ellipse cx="10" cy="38" rx="6" ry="8"/>
+    <!-- RUM 2 -->
+    <g transform="translate(388,358) rotate(-10 14 44)" stroke="#ff7878" opacity="0.34">
+      <rect x="9" y="0" width="10" height="12" rx="2"/>
+      <path d="M6 12 L6 22 Q1 34 1 50 L1 86 Q1 92 14 92 Q27 92 27 86 L27 50 Q27 34 22 22 L22 12"/>
+      <text class="lbl" x="14" y="68" fill="#ffb8b8">RUM</text>
     </g>
 
-    <!-- Wine glass 2 — magenta -->
-    <g transform="translate(565,230) rotate(6 14 26)" stroke="#c86ddf" opacity="0.18">
-      <ellipse cx="14" cy="6" rx="14" ry="6"/>
-      <path d="M0 6 Q0 28 14 33 Q28 28 28 6"/>
-      <line x1="14" y1="33" x2="14" y2="52"/>
-      <line x1="5" y1="52" x2="23" y2="52"/>
-    </g>
-
-    <!-- Extra scattered small items -->
-
-    <!-- Cherry 2 -->
-    <g transform="translate(530,75) rotate(-25 8 8)" stroke="#ff6b6b" opacity="0.16">
-      <circle cx="8" cy="12" r="7"/>
-      <path d="M8 5 Q10 -5 18 -2"/>
-    </g>
-
-    <!-- Ice cube solo -->
-    <g transform="translate(142,185) rotate(30 6 6)" stroke="#74b9ff" opacity="0.16">
-      <rect x="0" y="0" width="12" height="12" rx="2"/>
-    </g>
-
-    <!-- Lemon wedge mini -->
-    <g transform="translate(458,170) rotate(-22 10 8)" stroke="#d4c438" opacity="0.16">
-      <path d="M0 14 Q10 -3 20 14Z"/>
-      <line x1="10" y1="3" x2="10" y2="12"/>
-    </g>
-
-    <!-- Shot glass 2 -->
-    <g transform="translate(48,290) rotate(11 10 18)" stroke="#e8985b" opacity="0.16">
-      <path d="M0 0 L20 0 L17 30 Q17 35 10 35 Q3 35 3 30Z"/>
-      <line x1="2" y1="10" x2="18" y2="10"/>
-    </g>
-
-    <!-- Cherry 3 -->
-    <g transform="translate(328,310) rotate(8 8 8)" stroke="#ff6b6b" opacity="0.15">
-      <circle cx="8" cy="12" r="7"/>
-      <path d="M8 5 Q10 -5 18 -2"/>
-      <circle cx="18" cy="12" r="7"/>
-      <path d="M18 5 Q16 -5 8 -2"/>
-    </g>
-
-    <!-- Ice cubes 2 -->
-    <g transform="translate(210,330) rotate(-18 11 9)" stroke="#74b9ff" opacity="0.15">
-      <rect x="0" y="0" width="12" height="12" rx="2" transform="rotate(10 6 6)"/>
-      <rect x="10" y="5" width="12" height="12" rx="2" transform="rotate(-5 16 11)"/>
-    </g>
-
-    <!-- Lemon mini 2 -->
-    <g transform="translate(478,305) rotate(25 8 8)" stroke="#a8d848" opacity="0.16">
-      <path d="M0 12 A12 12 0 0 1 24 12Z"/>
-      <line x1="12" y1="0" x2="12" y2="12"/>
-    </g>
-
-    <!-- Small umbrella -->
-    <g transform="translate(560,340) rotate(-14 12 15)" stroke="#e86790" opacity="0.15">
-      <path d="M0 15 Q10 -3 20 15"/>
-      <line x1="10" y1="-1" x2="10" y2="35"/>
-    </g>
-
-    <!-- Tiny bottle -->
-    <g transform="translate(128,340) rotate(7 5 20)" stroke="#9b7ed8" opacity="0.15">
-      <rect x="4" y="0" width="4" height="5" rx="1"/>
-      <path d="M2 5 L2 35 Q2 38 6 38 Q10 38 10 35 L10 5"/>
+    <!-- GIN 2 -->
+    <g transform="translate(490,350) rotate(13 13 42)" stroke="#44e8c8" opacity="0.32">
+      <rect x="8" y="0" width="10" height="14" rx="2"/>
+      <path d="M5 14 L5 24 Q0 36 0 52 L0 84 Q0 90 13 90 Q26 90 26 84 L26 52 Q26 36 21 24 L21 14"/>
+      <text class="lbl" x="13" y="64" fill="#a8ffe8">GIN</text>
     </g>
 
   </g>
