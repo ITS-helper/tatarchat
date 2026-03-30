@@ -95,18 +95,18 @@ function getStoredToken() {
 }
 
 function canonicalizeStoredRoom(s) {
-  if (!s || typeof s !== "string") return "dreamteamdauns";
+  if (!s || typeof s !== "string") return "lobby";
   const dm = s.trim().match(/^dm-(\d+)-(\d+)$/i);
   if (dm) {
     let a = parseInt(dm[1], 10);
     let b = parseInt(dm[2], 10);
-    if (!Number.isInteger(a) || !Number.isInteger(b) || a < 1 || b < 1 || a === b) return "dreamteamdauns";
+    if (!Number.isInteger(a) || !Number.isInteger(b) || a < 1 || b < 1 || a === b) return "lobby";
     if (a > b) [a, b] = [b, a];
     return `dm-${a}-${b}`;
   }
   const alnum = s.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
   if (alnum && alnum.length <= 64) return alnum;
-  return "dreamteamdauns";
+  return "lobby";
 }
 
 function getInitialRoom() {
