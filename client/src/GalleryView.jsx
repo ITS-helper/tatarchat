@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 const SORT_OPTIONS = [
   { value: "created_desc", label: "Сначала новые" },
@@ -8,30 +8,52 @@ const SORT_OPTIONS = [
   { value: "manual", label: "Свой порядок" },
 ];
 
-function GalleryThumb({ itemId, getApiBase, getAuthHeaders, className, alt }) {
+function GalleryThumb({ itemId, getApiBase, authHeaders, className, alt }) {
   const [url, setUrl] = useState(null);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     let blobUrl = null;
     let cancelled = false;
+    setFailed(false);
+    setUrl(null);
     (async () => {
       try {
         const res = await fetch(`${getApiBase()}/api/gallery/file/${itemId}`, {
-          headers: getAuthHeaders(),
+          headers: authHeaders,
         });
-        if (!res.ok || cancelled) return;
+        if (cancelled) return;
+        if (!res.ok) {
+          setFailed(true);
+          return;
+        }
+        const ct = (res.headers.get("content-type") || "").toLowerCase();
+        if (ct.includes("application/json")) {
+          setFailed(true);
+          return;
+        }
         const blob = await res.blob();
         if (cancelled) return;
         blobUrl = URL.createObjectURL(blob);
         setUrl(blobUrl);
       } catch {
-        /* ignore */
+        if (!cancelled) setFailed(true);
       }
     })();
     return () => {
       cancelled = true;
       if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
-  }, [itemId, getApiBase, getAuthHeaders]);
+  }, [itemId, getApiBase, authHeaders]);
+  if (failed) {
+    return (
+      <div
+        className={`flex items-center justify-center bg-tc-asphalt/80 text-[10px] text-tc-text-muted ${className || ""}`}
+        title="Файл не найден на сервере или нет доступа"
+      >
+        нет файла
+      </div>
+    );
+  }
   if (!url) {
     return (
       <div className={`animate-pulse bg-tc-asphalt/60 ${className || ""}`} aria-hidden />
@@ -40,7 +62,11 @@ function GalleryThumb({ itemId, getApiBase, getAuthHeaders, className, alt }) {
   return <img src={url} alt={alt || ""} className={className} loading="lazy" />;
 }
 
-export default function GalleryView({ getApiBase, getAuthHeaders, onError }) {
+export default function GalleryView({ getApiBase, token, onError }) {
+  const authHeaders = useMemo(
+    () => ({ Authorization: `Bearer ${token}` }),
+    [token]
+  );
   const [sort, setSort] = useState("created_desc");
   const [stack, setStack] = useState([{ id: null, name: "Галерея" }]);
   const [folders, setFolders] = useState([]);
@@ -62,7 +88,7 @@ export default function GalleryView({ getApiBase, getAuthHeaders, onError }) {
     onError?.(null);
     try {
       const base = getApiBase();
-      const h = getAuthHeaders();
+      const h = authHeaders;
       const parentQ =
         folderId == null ? "" : `?parentId=${encodeURIComponent(String(folderId))}`;
       const itemQ =
@@ -98,7 +124,7 @@ export default function GalleryView({ getApiBase, getAuthHeaders, onError }) {
     } finally {
       setLoading(false);
     }
-  }, [folderId, sort, getApiBase, getAuthHeaders, onError]);
+  }, [folderId, sort, getApiBase, authHeaders, onError]);
 
   useEffect(() => {
     void load();
@@ -120,7 +146,7 @@ export default function GalleryView({ getApiBase, getAuthHeaders, onError }) {
       const base = getApiBase();
       const res = await fetch(`${base}/api/gallery/folders`, {
         method: "POST",
-        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        headers: { ...authHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({ name, parentId: folderId ?? "" }),
       });
       const data = await res.json().catch(() => ({}));
@@ -143,7 +169,7 @@ export default function GalleryView({ getApiBase, getAuthHeaders, onError }) {
       const base = getApiBase();
       const res = await fetch(`${base}/api/gallery/folders/${f.id}`, {
         method: "DELETE",
-        headers: getAuthHeaders(),
+        headers: authHeaders,
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -172,7 +198,7 @@ export default function GalleryView({ getApiBase, getAuthHeaders, onError }) {
         if (folderId != null) fd.append("folderId", String(folderId));
         const res = await fetch(`${base}/api/gallery/upload`, {
           method: "POST",
-          headers: getAuthHeaders(),
+          headers: authHeaders,
           body: fd,
         });
         const data = await res.json().catch(() => ({}));
@@ -195,7 +221,7 @@ export default function GalleryView({ getApiBase, getAuthHeaders, onError }) {
       const base = getApiBase();
       const res = await fetch(`${base}/api/gallery/items/${it.id}`, {
         method: "DELETE",
-        headers: getAuthHeaders(),
+        headers: authHeaders,
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -215,7 +241,7 @@ export default function GalleryView({ getApiBase, getAuthHeaders, onError }) {
       const base = getApiBase();
       const res = await fetch(`${base}/api/gallery/items/${moveItem.id}`, {
         method: "PATCH",
-        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        headers: { ...authHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({
           folderId: targetFolderId === "" || targetFolderId == null ? null : targetFolderId,
         }),
@@ -251,7 +277,7 @@ export default function GalleryView({ getApiBase, getAuthHeaders, onError }) {
       const base = getApiBase();
       const res = await fetch(`${base}/api/gallery/items/reorder`, {
         method: "PUT",
-        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        headers: { ...authHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({ itemIds: orderedIds, folderId: folderId ?? "" }),
       });
       const data = await res.json().catch(() => ({}));
@@ -432,7 +458,7 @@ export default function GalleryView({ getApiBase, getAuthHeaders, onError }) {
                       <GalleryThumb
                         itemId={it.id}
                         getApiBase={getApiBase}
-                        getAuthHeaders={getAuthHeaders}
+                        authHeaders={authHeaders}
                         className="h-full w-full object-cover"
                         alt={it.original_name || ""}
                       />
@@ -594,7 +620,7 @@ export default function GalleryView({ getApiBase, getAuthHeaders, onError }) {
             <GalleryThumb
               itemId={lightbox.id}
               getApiBase={getApiBase}
-              getAuthHeaders={getAuthHeaders}
+              authHeaders={authHeaders}
               className="max-h-[85vh] max-w-full object-contain"
               alt={lightbox.original_name || ""}
             />

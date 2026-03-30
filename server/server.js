@@ -1705,7 +1705,8 @@ app.get("/api/gallery/file/:id", requireAuth, requireGallery, async (req, res) =
     const { storage_key: storageKey, original_name: oname, mime } = rows[0];
     const full = path.join(UPLOAD_ROOT, storageKey);
     if (!fs.existsSync(full)) return res.status(404).json({ error: "Файл отсутствует на диске" });
-    res.setHeader("Content-Type", mime || "image/jpeg");
+    const mimeNorm = normalizeContentTypeMime(mime || "") || "image/jpeg";
+    res.setHeader("Content-Type", mimeNorm);
     res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(oname || "photo")}`);
     res.sendFile(full);
   } catch (err) {
@@ -2033,11 +2034,12 @@ app.get("/api/files/:messageId", requireAuth, async (req, res) => {
     if (!fs.existsSync(full)) {
       return res.status(404).json({ error: "Файл не найден" });
     }
-    res.setHeader("Content-Type", row.attachment_mime || "application/octet-stream");
+    const mimeNorm = normalizeContentTypeMime(row.attachment_mime || "") || "application/octet-stream";
+    res.setHeader("Content-Type", mimeNorm);
     const disp =
-      IMAGE_MIMES.has(row.attachment_mime) ||
-      VIDEO_NOTE_MIMES.has(row.attachment_mime) ||
-      VOICE_MIMES.has(row.attachment_mime)
+      IMAGE_MIMES.has(mimeNorm) ||
+      VIDEO_NOTE_MIMES.has(mimeNorm) ||
+      VOICE_MIMES.has(mimeNorm)
         ? "inline"
         : "attachment";
     res.setHeader(

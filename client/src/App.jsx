@@ -232,17 +232,31 @@ function messagePreviewForReply(m) {
   return "📎 файл";
 }
 
-function MessageAttachment({ messageId, attachment, getAuthHeaders }) {
+function MessageAttachment({ messageId, messageRoom, attachment, getAttachmentHeaders }) {
   const [url, setUrl] = useState(null);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     if (!messageId || !attachment) return undefined;
     let revoke = null;
     let cancelled = false;
+    setFailed(false);
+    setUrl(null);
     (async () => {
       try {
         const base = getApiBase();
-        const res = await fetch(`${base}/api/files/${messageId}`, { headers: getAuthHeaders() });
-        if (!res.ok || cancelled) return;
+        const res = await fetch(`${base}/api/files/${messageId}`, {
+          headers: getAttachmentHeaders(messageRoom),
+        });
+        if (cancelled) return;
+        if (!res.ok) {
+          setFailed(true);
+          return;
+        }
+        const ct = (res.headers.get("content-type") || "").toLowerCase();
+        if (ct.includes("application/json")) {
+          setFailed(true);
+          return;
+        }
         const blob = await res.blob();
         if (cancelled) return;
         const u = URL.createObjectURL(blob);
@@ -250,27 +264,40 @@ function MessageAttachment({ messageId, attachment, getAuthHeaders }) {
         setUrl(u);
       } catch (e) {
         console.error(e);
+        if (!cancelled) setFailed(true);
       }
     })();
     return () => {
       cancelled = true;
       if (revoke) URL.revokeObjectURL(revoke);
     };
-  }, [messageId, attachment, getAuthHeaders]);
+  }, [messageId, messageRoom, attachment?.kind, getAttachmentHeaders]);
 
   if (!attachment) return null;
+  if (failed) {
+    return (
+      <p
+        className="mt-1 max-w-xs text-xs text-tc-danger"
+        title="Нет файла на диске (часто после деплоя на Render без постоянного диска) или нет доступа к комнате"
+      >
+        Не удалось загрузить вложение
+      </p>
+    );
+  }
   if (attachment.kind === "video_note" && url) {
+    const vt = stripMimeParams(attachment.mime) || "video/webm";
     return (
       <div className="mt-1.5 w-52">
         <div className="aspect-square overflow-hidden rounded-xl bg-black">
           <video
-            src={url}
             className="h-full w-full object-cover"
             controls
             playsInline
             preload="metadata"
             aria-label={attachment.name || "Видеосообщение"}
-          />
+          >
+            <source src={url} type={vt} />
+          </video>
         </div>
       </div>
     );
@@ -549,6 +576,23 @@ export default function App() {
     }
     return headers;
   }, [publicChannels]);
+
+  /** Заголовки для /api/files/:id — пароль комнаты от комнаты сообщения, не от активной вкладки */
+  const getAttachmentHeaders = useCallback(
+    (messageRoom) => {
+      const headers = { Authorization: `Bearer ${token}` };
+      const slug = String(messageRoom || "");
+      const row = publicChannels.find((c) => c.slug === slug);
+      const need =
+        row?.requiresPassword === true || (row == null && slug === "dreamteamdauns");
+      if (need) {
+        const pw = sessionStorage.getItem(SS_DTD_ROOM_PW);
+        if (pw) headers["X-Room-Password"] = pw;
+      }
+      return headers;
+    },
+    [token, publicChannels]
+  );
 
   const refreshChannels = useCallback(async () => {
     if (!token.trim()) return;
@@ -2085,7 +2129,7 @@ export default function App() {
         )}
 
         {activeRoom === GALLERY_ROOM ? (
-          <GalleryView getApiBase={getApiBase} getAuthHeaders={getAuthHeaders} onError={setBanner} />
+          <GalleryView getApiBase={getApiBase} token={token} onError={setBanner} />
         ) : (
           <>
         {/* Messages + parallax pattern (фон медленнее ленты) */}
@@ -2156,8 +2200,9 @@ export default function App() {
                           {m.attachment && m.id != null ? (
                             <MessageAttachment
                               messageId={m.id}
+                              messageRoom={m.room}
                               attachment={m.attachment}
-                              getAuthHeaders={getAuthHeaders}
+                              getAttachmentHeaders={getAttachmentHeaders}
                             />
                           ) : null}
                         </>
