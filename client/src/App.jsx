@@ -580,10 +580,10 @@ export default function App() {
     const stream = videoNoteStreamRef.current;
     videoNoteRecorderRef.current = null;
     videoNoteStreamRef.current = null;
-    stream?.getTracks().forEach((t) => t.stop());
 
     const started = videoNoteStartedAtRef.current;
-    if (!rec || rec.state === "inactive") {
+    if (!rec) {
+      stream?.getTracks().forEach((t) => t.stop());
       videoNoteStoppingRef.current = false;
       return;
     }
@@ -594,16 +594,22 @@ export default function App() {
       } catch (_) {
         /* ignore */
       }
-      await new Promise((r) => setTimeout(r, 120));
     }
-    await new Promise((resolve) => {
-      rec.addEventListener("stop", resolve, { once: true });
-      try {
-        rec.stop();
-      } catch (_) {
-        resolve();
-      }
-    });
+
+    if (rec.state !== "inactive") {
+      await new Promise((resolve) => {
+        rec.addEventListener("stop", resolve, { once: true });
+        try {
+          rec.stop();
+        } catch (_) {
+          resolve();
+        }
+      });
+    }
+
+    stream?.getTracks().forEach((t) => t.stop());
+
+    await new Promise((r) => setTimeout(r, 60));
 
     const chunks = videoNoteChunksRef.current;
     videoNoteChunksRef.current = [];
