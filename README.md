@@ -59,6 +59,12 @@ JWT_SECRET=любая-длинная-случайная-строка-для-ло
 npm run db:init
 ```
 
+Создать или обновить пользователя в БД (хеш пароля как у сервера), из каталога `server/`:
+
+```bash
+npm run user:upsert -- "Саня" "12345678"
+```
+
 Если в логах Postgres ошибка вроде `column m.created_at does not exist`, а в таблице `messages` колонка называлась `timestamp`, выполните миграцию (подставьте своё имя БД):
 
 ```bash
@@ -128,6 +134,7 @@ Get-Content migrations\003_messages_user_id.sql -Raw | docker exec -i tatarchat-
 | `GET` | `/api/health` | Проверка сервера |
 | `POST` | `/api/auth/register` | `{ "name", "password" }` — пароль от 6 символов; ответ `{ token, user }` |
 | `POST` | `/api/auth/login` | `{ "name", "password" }` — ответ `{ token, user }` |
+| `POST` | `/api/auth/change-password` | `Authorization: Bearer`; тело `{ "currentPassword", "newPassword" }` (6…128 символов) |
 | `GET` | `/api/rooms` | Список комнат: `slug`, `title`, `requiresPassword` |
 | `GET` | `/api/messages/:slug` | История комнаты. Заголовок: `Authorization: Bearer` (для комнат с `requiresPassword` — опционально `X-Room-Password`) |
 | `POST` | `/api/messages` | `Authorization: Bearer`; тело `{ "room": "<slug>", "text": "..." }` |

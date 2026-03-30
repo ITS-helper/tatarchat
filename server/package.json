@@ -8,7 +8,8 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "db:init": "node scripts/init-db.js",
-    "db:migrate": "node scripts/apply-migration.js"
+    "db:migrate": "node scripts/apply-migration.js",
+    "user:upsert": "node scripts/upsert-user.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

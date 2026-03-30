@@ -1952,6 +1952,41 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
+app.post("/api/auth/change-password", requireAuth, async (req, res) => {
+  try {
+    const currentPassword = String(req.body?.currentPassword ?? "");
+    const newPassword = sanitizePassword(req.body?.newPassword);
+    if (!currentPassword) {
+      return res.status(400).json({ error: "Укажите текущий пароль" });
+    }
+    if (!newPassword) {
+      return res.status(400).json({
+        error: `Новый пароль: от ${MIN_PASSWORD_LEN} до ${MAX_PASSWORD_LEN} символов`,
+      });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT id, password_hash FROM users WHERE id = $1`,
+      [req.user.userId]
+    );
+    const row = rows[0];
+    if (!row?.password_hash) {
+      return res.status(401).json({ error: "Нельзя сменить пароль для этого аккаунта" });
+    }
+    const ok = await bcrypt.compare(currentPassword, row.password_hash);
+    if (!ok) {
+      return res.status(400).json({ error: "Неверный текущий пароль" });
+    }
+
+    const hash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    await pool.query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [hash, row.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("POST /api/auth/change-password", err);
+    res.status(500).json({ error: "Не удалось сменить пароль" });
+  }
+});
+
 function handleUpload(req, res, next) {
   upload.single("file")(req, res, (err) => {
     if (!err) return next();

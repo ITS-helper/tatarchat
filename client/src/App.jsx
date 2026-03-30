@@ -439,6 +439,12 @@ export default function App() {
   const [status, setStatus] = useState("offline");
   const [roomJoined, setRoomJoined] = useState(false);
   const [banner, setBanner] = useState(null);
+  const [changePwOpen, setChangePwOpen] = useState(false);
+  const [changePwCurrent, setChangePwCurrent] = useState("");
+  const [changePwNew, setChangePwNew] = useState("");
+  const [changePwNew2, setChangePwNew2] = useState("");
+  const [changePwBusy, setChangePwBusy] = useState(false);
+  const [changePwOk, setChangePwOk] = useState("");
   const listRef = useRef(null);
   const chatParallaxRef = useRef(null);
   const socketRef = useRef(null);
@@ -1394,6 +1400,51 @@ export default function App() {
     }
   };
 
+  const submitChangePassword = async (e) => {
+    e.preventDefault();
+    setBanner(null);
+    setChangePwOk("");
+    const c = changePwCurrent;
+    const n = changePwNew.trim();
+    const n2 = changePwNew2.trim();
+    if (!c || !n || !n2) {
+      setBanner("Заполните все поля");
+      return;
+    }
+    if (n !== n2) {
+      setBanner("Новый пароль и подтверждение не совпадают");
+      return;
+    }
+    if (n.length < 6 || n.length > 128) {
+      setBanner("Новый пароль: от 6 до 128 символов");
+      return;
+    }
+    setChangePwBusy(true);
+    try {
+      const base = getApiBase();
+      const res = await fetch(`${base}/api/auth/change-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ currentPassword: c, newPassword: n }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBanner(data.error || "Не удалось сменить пароль");
+        return;
+      }
+      setChangePwCurrent("");
+      setChangePwNew("");
+      setChangePwNew2("");
+      setChangePwOk("Пароль обновлён");
+      window.setTimeout(() => setChangePwOk(""), 5000);
+    } catch (err) {
+      console.error(err);
+      setBanner("Сеть: не удалось сменить пароль");
+    } finally {
+      setChangePwBusy(false);
+    }
+  };
+
   const handleLogout = () => {
     const s = socketRef.current;
     if (s) {
@@ -1429,6 +1480,12 @@ export default function App() {
     setStatus("offline");
     setRoomJoined(false);
     roomJoinedRef.current = false;
+    setChangePwOpen(false);
+    setChangePwCurrent("");
+    setChangePwNew("");
+    setChangePwNew2("");
+    setChangePwOk("");
+    setChangePwBusy(false);
   };
 
   const selectChannel = (slug) => {
@@ -1956,6 +2013,63 @@ export default function App() {
             />
             <span>{hasAvatar ? "Сменить аватар" : "Загрузить аватар"}</span>
           </button>
+          <div className="rounded-lg border border-tc-border/60 bg-tc-panel/40 px-2 py-2">
+            <button
+              type="button"
+              onClick={() => {
+                setChangePwOpen((v) => !v);
+                setChangePwOk("");
+                setBanner(null);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" fill="currentColor" aria-hidden>
+                <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z" />
+              </svg>
+              <span className="text-left">{changePwOpen ? "Скрыть смену пароля" : "Сменить пароль"}</span>
+            </button>
+            {changePwOpen ? (
+              <form onSubmit={submitChangePassword} className="mt-2 space-y-2 px-1 pb-1">
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  className="w-full rounded-lg border border-tc-border bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted focus:border-tc-accent"
+                  placeholder="Текущий пароль"
+                  value={changePwCurrent}
+                  onChange={(e) => setChangePwCurrent(e.target.value)}
+                  disabled={changePwBusy}
+                />
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  className="w-full rounded-lg border border-tc-border bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted focus:border-tc-accent"
+                  placeholder="Новый пароль"
+                  value={changePwNew}
+                  onChange={(e) => setChangePwNew(e.target.value)}
+                  disabled={changePwBusy}
+                />
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  className="w-full rounded-lg border border-tc-border bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted focus:border-tc-accent"
+                  placeholder="Повторите новый пароль"
+                  value={changePwNew2}
+                  onChange={(e) => setChangePwNew2(e.target.value)}
+                  disabled={changePwBusy}
+                />
+                {changePwOk ? (
+                  <p className="text-center text-xs text-green-600 dark:text-green-400">{changePwOk}</p>
+                ) : null}
+                <button
+                  type="submit"
+                  disabled={changePwBusy}
+                  className="w-full rounded-lg bg-tc-accent py-2 text-sm font-medium text-white transition hover:bg-tc-accent/85 disabled:opacity-50"
+                >
+                  {changePwBusy ? "Сохранение…" : "Сохранить пароль"}
+                </button>
+              </form>
+            ) : null}
+          </div>
           <button
             type="button"
             onClick={handleLogout}
