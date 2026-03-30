@@ -211,8 +211,8 @@ function MessageAttachment({ messageId, attachment, getAuthHeaders }) {
   if (!attachment) return null;
   if (attachment.kind === "video_note" && url) {
     return (
-      <div className="mt-1.5 w-48">
-        <div className="aspect-square overflow-hidden rounded-full bg-black">
+      <div className="mt-1.5 w-52">
+        <div className="aspect-square overflow-hidden rounded-xl bg-black">
           <video
             src={url}
             className="h-full w-full object-cover"
@@ -278,6 +278,7 @@ export default function App() {
   const [myUserId, setMyUserId] = useState(() => readUserId());
   const [replyTo, setReplyTo] = useState(null);
   const [editingId, setEditingId] = useState(null);
+  const [selectedMsgId, setSelectedMsgId] = useState(null);
   const [typingPeers, setTypingPeers] = useState([]);
   const [pendingFile, setPendingFile] = useState(null);
   const [videoNoteRecording, setVideoNoteRecording] = useState(false);
@@ -1510,6 +1511,7 @@ export default function App() {
         <div
           ref={listRef}
           className="messages-scroll flex-1 overflow-y-auto px-4 py-3"
+          onClick={(e) => { if (e.target === e.currentTarget) setSelectedMsgId(null); }}
         >
           {messages.length === 0 ? (
             <div className="flex h-full items-center justify-center">
@@ -1521,6 +1523,7 @@ export default function App() {
                 const key = m.id != null ? m.id : `leg-${i}-${m.time}-${m.user_nick}`;
                 const mine = myUserId != null && m.user_id === myUserId;
                 const deleted = !!m.deleted;
+                const selected = selectedMsgId === m.id && m.id != null;
                 return (
                   <div
                     key={key}
@@ -1528,11 +1531,12 @@ export default function App() {
                     className={`flex ${mine ? "justify-end" : "justify-start"}`}
                   >
                     <div
-                      className={`group relative max-w-[85%] rounded-xl px-3 py-2 sm:max-w-[70%] ${
+                      className={`relative max-w-[85%] cursor-pointer rounded-xl px-3 py-2 transition-colors sm:max-w-[70%] ${
                         mine
                           ? "rounded-br-sm bg-tg-msg-own"
                           : "rounded-bl-sm bg-tg-msg"
-                      }`}
+                      } ${selected ? "ring-2 ring-tg-accent/60" : ""}`}
+                      onClick={() => setSelectedMsgId(selected ? null : m.id)}
                     >
                       {!mine && (
                         <p className="mb-0.5 text-[13px] font-semibold text-tg-accent">{m.user_nick}</p>
@@ -1554,7 +1558,7 @@ export default function App() {
                       ) : (
                         <>
                           {(m.text || "").trim() ? (
-                            <p className="whitespace-pre-wrap break-words text-sm text-tg-text">{m.text}</p>
+                            <p className="select-text whitespace-pre-wrap break-words text-sm text-tg-text">{m.text}</p>
                           ) : null}
                           {m.attachment && m.id != null ? (
                             <MessageAttachment
@@ -1580,7 +1584,7 @@ export default function App() {
                               <button
                                 key={r.emoji}
                                 type="button"
-                                onClick={() => m.id != null && toggleReaction(m.id, r.emoji)}
+                                onClick={(e) => { e.stopPropagation(); m.id != null && toggleReaction(m.id, r.emoji); }}
                                 className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs transition ${
                                   me
                                     ? "bg-tg-accent/25 text-tg-accent"
@@ -1594,69 +1598,69 @@ export default function App() {
                           })}
                         </div>
                       )}
-                      {/* Actions on hover */}
-                      <div className="absolute -top-7 right-1 hidden rounded-lg bg-tg-panel px-1 py-0.5 shadow-lg group-hover:flex">
-                        {QUICK_REACTIONS.map((em) => (
+                      {/* Action bar on select */}
+                      {selected && !deleted && (
+                        <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-white/10 pt-2">
+                          {QUICK_REACTIONS.map((em) => (
+                            <button
+                              key={em}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); m.id != null && toggleReaction(m.id, em); }}
+                              className="rounded-full px-1.5 py-1 text-sm transition hover:bg-white/10 active:scale-110"
+                            >
+                              {em}
+                            </button>
+                          ))}
+                          <span className="mx-1 h-4 w-px bg-white/10" />
                           <button
-                            key={em}
                             type="button"
-                            disabled={deleted || m.id == null}
-                            onClick={() => m.id != null && toggleReaction(m.id, em)}
-                            className="px-1 text-sm transition hover:scale-125 disabled:opacity-30"
-                          >
-                            {em}
-                          </button>
-                        ))}
-                        {!deleted && m.id != null && (
-                          <button
-                            type="button"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               setReplyTo({ id: m.id, user_nick: m.user_nick, preview: messagePreviewForReply(m) });
                               setEditingId(null);
+                              setSelectedMsgId(null);
                             }}
-                            className="px-1 text-sm text-tg-text-sec transition hover:text-tg-accent"
-                            title="Ответить"
+                            className="rounded-full px-2 py-1 text-xs text-tg-text-sec transition hover:bg-white/10 hover:text-tg-accent"
                           >
-                            ↩
+                            Ответить
                           </button>
-                        )}
-                        {!mine && !deleted && m.user_id != null && myUserId != null && (
-                          <button
-                            type="button"
-                            onClick={() => startDmWithPeer(m.user_id)}
-                            className="px-1 text-sm text-tg-text-sec transition hover:text-tg-accent"
-                            title="В ЛС"
-                          >
-                            ✉
-                          </button>
-                        )}
-                        {mine && !deleted && m.id != null && (
-                          <>
+                          {!mine && m.user_id != null && myUserId != null && (
                             <button
                               type="button"
-                              onClick={() => {
-                                setEditingId(m.id);
-                                setInput(m.text || "");
-                                setReplyTo(null);
-                                setPendingFile(null);
-                                if (fileInputRef.current) fileInputRef.current.value = "";
-                              }}
-                              className="px-1 text-sm text-tg-text-sec transition hover:text-tg-accent"
-                              title="Изменить"
+                              onClick={(e) => { e.stopPropagation(); startDmWithPeer(m.user_id); setSelectedMsgId(null); }}
+                              className="rounded-full px-2 py-1 text-xs text-tg-text-sec transition hover:bg-white/10 hover:text-tg-accent"
                             >
-                              ✏
+                              В ЛС
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => deleteMessage(m.id)}
-                              className="px-1 text-sm text-tg-text-sec transition hover:text-tg-danger"
-                              title="Удалить"
-                            >
-                              🗑
-                            </button>
-                          </>
-                        )}
-                      </div>
+                          )}
+                          {mine && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingId(m.id);
+                                  setInput(m.text || "");
+                                  setReplyTo(null);
+                                  setPendingFile(null);
+                                  if (fileInputRef.current) fileInputRef.current.value = "";
+                                  setSelectedMsgId(null);
+                                }}
+                                className="rounded-full px-2 py-1 text-xs text-tg-text-sec transition hover:bg-white/10 hover:text-tg-accent"
+                              >
+                                Изменить
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); deleteMessage(m.id); setSelectedMsgId(null); }}
+                                className="rounded-full px-2 py-1 text-xs text-tg-danger transition hover:bg-tg-danger/10"
+                              >
+                                Удалить
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
