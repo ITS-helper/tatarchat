@@ -1,10 +1,10 @@
 /**
  * Применяет один .sql файл миграции к БД из DATABASE_URL (server/.env).
- * По умолчанию: migrations/006_phase3_channels_dm.sql от корня репозитория.
+ * По умолчанию: server/migrations/006_phase3_channels_dm.sql
  *
  * Запуск из каталога server:
  *   node scripts/apply-migration.js
- *   node scripts/apply-migration.js ../../migrations/006_phase3_channels_dm.sql
+ *   node scripts/apply-migration.js migrations/006_phase3_channels_dm.sql
  */
 const fs = require("fs");
 const path = require("path");
@@ -41,7 +41,7 @@ async function main() {
 
   const sqlPath = process.argv[2]
     ? path.resolve(process.argv[2])
-    : path.join(__dirname, "..", "..", "migrations", "006_phase3_channels_dm.sql");
+    : path.join(__dirname, "..", "migrations", "006_phase3_channels_dm.sql");
 
   if (!fs.existsSync(sqlPath)) {
     console.error("Файл не найден:", sqlPath);
