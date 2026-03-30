@@ -17,6 +17,11 @@ CREATE TABLE IF NOT EXISTS messages (
   reply_to_id INTEGER REFERENCES messages (id) ON DELETE SET NULL,
   edited_at TIMESTAMPTZ,
   deleted_at TIMESTAMPTZ,
+  attachment_kind VARCHAR(16),
+  attachment_name VARCHAR(255),
+  attachment_mime VARCHAR(127),
+  attachment_size BIGINT,
+  attachment_storage_key VARCHAR(512),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

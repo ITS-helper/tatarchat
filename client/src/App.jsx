@@ -107,6 +107,73 @@ function formatTime(iso) {
   }
 }
 
+function formatFileSize(n) {
+  if (n == null || Number.isNaN(n)) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function messagePreviewForReply(m) {
+  if (!m || m.deleted) return "";
+  const t = (m.text || "").trim();
+  if (t) return t.slice(0, 120);
+  if (m.attachment?.name) return `📎 ${m.attachment.name}`;
+  return "📎 файл";
+}
+
+function MessageAttachment({ messageId, attachment, getAuthHeaders }) {
+  const [url, setUrl] = useState(null);
+  useEffect(() => {
+    if (!messageId || !attachment) return undefined;
+    let revoke = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const base = getApiBase();
+        const res = await fetch(`${base}/api/files/${messageId}`, { headers: getAuthHeaders() });
+        if (!res.ok || cancelled) return;
+        const blob = await res.blob();
+        if (cancelled) return;
+        const u = URL.createObjectURL(blob);
+        revoke = u;
+        setUrl(u);
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (revoke) URL.revokeObjectURL(revoke);
+    };
+  }, [messageId, attachment, getAuthHeaders]);
+
+  if (!attachment) return null;
+  if (attachment.kind === "image" && url) {
+    return (
+      <a href={url} target="_blank" rel="noreferrer" className="mt-2 block max-h-56 overflow-hidden rounded border border-neon-cyan/30">
+        <img src={url} alt={attachment.name} className="max-h-56 w-auto max-w-full object-contain" />
+      </a>
+    );
+  }
+  if (attachment.kind === "image" && !url) {
+    return <p className="mt-2 font-mono text-xs text-cyan-700">Загрузка изображения…</p>;
+  }
+  if (!url) {
+    return <p className="mt-2 font-mono text-xs text-cyan-700">Загрузка файла…</p>;
+  }
+  return (
+    <a
+      href={url}
+      download={attachment.name}
+      className="mt-2 inline-flex items-center gap-2 border border-neon-purple/40 bg-black/40 px-2 py-1 font-mono text-xs text-neon-purple hover:border-neon-cyan/50 hover:text-neon-cyan"
+    >
+      📎 {attachment.name}
+      {attachment.size != null ? <span className="text-cyan-700">({formatFileSize(attachment.size)})</span> : null}
+    </a>
+  );
+}
+
 export default function App() {
   const [token, setToken] = useState(() => getStoredToken());
   const [nickname, setNickname] = useState(() => localStorage.getItem(LS_NICKNAME) || "");
@@ -140,6 +207,10 @@ export default function App() {
   const [replyTo, setReplyTo] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [typingPeers, setTypingPeers] = useState([]);
+  const [pendingFile, setPendingFile] = useState(null);
+  const [searchInput, setSearchInput] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [status, setStatus] = useState("offline");
   const [roomJoined, setRoomJoined] = useState(false);
   const [banner, setBanner] = useState(null);
@@ -149,6 +220,7 @@ export default function App() {
   const joinGenRef = useRef(0);
   const activeRoomRef = useRef(activeRoom);
   const typingIdleRef = useRef(null);
+  const fileInputRef = useRef(null);
   const nicknameRef = useRef(nickname);
 
   useEffect(() => {
@@ -180,6 +252,10 @@ export default function App() {
     setReplyTo(null);
     setEditingId(null);
     setTypingPeers([]);
+    setPendingFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    setSearchInput("");
+    setSearchResults([]);
   }, [activeRoom]);
 
   const buildRoomHeaders = useCallback(() => {
@@ -194,6 +270,49 @@ export default function App() {
     }
     return headers;
   }, []);
+
+  const getAuthHeaders = useCallback(
+    () => ({
+      Authorization: `Bearer ${token}`,
+      ...buildRoomHeaders(),
+    }),
+    [token, buildRoomHeaders]
+  );
+
+  useEffect(() => {
+    if (!token.trim()) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    const q = searchInput.trim();
+    if (q.length < 1) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const base = getApiBase();
+        const params = new URLSearchParams({ q });
+        const room = activeRoomRef.current;
+        const headers = { Authorization: `Bearer ${token}`, ...buildRoomHeaders() };
+        const res = await fetch(`${base}/api/messages/${room}/search?${params}`, { headers });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setSearchResults([]);
+          return;
+        }
+        setSearchResults(data.results || []);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 380);
+    return () => clearTimeout(t);
+  }, [searchInput, token, buildRoomHeaders]);
 
   const stopTyping = useCallback(() => {
     if (typingIdleRef.current) {
@@ -507,6 +626,10 @@ export default function App() {
     setReplyTo(null);
     setEditingId(null);
     setTypingPeers([]);
+    setPendingFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    setSearchInput("");
+    setSearchResults([]);
     setActiveRoom("dreamteamdauns");
     setStatus("offline");
     setRoomJoined(false);
@@ -608,11 +731,10 @@ export default function App() {
   const sendMessage = async (e) => {
     e.preventDefault();
     const text = input.trim();
-    if (!text) return;
-
-    stopTyping();
 
     if (editingId != null) {
+      if (!text) return;
+      stopTyping();
       const socket = socketRef.current;
       if (socket?.connected && roomJoinedRef.current) {
         socket.emit("edit-message", { id: editingId, text }, (ack) => {
@@ -644,6 +766,39 @@ export default function App() {
       } catch (err) {
         console.error(err);
         setBanner("Сеть: правка");
+      }
+      return;
+    }
+
+    if (!pendingFile && !text) return;
+    stopTyping();
+
+    if (pendingFile) {
+      try {
+        const base = getApiBase();
+        const fd = new FormData();
+        fd.append("room", activeRoom);
+        fd.append("text", text);
+        fd.append("file", pendingFile);
+        if (replyTo?.id != null) fd.append("replyToId", String(replyTo.id));
+        const res = await fetch(`${base}/api/messages/send-with-file`, {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: fd,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setBanner(data.error || "Не удалось отправить файл");
+          return;
+        }
+        if (data.message) setMessages((prev) => upsertMessageList(prev, data.message));
+        setInput("");
+        setPendingFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        setReplyTo(null);
+      } catch (err) {
+        console.error(err);
+        setBanner("Сеть: отправка файла");
       }
       return;
     }
@@ -927,6 +1082,42 @@ export default function App() {
               {status === "online" ? "LINK_OK" : "NO_LINK"}
             </span>
           </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <input
+              type="search"
+              className="cyber-input max-w-[min(100%,280px)] flex-1 py-1.5 text-xs"
+              placeholder="Поиск в чате…"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              aria-label="Поиск в чате"
+            />
+            {searchLoading ? (
+              <span className="font-mono text-[10px] text-cyan-700">…</span>
+            ) : null}
+          </div>
+          {searchInput.trim() && searchResults.length > 0 ? (
+            <div className="mt-2 max-h-36 overflow-y-auto rounded border border-neon-cyan/25 bg-black/80 p-2 font-mono text-[11px]">
+              {searchResults.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  className="block w-full truncate py-1 text-left text-cyan-400 hover:text-neon-cyan"
+                  onClick={() => {
+                    const el = document.querySelector(`[data-message-id="${r.id}"]`);
+                    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    setSearchInput("");
+                  }}
+                >
+                  <span className="text-neon-purple">{r.user_nick}</span>
+                  {" · "}
+                  {r.deleted
+                    ? "удалено"
+                    : (r.text || "").trim().slice(0, 80) ||
+                      (r.attachment ? `📎 ${r.attachment.name}` : "—")}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
         <button
           type="button"
@@ -990,6 +1181,7 @@ export default function App() {
                 return (
                   <div
                     key={key}
+                    data-message-id={m.id != null ? m.id : undefined}
                     className="border border-neon-cyan/25 border-l-2 border-l-neon-hot bg-black/55 px-3 py-2 shadow-[inset_0_0_28px_rgba(0,229,255,0.04)]"
                   >
                     {m.reply_to && (
@@ -998,7 +1190,9 @@ export default function App() {
                         {m.reply_to.deleted ? (
                           <span className="italic"> — удалено</span>
                         ) : (
-                          <span className="mt-0.5 block truncate text-cyan-500/90">{m.reply_to.preview}</span>
+                          <span className="mt-0.5 block truncate text-cyan-500/90">
+                            {m.reply_to.preview?.trim() || "📎 файл"}
+                          </span>
                         )}
                       </div>
                     )}
@@ -1012,7 +1206,18 @@ export default function App() {
                     {deleted ? (
                       <p className="italic text-cyan-800">Сообщение удалено</p>
                     ) : (
-                      <p className="whitespace-pre-wrap break-words text-cyan-50/95">{m.text}</p>
+                      <>
+                        {(m.text || "").trim() ? (
+                          <p className="whitespace-pre-wrap break-words text-cyan-50/95">{m.text}</p>
+                        ) : null}
+                        {m.attachment && m.id != null ? (
+                          <MessageAttachment
+                            messageId={m.id}
+                            attachment={m.attachment}
+                            getAuthHeaders={getAuthHeaders}
+                          />
+                        ) : null}
+                      </>
                     )}
                     <div className="mt-2 flex flex-wrap gap-1 border-t border-neon-cyan/10 pt-2">
                       {QUICK_REACTIONS.map((em) => {
@@ -1047,7 +1252,7 @@ export default function App() {
                           setReplyTo({
                             id: m.id,
                             user_nick: m.user_nick,
-                            preview: (m.text || "").slice(0, 120),
+                            preview: messagePreviewForReply(m),
                           });
                           setEditingId(null);
                         }}
@@ -1063,6 +1268,8 @@ export default function App() {
                               setEditingId(m.id);
                               setInput(m.text || "");
                               setReplyTo(null);
+                              setPendingFile(null);
+                              if (fileInputRef.current) fileInputRef.current.value = "";
                             }}
                           >
                             Изменить
@@ -1113,10 +1320,46 @@ export default function App() {
 
           <form
             onSubmit={sendMessage}
-            className="flex flex-shrink-0 gap-2 border-t-2 border-neon-cyan/20 bg-black/50 p-3"
+            className="flex flex-shrink-0 flex-wrap items-center gap-2 border-t-2 border-neon-cyan/20 bg-black/50 p-3"
           >
             <input
-              className="cyber-input min-w-0 flex-1"
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,.pdf,.txt"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                setPendingFile(f || null);
+              }}
+            />
+            <button
+              type="button"
+              disabled={editingId != null}
+              title="Прикрепить файл"
+              className="shrink-0 border border-neon-purple/45 bg-black/50 px-2.5 py-2 font-mono text-sm text-neon-purple transition hover:border-neon-cyan/50 hover:text-neon-cyan disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              📎
+            </button>
+            {pendingFile && editingId == null ? (
+              <span className="flex max-w-[140px] items-center gap-1 truncate font-mono text-[10px] text-cyan-600">
+                <span className="truncate" title={pendingFile.name}>
+                  {pendingFile.name}
+                </span>
+                <button
+                  type="button"
+                  className="shrink-0 text-neon-hot hover:underline"
+                  onClick={() => {
+                    setPendingFile(null);
+                    if (fileInputRef.current) fileInputRef.current.value = "";
+                  }}
+                >
+                  ✕
+                </button>
+              </span>
+            ) : null}
+            <input
+              className="cyber-input min-w-0 flex-1 basis-[min(100%,12rem)]"
               value={input}
               onChange={onInputChange}
               placeholder={editingId != null ? "Редактирование…" : "Сообщение…"}
@@ -1125,8 +1368,14 @@ export default function App() {
             />
             <button
               type="submit"
-              disabled={status === "online" && !roomJoined}
-              className="font-display border border-neon-cyan/50 bg-gradient-to-br from-neon-cyan to-neon-purple px-4 py-2 text-sm font-bold tracking-wider text-black shadow-neon-cyan transition hover:brightness-110 disabled:cursor-not-allowed disabled:border-cyan-900 disabled:bg-cyan-950 disabled:text-cyan-800 disabled:shadow-none"
+              disabled={
+                status === "online" && !roomJoined
+                  ? true
+                  : editingId != null
+                    ? !input.trim()
+                    : !input.trim() && !pendingFile
+              }
+              className="font-display shrink-0 border border-neon-cyan/50 bg-gradient-to-br from-neon-cyan to-neon-purple px-4 py-2 text-sm font-bold tracking-wider text-black shadow-neon-cyan transition hover:brightness-110 disabled:cursor-not-allowed disabled:border-cyan-900 disabled:bg-cyan-950 disabled:text-cyan-800 disabled:shadow-none"
             >
               {editingId != null
                 ? "OK"

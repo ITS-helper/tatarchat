@@ -3,9 +3,13 @@
  * Вход по аккаунту (JWT). Групповые комнаты; часть комнат с паролем.
  */
 require("dotenv").config();
+const fs = require("fs");
+const fsp = require("fs/promises");
+const crypto = require("crypto");
 const http = require("http");
 const path = require("path");
 const express = require("express");
+const multer = require("multer");
 const cors = require("cors");
 const helmet = require("helmet");
 const bcrypt = require("bcrypt");
@@ -21,6 +25,18 @@ const MAX_PASSWORD_LEN = 128;
 const MESSAGES_PER_MINUTE = 30;
 const BCRYPT_ROUNDS = 10;
 const JWT_EXPIRES = "7d";
+const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_MB || 8) * 1024 * 1024;
+const UPLOAD_ROOT = path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, "data", "uploads"));
+const STAGING_DIR = path.join(UPLOAD_ROOT, "staging");
+const ALLOWED_UPLOAD_MIMES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "application/pdf",
+  "text/plain",
+]);
+const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
 /** slug → отображаемое имя и пароль комнаты (null = без пароля) */
 const GROUP_ROOMS = {
@@ -103,6 +119,40 @@ function sanitizeText(input) {
     .slice(0, MAX_MESSAGE_LEN)
     .trim();
   return s;
+}
+
+function normalizeMessageText(input) {
+  return String(input ?? "")
+    .replace(/[\u0000-\u001F\u007F]/g, "")
+    .replace(/<[^>]*>/g, "")
+    .slice(0, MAX_MESSAGE_LEN)
+    .trim();
+}
+
+function sanitizeOriginalName(name) {
+  const s = path
+    .basename(String(name || "file"))
+    .replace(/[\u0000-\u001F<>:"/\\|?*]/g, "_")
+    .slice(0, 200);
+  return s || "file";
+}
+
+function pickSafeExt(file) {
+  const fromName = path.extname(file.originalname || "");
+  if (/^\.[a-zA-Z0-9]{1,8}$/.test(fromName)) return fromName.toLowerCase();
+  const map = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "application/pdf": ".pdf",
+    "text/plain": ".txt",
+  };
+  return map[file.mimetype] || ".bin";
+}
+
+function escapeLikePattern(s) {
+  return String(s).replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
 }
 
 function sanitizeNickname(input) {
@@ -224,6 +274,41 @@ async function ensurePhase1Schema() {
     throw err;
   }
 }
+
+async function ensurePhase2Schema() {
+  try {
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_kind VARCHAR(16)`);
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_name VARCHAR(255)`);
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_mime VARCHAR(127)`);
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_size BIGINT`);
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_storage_key VARCHAR(512)`);
+  } catch (err) {
+    console.error("[schema] phase2:", err?.message || err);
+    throw err;
+  }
+}
+
+function ensureUploadDirs() {
+  fs.mkdirSync(STAGING_DIR, { recursive: true });
+  fs.mkdirSync(path.join(UPLOAD_ROOT, "rooms"), { recursive: true });
+}
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination(_req, _file, cb) {
+      cb(null, STAGING_DIR);
+    },
+    filename(req, file, cb) {
+      const ext = path.extname(file.originalname || "") || "";
+      cb(null, `${req.user.userId}_${Date.now()}_${crypto.randomBytes(8).toString("hex")}${ext}`);
+    },
+  }),
+  limits: { fileSize: MAX_UPLOAD_BYTES },
+  fileFilter(_req, file, cb) {
+    if (ALLOWED_UPLOAD_MIMES.has(file.mimetype)) cb(null, true);
+    else cb(new Error("UNSUPPORTED_MIME"));
+  },
+});
 
 /**
  * Старая БД (колонка "user" text вместо user_id): приводим к init.sql без ручного psql.
@@ -413,6 +498,15 @@ function formatApiMessage(row, reactionList) {
             : String(row.reply_text ?? "").slice(0, 160),
         }
       : null;
+  let attachment = null;
+  if (row.attachment_storage_key && row.attachment_kind) {
+    attachment = {
+      kind: row.attachment_kind,
+      name: row.attachment_name || "файл",
+      mime: row.attachment_mime || "application/octet-stream",
+      size: row.attachment_size != null ? Number(row.attachment_size) : null,
+    };
+  }
   return {
     id: row.id,
     room: row.room,
@@ -425,6 +519,7 @@ function formatApiMessage(row, reactionList) {
     reply_to_id: row.reply_to_id || null,
     reply_to: reply,
     reactions: reactionList || [],
+    attachment,
   };
 }
 
@@ -441,6 +536,11 @@ async function getLastMessages(room, limit = 50) {
           m.reply_to_id,
           m.edited_at,
           m.deleted_at,
+          m.attachment_kind,
+          m.attachment_name,
+          m.attachment_mime,
+          m.attachment_size,
+          m.attachment_storage_key,
           ${timeSelect} AS time,
           u.nickname AS user_nick,
           ru.nickname AS reply_user_nick,
@@ -470,6 +570,45 @@ async function getLastMessages(room, limit = 50) {
   throw new Error("getLastMessages: запрос не выполнен");
 }
 
+async function searchMessagesInRoom(room, query, limit = 40) {
+  const raw = String(query ?? "").trim().slice(0, 200);
+  if (!raw) return [];
+  const { timeSelect } = await getMessagesSchema();
+  const pattern = `%${escapeLikePattern(raw)}%`;
+  const q = `
+    SELECT
+      m.id,
+      m.room,
+      m.user_id,
+      m.text,
+      m.reply_to_id,
+      m.edited_at,
+      m.deleted_at,
+      m.attachment_kind,
+      m.attachment_name,
+      m.attachment_mime,
+      m.attachment_size,
+      m.attachment_storage_key,
+      ${timeSelect} AS time,
+      u.nickname AS user_nick,
+      ru.nickname AS reply_user_nick,
+      rm.text AS reply_text,
+      rm.deleted_at AS reply_deleted_at
+    FROM messages m
+    JOIN users u ON u.id = m.user_id
+    LEFT JOIN messages rm ON rm.id = m.reply_to_id
+    LEFT JOIN users ru ON ru.id = rm.user_id
+    WHERE m.room = $1 AND m.deleted_at IS NULL
+      AND (m.text ILIKE $2 ESCAPE '\\' OR COALESCE(m.attachment_name, '') ILIKE $2 ESCAPE '\\')
+    ORDER BY ${timeSelect} DESC
+    LIMIT $3
+  `;
+  const { rows } = await pool.query(q, [room, pattern, limit]);
+  const ids = rows.map((r) => r.id);
+  const reactMap = await fetchReactionAggregates(ids);
+  return rows.map((r) => formatApiMessage(r, reactMap.get(r.id) || []));
+}
+
 async function getMessageRowById(id) {
   const { timeSelect } = await getMessagesSchema();
   const q = `
@@ -481,6 +620,11 @@ async function getMessageRowById(id) {
       m.reply_to_id,
       m.edited_at,
       m.deleted_at,
+      m.attachment_kind,
+      m.attachment_name,
+      m.attachment_mime,
+      m.attachment_size,
+      m.attachment_storage_key,
       ${timeSelect} AS time,
       u.nickname AS user_nick,
       ru.nickname AS reply_user_nick,
@@ -516,8 +660,11 @@ async function insertMessage(room, userId, text, replyToId = null) {
     try {
       const { timeReturning } = await getMessagesSchema();
       const q = `
-        INSERT INTO messages (room, user_id, text, reply_to_id)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO messages (
+          room, user_id, text, reply_to_id,
+          attachment_kind, attachment_name, attachment_mime, attachment_size, attachment_storage_key
+        )
+        VALUES ($1, $2, $3, $4, NULL, NULL, NULL, NULL, NULL)
         RETURNING id, ${timeReturning}
       `;
       const { rows } = await pool.query(q, [room, userId, text, replyToId]);
@@ -531,6 +678,82 @@ async function insertMessage(room, userId, text, replyToId = null) {
     }
   }
   throw new Error("insertMessage: не удалось записать сообщение");
+}
+
+async function unlinkAttachmentForMessage(id) {
+  const { rows } = await pool.query(`SELECT attachment_storage_key FROM messages WHERE id = $1`, [id]);
+  const key = rows[0]?.attachment_storage_key;
+  if (!key) return;
+  const full = path.join(UPLOAD_ROOT, key);
+  try {
+    await fsp.unlink(full);
+  } catch (_) {}
+}
+
+async function saveNewMessageWithOptionalFile({ room, userId, text, replyToId, multerFile }) {
+  const normalizedText = normalizeMessageText(text);
+  if (!normalizedText && !multerFile) {
+    const e = new Error("Пустое сообщение");
+    e.code = "EMPTY_MSG";
+    throw e;
+  }
+  let attKind = null;
+  let attName = null;
+  let attMime = null;
+  let attSize = null;
+  if (multerFile) {
+    if (!ALLOWED_UPLOAD_MIMES.has(multerFile.mimetype)) {
+      await fsp.unlink(multerFile.path).catch(() => {});
+      const e = new Error("Тип файла не разрешён");
+      e.code = "BAD_MIME";
+      throw e;
+    }
+    attKind = IMAGE_MIMES.has(multerFile.mimetype) ? "image" : "file";
+    attName = sanitizeOriginalName(multerFile.originalname);
+    attMime = multerFile.mimetype;
+    attSize = multerFile.size;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { timeReturning } = await getMessagesSchema();
+    const ins = `
+      INSERT INTO messages (
+        room, user_id, text, reply_to_id,
+        attachment_kind, attachment_name, attachment_mime, attachment_size, attachment_storage_key
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL)
+      RETURNING id, ${timeReturning}
+    `;
+    const { rows } = await client.query(ins, [
+      room,
+      userId,
+      normalizedText,
+      replyToId,
+      attKind,
+      attName,
+      attMime,
+      attSize,
+    ]);
+    const mid = rows[0].id;
+    if (multerFile) {
+      const ext = pickSafeExt(multerFile);
+      const storageKey = `rooms/${room}/${mid}${ext}`;
+      const dest = path.join(UPLOAD_ROOT, storageKey);
+      await fsp.mkdir(path.dirname(dest), { recursive: true });
+      await fsp.rename(multerFile.path, dest);
+      await client.query(`UPDATE messages SET attachment_storage_key = $1 WHERE id = $2`, [storageKey, mid]);
+    }
+    await client.query("COMMIT");
+    return await formatMessageById(mid);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    if (multerFile?.path) await fsp.unlink(multerFile.path).catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 async function toggleReactionDb(messageId, userId, emoji) {
@@ -685,6 +908,42 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
+function handleUpload(req, res, next) {
+  upload.single("file")(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({ error: "Файл слишком большой" });
+    }
+    if (err.message === "UNSUPPORTED_MIME") {
+      return res.status(400).json({ error: "Тип файла не разрешён" });
+    }
+    console.error("upload", err);
+    return res.status(400).json({ error: "Ошибка загрузки файла" });
+  });
+}
+
+app.get("/api/messages/:roomSlug/search", requireAuth, async (req, res) => {
+  try {
+    const slug = normalizeRoomSlug(req.params.roomSlug);
+    if (!slug) {
+      return res.status(404).json({ error: "Комната не найдена" });
+    }
+    const rp = getRoomPasswordFromRequest(req);
+    if (!roomAllowsAccess(slug, rp)) {
+      return res.status(403).json({ error: "Нужен пароль комнаты" });
+    }
+    const q = req.query?.q;
+    if (q == null || String(q).trim().length < 1) {
+      return res.status(400).json({ error: "Укажите строку поиска" });
+    }
+    const results = await searchMessagesInRoom(slug, q, 40);
+    res.json({ room: slug, title: GROUP_ROOMS[slug].title, results });
+  } catch (err) {
+    console.error("GET search", err?.message || err, err?.code || "");
+    res.status(500).json({ error: err.message || "Ошибка поиска" });
+  }
+});
+
 app.get("/api/messages/:roomSlug", requireAuth, async (req, res) => {
   try {
     const slug = normalizeRoomSlug(req.params.roomSlug);
@@ -705,6 +964,87 @@ app.get("/api/messages/:roomSlug", requireAuth, async (req, res) => {
     res.status(500).json({
       error: err.message || "Не удалось загрузить сообщения",
     });
+  }
+});
+
+app.get("/api/files/:messageId", requireAuth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.messageId, 10);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ error: "Некорректный id" });
+    }
+    const row = await getMessageRowById(id);
+    if (!row?.attachment_storage_key) {
+      return res.status(404).json({ error: "Нет вложения" });
+    }
+    const rp = getRoomPasswordFromRequest(req);
+    if (!roomAllowsAccess(row.room, rp)) {
+      return res.status(403).json({ error: "Нужен пароль комнаты" });
+    }
+    const full = path.join(UPLOAD_ROOT, row.attachment_storage_key);
+    if (!fs.existsSync(full)) {
+      return res.status(404).json({ error: "Файл не найден" });
+    }
+    res.setHeader("Content-Type", row.attachment_mime || "application/octet-stream");
+    const disp = IMAGE_MIMES.has(row.attachment_mime) ? "inline" : "attachment";
+    res.setHeader(
+      "Content-Disposition",
+      `${disp}; filename*=UTF-8''${encodeURIComponent(row.attachment_name || "file")}`
+    );
+    res.sendFile(full);
+  } catch (err) {
+    console.error("GET /api/files/:messageId", err);
+    res.status(500).json({ error: "Не удалось отдать файл" });
+  }
+});
+
+app.post("/api/messages/send-with-file", requireAuth, handleUpload, async (req, res) => {
+  try {
+    const slug = normalizeRoomSlug(req.body?.room);
+    if (!slug) {
+      return res.status(400).json({ error: "Неизвестная комната" });
+    }
+    const rp = getRoomPasswordFromRequest(req);
+    if (!roomAllowsAccess(slug, rp)) {
+      return res.status(403).json({ error: "Нужен пароль комнаты" });
+    }
+    const normalizedText = normalizeMessageText(req.body?.text);
+    if (!normalizedText && !req.file) {
+      return res.status(400).json({ error: "Нужен текст или файл" });
+    }
+
+    const rawReply = req.body?.replyToId ?? req.body?.reply_to_id;
+    let replyToId = null;
+    if (rawReply != null && rawReply !== "") {
+      replyToId = parseInt(rawReply, 10);
+      if (!Number.isInteger(replyToId)) {
+        return res.status(400).json({ error: "Некорректный ответ" });
+      }
+      if (!(await validateReplyInRoom(replyToId, slug))) {
+        return res.status(400).json({ error: "Сообщение для ответа не найдено в этой комнате" });
+      }
+    }
+
+    const userId = req.user.userId;
+    if (!checkRateLimit(userId)) {
+      return res.status(429).json({ error: "Слишком много сообщений в минуту" });
+    }
+
+    const formatted = await saveNewMessageWithOptionalFile({
+      room: slug,
+      userId,
+      text: req.body?.text,
+      replyToId,
+      multerFile: req.file || null,
+    });
+    io.to(slug).emit("message", formatted);
+    res.status(201).json({ ok: true, message: formatted });
+  } catch (err) {
+    if (err.code === "EMPTY_MSG" || err.code === "BAD_MIME") {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error("POST send-with-file", err);
+    res.status(500).json({ error: "Не удалось сохранить сообщение" });
   }
 });
 
@@ -834,6 +1174,7 @@ app.delete("/api/messages/:id", requireAuth, async (req, res) => {
     if (!roomAllowsAccess(slug, rp)) {
       return res.status(403).json({ error: "Нужен пароль комнаты" });
     }
+    await unlinkAttachmentForMessage(id);
     await pool.query(`UPDATE messages SET deleted_at = NOW(), text = '' WHERE id = $1`, [id]);
     const formatted = await formatMessageById(id);
     io.to(slug).emit("message-deleted", { id, room: slug, message: formatted });
@@ -1060,6 +1401,7 @@ io.on("connection", (socket) => {
         if (typeof ack === "function") ack(e);
         return;
       }
+      await unlinkAttachmentForMessage(id);
       await pool.query(`UPDATE messages SET deleted_at = NOW(), text = '' WHERE id = $1`, [id]);
       const formatted = await formatMessageById(id);
       io.to(slug).emit("message-deleted", { id, room: slug, message: formatted });
@@ -1154,6 +1496,8 @@ io.on("connection", (socket) => {
 async function start() {
   await ensureMessagesUserIdSchema();
   await ensurePhase1Schema();
+  await ensurePhase2Schema();
+  ensureUploadDirs();
   server.listen(PORT, () => {
     console.log(`Сервер: http://localhost:${PORT}`);
   });
