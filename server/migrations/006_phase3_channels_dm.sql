@@ -21,5 +21,5 @@ SELECT 'dreamteamdauns', 'DTD', 'public'
 WHERE NOT EXISTS (SELECT 1 FROM channels WHERE slug = 'dreamteamdauns');
 
 INSERT INTO channels (slug, title, kind)
-SELECT 'lobby', 'Лобби', 'public'
+SELECT 'lobby', 'Семья', 'public'
 WHERE NOT EXISTS (SELECT 1 FROM channels WHERE slug = 'lobby');

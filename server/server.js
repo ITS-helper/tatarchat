@@ -421,7 +421,7 @@ async function ensurePhase2Schema() {
   }
 }
 
-/** Лобби и групповые комнаты из GROUP_ROOMS — гарантируем строки в БД (в т.ч. после удаления). */
+/** Канал lobby («Семья») и групповые комнаты из GROUP_ROOMS — гарантируем строки в БД (в т.ч. после удаления). */
 async function ensureCorePublicChannelRows() {
   for (const [slug, conf] of Object.entries(GROUP_ROOMS)) {
     await pool.query(
@@ -433,9 +433,13 @@ async function ensureCorePublicChannelRows() {
   }
   await pool.query(`
     INSERT INTO channels (slug, title, kind)
-    SELECT 'lobby', 'Лобби', 'public'
+    SELECT 'lobby', 'Семья', 'public'
     WHERE NOT EXISTS (SELECT 1 FROM channels WHERE slug = 'lobby')
   `);
+  await pool.query(
+    `UPDATE channels SET title = $1 WHERE slug = 'lobby' AND kind = 'public'`,
+    ["Семья"]
+  );
 }
 
 async function ensurePhase3Schema() {
@@ -473,7 +477,7 @@ function mergeMissingCorePublicRows(rows) {
     }
   }
   if (!bySlug.has("lobby")) {
-    bySlug.set("lobby", { slug: "lobby", title: "Лобби", avatar_storage_key: null });
+    bySlug.set("lobby", { slug: "lobby", title: "Семья", avatar_storage_key: null });
   }
   return Array.from(bySlug.values()).sort((a, b) => String(a.slug).localeCompare(String(b.slug)));
 }
@@ -1176,7 +1180,7 @@ app.delete("/api/rooms/:slug", requireAuth, async (req, res) => {
   try {
     if (!req.user.isAdmin) return res.status(403).json({ error: "Только для админов" });
     const slug = req.params.slug;
-    if (slug === "lobby") return res.status(400).json({ error: "Нельзя удалить лобби" });
+    if (slug === "lobby") return res.status(400).json({ error: "Нельзя удалить комнату «Семья»" });
     if (/^saved-\d+$/i.test(slug)) return res.status(400).json({ error: "Нельзя удалить избранное" });
     await pool.query(`DELETE FROM channels WHERE slug = $1 AND kind = 'public'`, [slug]);
     res.json({ ok: true });

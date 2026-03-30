@@ -45,7 +45,7 @@ CREATE INDEX IF NOT EXISTS idx_channels_dm_users ON channels (user_low_id, user_
 
 INSERT INTO channels (slug, title, kind) VALUES
   ('dreamteamdauns', 'DTD', 'public'),
-  ('lobby', 'Лобби', 'public')
+  ('lobby', 'Семья', 'public')
 ON CONFLICT (slug) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS message_reactions (

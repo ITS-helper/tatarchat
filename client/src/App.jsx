@@ -391,7 +391,7 @@ export default function App() {
   const [activeRoom, setActiveRoom] = useState(() => getInitialRoom());
   const [roomTitle, setRoomTitle] = useState(() => {
     const slug = getInitialRoom();
-    return slug.startsWith("dm-") ? "ЛС" : slug === "lobby" ? "Лобби" : "DTD";
+    return slug.startsWith("dm-") ? "ЛС" : slug === "lobby" ? "Семья" : "DTD";
   });
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -1362,7 +1362,7 @@ export default function App() {
     setPublicChannels([]);
     setDirectChannels([]);
     setActiveRoom("lobby");
-    setRoomTitle("Лобби");
+    setRoomTitle("Семья");
     setStatus("offline");
     setRoomJoined(false);
     roomJoinedRef.current = false;
