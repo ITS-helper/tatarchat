@@ -164,19 +164,69 @@ function sanitizePassword(input) {
   return s;
 }
 
-function normalizeRoomSlug(input) {
-  const s = String(input ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_]/g, "");
-  return GROUP_ROOMS[s] ? s : "";
+/** Публичный slug [a-z0-9_] или личка dm-<меньшийId>-<большийId> */
+function canonicalizeChannelSlug(input) {
+  const raw = String(input ?? "").trim();
+  if (!raw) return null;
+  const dm = raw.match(/^dm-(\d+)-(\d+)$/i);
+  if (dm) {
+    let a = parseInt(dm[1], 10);
+    let b = parseInt(dm[2], 10);
+    if (!Number.isInteger(a) || !Number.isInteger(b) || a < 1 || b < 1 || a === b) return null;
+    if (a > b) [a, b] = [b, a];
+    return `dm-${a}-${b}`;
+  }
+  const s = raw.toLowerCase().replace(/[^a-z0-9_]/g, "");
+  if (!s || s.length > 64) return null;
+  return s;
 }
 
-function roomAllowsAccess(slug, roomPasswordFromClient) {
+async function ensureDmChannelRow(slug, low, high) {
+  await pool.query(
+    `INSERT INTO channels (slug, title, kind, user_low_id, user_high_id)
+     VALUES ($1, '', 'direct', $2, $3)
+     ON CONFLICT (slug) DO NOTHING`,
+    [slug, low, high]
+  );
+}
+
+async function userCanAccessChannel(slug, userId, roomPassword) {
+  if (!slug || userId == null) return false;
+  if (slug.startsWith("dm-")) {
+    const m = /^dm-(\d+)-(\d+)$/.exec(slug);
+    if (!m) return false;
+    const a = parseInt(m[1], 10);
+    const b = parseInt(m[2], 10);
+    if (userId !== a && userId !== b) return false;
+    await ensureDmChannelRow(slug, a, b);
+    return true;
+  }
   const conf = GROUP_ROOMS[slug];
-  if (!conf) return false;
-  if (conf.roomPassword == null) return true;
-  return conf.roomPassword === String(roomPasswordFromClient ?? "");
+  if (conf) {
+    if (conf.roomPassword == null) return true;
+    return conf.roomPassword === String(roomPassword ?? "");
+  }
+  const { rows } = await pool.query(`SELECT 1 FROM channels WHERE slug = $1 AND kind = 'public'`, [slug]);
+  return rows.length > 0;
+}
+
+async function getChannelTitleForUser(slug, viewerUserId) {
+  const conf = GROUP_ROOMS[slug];
+  if (conf) return conf.title;
+  if (slug.startsWith("dm-")) {
+    const m = /^dm-(\d+)-(\d+)$/.exec(slug);
+    if (!m) return "ЛС";
+    const a = parseInt(m[1], 10);
+    const b = parseInt(m[2], 10);
+    const peerId = viewerUserId === a ? b : viewerUserId === b ? a : null;
+    if (peerId == null) return "ЛС";
+    const { rows } = await pool.query(`SELECT nickname FROM users WHERE id = $1`, [peerId]);
+    const nick = rows[0]?.nickname;
+    return nick ? `ЛС: ${nick}` : "ЛС";
+  }
+  const { rows } = await pool.query(`SELECT title FROM channels WHERE slug = $1 AND kind = 'public'`, [slug]);
+  if (rows[0]?.title) return rows[0].title;
+  return slug;
 }
 
 const presenceByUserId = new Map();
@@ -280,6 +330,44 @@ async function ensurePhase2Schema() {
     await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_storage_key VARCHAR(512)`);
   } catch (err) {
     console.error("[schema] phase2:", err?.message || err);
+    throw err;
+  }
+}
+
+async function ensurePhase3Schema() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS channels (
+        id SERIAL PRIMARY KEY,
+        slug VARCHAR(64) NOT NULL UNIQUE,
+        title VARCHAR(128) NOT NULL DEFAULT '',
+        kind VARCHAR(16) NOT NULL CHECK (kind IN ('public', 'direct')),
+        user_low_id INTEGER REFERENCES users (id) ON DELETE CASCADE,
+        user_high_id INTEGER REFERENCES users (id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CHECK (
+          (kind = 'public' AND user_low_id IS NULL AND user_high_id IS NULL)
+          OR (kind = 'direct' AND user_low_id IS NOT NULL AND user_high_id IS NOT NULL AND user_low_id < user_high_id)
+        )
+      )
+    `);
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_channels_dm_users ON channels (user_low_id, user_high_id) WHERE kind = 'direct'`
+    );
+    for (const [slug, conf] of Object.entries(GROUP_ROOMS)) {
+      await pool.query(
+        `INSERT INTO channels (slug, title, kind) VALUES ($1, $2, 'public')
+         ON CONFLICT (slug) DO NOTHING`,
+        [slug, conf.title]
+      );
+    }
+    await pool.query(`
+      INSERT INTO channels (slug, title, kind)
+      SELECT 'lobby', 'Лобби', 'public'
+      WHERE NOT EXISTS (SELECT 1 FROM channels WHERE slug = 'lobby')
+    `);
+  } catch (err) {
+    console.error("[schema] phase3:", err?.message || err);
     throw err;
   }
 }
@@ -827,13 +915,98 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/rooms", (_req, res) => {
-  const rooms = Object.entries(GROUP_ROOMS).map(([slug, c]) => ({
-    slug,
-    title: c.title,
-    requiresPassword: c.roomPassword != null,
-  }));
-  res.json({ rooms });
+app.get("/api/rooms", async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT slug, title FROM channels WHERE kind = 'public' ORDER BY slug`
+    );
+    const rooms = rows.map((r) => ({
+      slug: r.slug,
+      title: r.title || GROUP_ROOMS[r.slug]?.title || r.slug,
+      requiresPassword: !!(GROUP_ROOMS[r.slug]?.roomPassword != null),
+    }));
+    res.json({ rooms });
+  } catch (err) {
+    console.error("GET /api/rooms", err);
+    res.status(500).json({ error: "Не удалось загрузить комнаты" });
+  }
+});
+
+app.get("/api/channels", requireAuth, async (req, res) => {
+  try {
+    const me = req.user.userId;
+    const { rows: pubRows } = await pool.query(
+      `SELECT slug, title FROM channels WHERE kind = 'public' ORDER BY slug`
+    );
+    const publicChannels = pubRows.map((r) => ({
+      slug: r.slug,
+      title: r.title || GROUP_ROOMS[r.slug]?.title || r.slug,
+      kind: "public",
+      requiresPassword: GROUP_ROOMS[r.slug]?.roomPassword != null,
+    }));
+    const { rows: dmRows } = await pool.query(
+      `SELECT slug, user_low_id, user_high_id FROM channels WHERE kind = 'direct' AND (user_low_id = $1 OR user_high_id = $1) ORDER BY slug`,
+      [me]
+    );
+    const directChannels = [];
+    for (const r of dmRows) {
+      const peerId = r.user_low_id === me ? r.user_high_id : r.user_low_id;
+      const nickRows = await pool.query(`SELECT nickname FROM users WHERE id = $1`, [peerId]);
+      const nick = nickRows.rows[0]?.nickname || "?";
+      directChannels.push({
+        slug: r.slug,
+        title: `ЛС: ${nick}`,
+        kind: "direct",
+        peer: { id: peerId, nickname: nick },
+      });
+    }
+    res.json({ publicChannels, directChannels });
+  } catch (err) {
+    console.error("GET /api/channels", err);
+    res.status(500).json({ error: "Не удалось загрузить каналы" });
+  }
+});
+
+app.get("/api/users/for-dm", requireAuth, async (req, res) => {
+  try {
+    const me = req.user.userId;
+    const { rows } = await pool.query(
+      `SELECT id, nickname FROM users WHERE id <> $1 ORDER BY nickname ASC LIMIT 500`,
+      [me]
+    );
+    res.json({ users: rows });
+  } catch (err) {
+    console.error("GET /api/users/for-dm", err);
+    res.status(500).json({ error: "Не удалось загрузить пользователей" });
+  }
+});
+
+app.post("/api/channels/open-dm", requireAuth, async (req, res) => {
+  try {
+    const peerId = parseInt(req.body?.peerId ?? req.body?.userId, 10);
+    const me = req.user.userId;
+    if (!Number.isInteger(peerId) || peerId < 1 || peerId === me) {
+      return res.status(400).json({ error: "Некорректный пользователь" });
+    }
+    const { rows: urows } = await pool.query(`SELECT id, nickname FROM users WHERE id = $1`, [peerId]);
+    if (!urows[0]) {
+      return res.status(404).json({ error: "Пользователь не найден" });
+    }
+    const low = Math.min(me, peerId);
+    const high = Math.max(me, peerId);
+    const slug = `dm-${low}-${high}`;
+    await ensureDmChannelRow(slug, low, high);
+    const peerNick = urows[0].nickname;
+    res.status(201).json({
+      slug,
+      title: `ЛС: ${peerNick}`,
+      kind: "direct",
+      peer: { id: peerId, nickname: peerNick },
+    });
+  } catch (err) {
+    console.error("POST /api/channels/open-dm", err);
+    res.status(500).json({ error: "Не удалось открыть личку" });
+  }
 });
 
 app.post("/api/auth/register", async (req, res) => {
@@ -920,20 +1093,21 @@ function handleUpload(req, res, next) {
 
 app.get("/api/messages/:roomSlug/search", requireAuth, async (req, res) => {
   try {
-    const slug = normalizeRoomSlug(req.params.roomSlug);
+    const slug = canonicalizeChannelSlug(req.params.roomSlug);
     if (!slug) {
-      return res.status(404).json({ error: "Комната не найдена" });
+      return res.status(404).json({ error: "Канал не найден" });
     }
     const rp = getRoomPasswordFromRequest(req);
-    if (!roomAllowsAccess(slug, rp)) {
-      return res.status(403).json({ error: "Нужен пароль комнаты" });
+    if (!(await userCanAccessChannel(slug, req.user.userId, rp))) {
+      return res.status(403).json({ error: "Нет доступа к каналу" });
     }
     const q = req.query?.q;
     if (q == null || String(q).trim().length < 1) {
       return res.status(400).json({ error: "Укажите строку поиска" });
     }
     const results = await searchMessagesInRoom(slug, q, 40);
-    res.json({ room: slug, title: GROUP_ROOMS[slug].title, results });
+    const title = await getChannelTitleForUser(slug, req.user.userId);
+    res.json({ room: slug, title, results });
   } catch (err) {
     console.error("GET search", err?.message || err, err?.code || "");
     res.status(500).json({ error: err.message || "Ошибка поиска" });
@@ -942,16 +1116,17 @@ app.get("/api/messages/:roomSlug/search", requireAuth, async (req, res) => {
 
 app.get("/api/messages/:roomSlug", requireAuth, async (req, res) => {
   try {
-    const slug = normalizeRoomSlug(req.params.roomSlug);
+    const slug = canonicalizeChannelSlug(req.params.roomSlug);
     if (!slug) {
-      return res.status(404).json({ error: "Комната не найдена" });
+      return res.status(404).json({ error: "Канал не найден" });
     }
     const rp = getRoomPasswordFromRequest(req);
-    if (!roomAllowsAccess(slug, rp)) {
-      return res.status(403).json({ error: "Нужен пароль комнаты" });
+    if (!(await userCanAccessChannel(slug, req.user.userId, rp))) {
+      return res.status(403).json({ error: "Нет доступа к каналу" });
     }
     const messages = await getLastMessages(slug, 50);
-    res.json({ room: slug, title: GROUP_ROOMS[slug].title, messages });
+    const title = await getChannelTitleForUser(slug, req.user.userId);
+    res.json({ room: slug, title, messages });
   } catch (err) {
     console.error("GET /api/messages/:roomSlug", err?.message || err, err?.code || "");
     if (err.code === "SCHEMA_MESSAGES" || err.code === "SCHEMA_MESSAGES_TIME") {
@@ -974,8 +1149,8 @@ app.get("/api/files/:messageId", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "Нет вложения" });
     }
     const rp = getRoomPasswordFromRequest(req);
-    if (!roomAllowsAccess(row.room, rp)) {
-      return res.status(403).json({ error: "Нужен пароль комнаты" });
+    if (!(await userCanAccessChannel(row.room, req.user.userId, rp))) {
+      return res.status(403).json({ error: "Нет доступа к каналу" });
     }
     const full = path.join(UPLOAD_ROOT, row.attachment_storage_key);
     if (!fs.existsSync(full)) {
@@ -996,13 +1171,13 @@ app.get("/api/files/:messageId", requireAuth, async (req, res) => {
 
 app.post("/api/messages/send-with-file", requireAuth, handleUpload, async (req, res) => {
   try {
-    const slug = normalizeRoomSlug(req.body?.room);
+    const slug = canonicalizeChannelSlug(req.body?.room);
     if (!slug) {
-      return res.status(400).json({ error: "Неизвестная комната" });
+      return res.status(400).json({ error: "Неизвестный канал" });
     }
     const rp = getRoomPasswordFromRequest(req);
-    if (!roomAllowsAccess(slug, rp)) {
-      return res.status(403).json({ error: "Нужен пароль комнаты" });
+    if (!(await userCanAccessChannel(slug, req.user.userId, rp))) {
+      return res.status(403).json({ error: "Нет доступа к каналу" });
     }
     const normalizedText = normalizeMessageText(req.body?.text);
     if (!normalizedText && !req.file) {
@@ -1078,13 +1253,13 @@ io.use(async (socket, next) => {
 
 app.post("/api/messages", requireAuth, async (req, res) => {
   try {
-    const slug = normalizeRoomSlug(req.body?.room);
+    const slug = canonicalizeChannelSlug(req.body?.room);
     if (!slug) {
-      return res.status(400).json({ error: "Неизвестная комната" });
+      return res.status(400).json({ error: "Неизвестный канал" });
     }
     const rp = getRoomPasswordFromRequest(req);
-    if (!roomAllowsAccess(slug, rp)) {
-      return res.status(403).json({ error: "Нужен пароль комнаты" });
+    if (!(await userCanAccessChannel(slug, req.user.userId, rp))) {
+      return res.status(403).json({ error: "Нет доступа к каналу" });
     }
     const body = sanitizeText(req.body?.text);
     if (!body) {
@@ -1139,8 +1314,8 @@ app.patch("/api/messages/:id", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "Сообщение не найдено" });
     }
     const slug = rows[0].room;
-    if (!roomAllowsAccess(slug, rp)) {
-      return res.status(403).json({ error: "Нужен пароль комнаты" });
+    if (!(await userCanAccessChannel(slug, req.user.userId, rp))) {
+      return res.status(403).json({ error: "Нет доступа к каналу" });
     }
     await pool.query(`UPDATE messages SET text = $1, edited_at = NOW() WHERE id = $2`, [body, id]);
     const formatted = await formatMessageById(id);
@@ -1167,8 +1342,8 @@ app.delete("/api/messages/:id", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "Сообщение не найдено" });
     }
     const slug = rows[0].room;
-    if (!roomAllowsAccess(slug, rp)) {
-      return res.status(403).json({ error: "Нужен пароль комнаты" });
+    if (!(await userCanAccessChannel(slug, req.user.userId, rp))) {
+      return res.status(403).json({ error: "Нет доступа к каналу" });
     }
     await unlinkAttachmentForMessage(id);
     await pool.query(`UPDATE messages SET deleted_at = NOW(), text = '' WHERE id = $1`, [id]);
@@ -1197,8 +1372,8 @@ app.post("/api/messages/:id/reaction", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "Сообщение не найдено" });
     }
     const slug = rows[0].room;
-    if (!roomAllowsAccess(slug, rp)) {
-      return res.status(403).json({ error: "Нужен пароль комнаты" });
+    if (!(await userCanAccessChannel(slug, req.user.userId, rp))) {
+      return res.status(403).json({ error: "Нет доступа к каналу" });
     }
     const reactions = await toggleReactionDb(id, req.user.userId, emoji);
     io.to(slug).emit("message-reactions", { id, room: slug, reactions });
@@ -1219,15 +1394,16 @@ if (process.env.NODE_ENV === "production") {
 
 async function processJoinRoom(socket, payload, ack) {
   try {
-    const slug = normalizeRoomSlug(payload?.room);
+    const slug = canonicalizeChannelSlug(payload?.room);
     if (!slug) {
-      const e = { ok: false, error: "Неизвестная комната" };
+      const e = { ok: false, error: "Неизвестный канал" };
       if (typeof ack === "function") ack(e);
       socket.emit("error-toast", e);
       return;
     }
-    if (!roomAllowsAccess(slug, payload?.roomPassword)) {
-      const e = { ok: false, error: "Неверный пароль комнаты" };
+    const uid = socket.data.userId;
+    if (!(await userCanAccessChannel(slug, uid, payload?.roomPassword))) {
+      const e = { ok: false, error: "Нет доступа к каналу" };
       if (typeof ack === "function") ack(e);
       socket.emit("error-toast", e);
       return;
@@ -1254,7 +1430,8 @@ async function processJoinRoom(socket, payload, ack) {
     }
 
     const history = await getLastMessages(slug, 50);
-    socket.emit("room-changed", { room: slug });
+    const title = await getChannelTitleForUser(slug, uid);
+    socket.emit("room-changed", { room: slug, title });
     socket.emit("history", { room: slug, messages: history });
     if (typeof ack === "function") {
       ack({ ok: true, room: slug });
@@ -1493,6 +1670,7 @@ async function start() {
   await ensureMessagesUserIdSchema();
   await ensurePhase1Schema();
   await ensurePhase2Schema();
+  await ensurePhase3Schema();
   ensureUploadDirs();
   server.listen(PORT, () => {
     console.log(`Сервер: http://localhost:${PORT}`);

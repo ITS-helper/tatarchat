@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 
 const LS_TOKEN = "tatarchat_token";
@@ -14,8 +14,6 @@ const SS_DTD_ROOM_PW = "tatarchat_room_pw_dreamteamdauns";
 const GATE_PASSWORD_DTD = "1488";
 
 const PRODUCTION_API_ORIGIN = "https://tatarchat-server.onrender.com";
-
-const DEFAULT_ROOMS = [{ slug: "dreamteamdauns", title: "DTD", requiresPassword: true }];
 
 function getApiBase() {
   const fromEnv = import.meta.env.VITE_API_URL;
@@ -35,10 +33,23 @@ function getStoredToken() {
   return localStorage.getItem(LS_TOKEN) || "";
 }
 
-function getInitialRoom() {
-  const s = localStorage.getItem(LS_LAST_ROOM);
-  if (s === "dreamteamdauns") return s;
+function canonicalizeStoredRoom(s) {
+  if (!s || typeof s !== "string") return "dreamteamdauns";
+  const dm = s.trim().match(/^dm-(\d+)-(\d+)$/i);
+  if (dm) {
+    let a = parseInt(dm[1], 10);
+    let b = parseInt(dm[2], 10);
+    if (!Number.isInteger(a) || !Number.isInteger(b) || a < 1 || b < 1 || a === b) return "dreamteamdauns";
+    if (a > b) [a, b] = [b, a];
+    return `dm-${a}-${b}`;
+  }
+  const alnum = s.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
+  if (alnum && alnum.length <= 64) return alnum;
   return "dreamteamdauns";
+}
+
+function getInitialRoom() {
+  return canonicalizeStoredRoom(localStorage.getItem(LS_LAST_ROOM));
 }
 
 function readSiteRoomFromSession() {
@@ -173,17 +184,18 @@ export default function App() {
   const [passwordInput, setPasswordInput] = useState("");
   const [siteRoom, setSiteRoom] = useState(() => readSiteRoomFromSession());
   const [gatePasswordDraft, setGatePasswordDraft] = useState("");
-  const rooms = useMemo(
-    () => (siteRoom ? DEFAULT_ROOMS.filter((r) => r.slug === siteRoom) : []),
-    [siteRoom]
-  );
+  const [publicChannels, setPublicChannels] = useState([]);
+  const [directChannels, setDirectChannels] = useState([]);
+  const [dmModalOpen, setDmModalOpen] = useState(false);
+  const [dmUsers, setDmUsers] = useState([]);
+  const [dmUsersLoading, setDmUsersLoading] = useState(false);
+  const publicChannelsRef = useRef([]);
   const [activeRoom, setActiveRoom] = useState(
     () => readSiteRoomFromSession() || getInitialRoom()
   );
   const [roomTitle, setRoomTitle] = useState(() => {
     const slug = readSiteRoomFromSession() || getInitialRoom();
-    const m = DEFAULT_ROOMS.find((r) => r.slug === slug);
-    return m?.title || "DTD";
+    return slug.startsWith("dm-") ? "ЛС" : slug === "lobby" ? "Лобби" : "DTD";
   });
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -233,6 +245,10 @@ export default function App() {
   }, [activeRoom]);
 
   useEffect(() => {
+    publicChannelsRef.current = publicChannels;
+  }, [publicChannels]);
+
+  useEffect(() => {
     setReplyTo(null);
     setEditingId(null);
     setTypingPeers([]);
@@ -244,12 +260,87 @@ export default function App() {
 
   const buildRoomHeaders = useCallback(() => {
     const headers = {};
-    if (activeRoomRef.current === "dreamteamdauns") {
+    const room = activeRoomRef.current;
+    const row = publicChannels.find((c) => c.slug === room);
+    const need =
+      row?.requiresPassword === true || (row == null && room === "dreamteamdauns");
+    if (need) {
       const pw = sessionStorage.getItem(SS_DTD_ROOM_PW);
       if (pw) headers["X-Room-Password"] = pw;
     }
     return headers;
-  }, []);
+  }, [publicChannels]);
+
+  const refreshChannels = useCallback(async () => {
+    if (!token.trim()) return;
+    try {
+      const base = getApiBase();
+      const res = await fetch(`${base}/api/channels`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setPublicChannels(data.publicChannels || []);
+        setDirectChannels(data.directChannels || []);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (token.trim()) refreshChannels();
+  }, [token, refreshChannels]);
+
+  const openDmModal = useCallback(async () => {
+    setDmModalOpen(true);
+    setDmUsersLoading(true);
+    try {
+      const base = getApiBase();
+      const res = await fetch(`${base}/api/users/for-dm`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) setDmUsers(data.users || []);
+      else setDmUsers([]);
+    } catch {
+      setDmUsers([]);
+    } finally {
+      setDmUsersLoading(false);
+    }
+  }, [token]);
+
+  const startDmWithPeer = useCallback(
+    async (peerId) => {
+      try {
+        const base = getApiBase();
+        const res = await fetch(`${base}/api/channels/open-dm`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ peerId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setBanner(data.error || "Не удалось открыть личку");
+          return;
+        }
+        await refreshChannels();
+        if (data.slug) {
+          setActiveRoom(data.slug);
+          if (data.title) setRoomTitle(data.title);
+        }
+        setDmModalOpen(false);
+        setBanner(null);
+      } catch (e) {
+        console.error(e);
+        setBanner("Сеть: личка");
+      }
+    },
+    [token, refreshChannels]
+  );
 
   const getAuthHeaders = useCallback(
     () => ({
@@ -278,7 +369,10 @@ export default function App() {
         const params = new URLSearchParams({ q });
         const room = activeRoomRef.current;
         const headers = { Authorization: `Bearer ${token}`, ...buildRoomHeaders() };
-        const res = await fetch(`${base}/api/messages/${room}/search?${params}`, { headers });
+        const res = await fetch(
+          `${base}/api/messages/${encodeURIComponent(room)}/search?${params}`,
+          { headers }
+        );
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           setSearchResults([]);
@@ -317,12 +411,8 @@ export default function App() {
       if (!token) return;
       try {
         const base = getApiBase();
-        const headers = { Authorization: `Bearer ${token}` };
-        if (room === "dreamteamdauns") {
-          const pw = sessionStorage.getItem(SS_DTD_ROOM_PW);
-          if (pw) headers["X-Room-Password"] = pw;
-        }
-        const res = await fetch(`${base}/api/messages/${room}`, { headers });
+        const headers = { Authorization: `Bearer ${token}`, ...buildRoomHeaders() };
+        const res = await fetch(`${base}/api/messages/${encodeURIComponent(room)}`, { headers });
         const raw = await res.text();
         let data = {};
         try {
@@ -343,7 +433,7 @@ export default function App() {
         setBanner("Не удалось загрузить историю.");
       }
     },
-    [token]
+    [token, buildRoomHeaders]
   );
 
   useEffect(() => {
@@ -355,7 +445,10 @@ export default function App() {
   const emitJoinRoom = useCallback((socket) => {
     const gen = ++joinGenRef.current;
     const r = activeRoomRef.current;
-    const pw = r === "dreamteamdauns" ? sessionStorage.getItem(SS_DTD_ROOM_PW) || "" : "";
+    const row = publicChannelsRef.current.find((c) => c.slug === r);
+    const need =
+      row?.requiresPassword === true || (row == null && r === "dreamteamdauns");
+    const pw = need ? sessionStorage.getItem(SS_DTD_ROOM_PW) || "" : "";
     setRoomJoined(false);
     roomJoinedRef.current = false;
     socket.emit("join-room", { room: r, roomPassword: pw || undefined }, (ack) => {
@@ -427,9 +520,8 @@ export default function App() {
       roomJoinedRef.current = true;
     });
 
-    socket.on("room-changed", ({ room }) => {
-      const meta = rooms.find((x) => x.slug === room);
-      if (meta) setRoomTitle(meta.title);
+    socket.on("room-changed", ({ title }) => {
+      if (title) setRoomTitle(title);
     });
 
     socket.on("message", (msg) => {
@@ -479,17 +571,13 @@ export default function App() {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [token, emitJoinRoom, rooms]);
+  }, [token, emitJoinRoom]);
 
   useEffect(() => {
     const s = socketRef.current;
     if (!token || !s?.connected) return;
     emitJoinRoom(s);
   }, [activeRoom, token, emitJoinRoom]);
-
-  useEffect(() => {
-    if (siteRoom && activeRoom !== siteRoom) setActiveRoom(siteRoom);
-  }, [siteRoom, activeRoom]);
 
   const submitGate = (e) => {
     e.preventDefault();
@@ -508,8 +596,7 @@ export default function App() {
     sessionStorage.setItem(SS_DTD_ROOM_PW, p);
     setSiteRoom(slug);
     setActiveRoom(slug);
-    const meta = DEFAULT_ROOMS.find((r) => r.slug === slug);
-    if (meta) setRoomTitle(meta.title);
+    setRoomTitle("DTD");
     localStorage.setItem(LS_LAST_ROOM, slug);
     setGatePasswordDraft("");
     setBanner(null);
@@ -594,15 +681,17 @@ export default function App() {
     if (fileInputRef.current) fileInputRef.current.value = "";
     setSearchInput("");
     setSearchResults([]);
+    setPublicChannels([]);
+    setDirectChannels([]);
     setActiveRoom("dreamteamdauns");
     setStatus("offline");
     setRoomJoined(false);
     roomJoinedRef.current = false;
   };
 
-  const selectRoom = (slug) => {
+  const selectChannel = (slug) => {
     setBanner(null);
-    if (slug === siteRoom) setActiveRoom(slug);
+    setActiveRoom(slug);
   };
 
   const flushReaction = useCallback(
@@ -1057,14 +1146,23 @@ export default function App() {
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:flex-row md:p-4">
-        <aside className="cyber-panel order-2 w-full flex-shrink-0 p-3 md:order-1 md:w-60">
-          <h2 className="mb-3 font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-neon-cyan/50">Каналы</h2>
-          <ul className="space-y-1.5 text-sm">
-            {rooms.map((r) => (
+        <aside className="cyber-panel order-2 flex w-full max-h-[min(70vh,560px)] flex-shrink-0 flex-col p-3 md:order-1 md:max-h-none md:w-72">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-neon-cyan/50">Каналы</h2>
+            <button
+              type="button"
+              onClick={() => openDmModal()}
+              className="hud-chip shrink-0 border-neon-purple/50 px-2 py-1 font-mono text-[9px] text-neon-purple hover:border-neon-cyan/50 hover:text-neon-cyan"
+            >
+              + Личка
+            </button>
+          </div>
+          <ul className="mb-4 space-y-1.5 overflow-y-auto text-sm">
+            {publicChannels.map((r) => (
               <li key={r.slug}>
                 <button
                   type="button"
-                  onClick={() => selectRoom(r.slug)}
+                  onClick={() => selectChannel(r.slug)}
                   className={`flex w-full items-center justify-between border px-2.5 py-2 text-left font-mono transition ${
                     activeRoom === r.slug
                       ? "border-neon-cyan bg-neon-cyan/10 text-neon-bright shadow-neon-cyan"
@@ -1072,17 +1170,39 @@ export default function App() {
                   }`}
                 >
                   <span className="truncate">{r.title}</span>
-                  {r.requiresPassword && (
+                  {r.requiresPassword ? (
                     <span
                       className="hud-chip ml-1 shrink-0 border-neon-hot/70 bg-black/60 text-[8px] text-neon-hot"
                       title="Защищённый канал"
                     >
                       SEC
                     </span>
-                  )}
+                  ) : null}
                 </button>
               </li>
             ))}
+          </ul>
+          <h2 className="mb-2 font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-neon-purple/50">Лички</h2>
+          <ul className="min-h-0 flex-1 space-y-1.5 overflow-y-auto text-sm">
+            {directChannels.length === 0 ? (
+              <li className="font-mono text-[11px] text-cyan-800">Пока нет — «+ Личка»</li>
+            ) : (
+              directChannels.map((r) => (
+                <li key={r.slug}>
+                  <button
+                    type="button"
+                    onClick={() => selectChannel(r.slug)}
+                    className={`flex w-full items-center justify-between border px-2.5 py-2 text-left font-mono transition ${
+                      activeRoom === r.slug
+                        ? "border-neon-purple bg-neon-purple/15 text-neon-bright shadow-neon-magenta"
+                        : "border-transparent bg-black/40 text-cyan-600 hover:border-neon-purple/35 hover:text-neon-purple"
+                    }`}
+                  >
+                    <span className="truncate">{r.title}</span>
+                  </button>
+                </li>
+              ))
+            )}
           </ul>
         </aside>
 
@@ -1187,6 +1307,15 @@ export default function App() {
                       >
                         Ответить
                       </button>
+                      {!mine && !deleted && m.user_id != null && myUserId != null ? (
+                        <button
+                          type="button"
+                          className="text-neon-purple hover:text-neon-cyan"
+                          onClick={() => startDmWithPeer(m.user_id)}
+                        >
+                          В ЛС
+                        </button>
+                      ) : null}
                       {mine && !deleted && m.id != null && (
                         <>
                           <button
@@ -1314,6 +1443,49 @@ export default function App() {
           </form>
         </section>
       </div>
+
+      {dmModalOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="dm-modal-title"
+        >
+          <div className="cyber-panel relative max-h-[75vh] w-full max-w-md overflow-hidden p-4 shadow-neon-cyan">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h3 id="dm-modal-title" className="font-mono text-sm text-neon-cyan">
+                Кому написать
+              </h3>
+              <button
+                type="button"
+                className="font-mono text-neon-hot hover:underline"
+                onClick={() => setDmModalOpen(false)}
+              >
+                Закрыть
+              </button>
+            </div>
+            {dmUsersLoading ? (
+              <p className="py-6 text-center font-mono text-sm text-cyan-700">Загрузка…</p>
+            ) : dmUsers.length === 0 ? (
+              <p className="py-6 text-center font-mono text-sm text-cyan-800">Нет других пользователей</p>
+            ) : (
+              <ul className="max-h-64 space-y-1 overflow-y-auto md:max-h-80">
+                {dmUsers.map((u) => (
+                  <li key={u.id}>
+                    <button
+                      type="button"
+                      className="w-full truncate border border-transparent px-2 py-2 text-left font-mono text-sm text-cyan-400 transition hover:border-neon-cyan/40 hover:text-neon-cyan"
+                      onClick={() => startDmWithPeer(u.id)}
+                    >
+                      {u.nickname}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      ) : null}
       </div>
     </div>
   );

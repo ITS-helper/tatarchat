@@ -27,6 +27,27 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS idx_messages_room_created_at ON messages (room, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS channels (
+  id SERIAL PRIMARY KEY,
+  slug VARCHAR(64) NOT NULL UNIQUE,
+  title VARCHAR(128) NOT NULL DEFAULT '',
+  kind VARCHAR(16) NOT NULL CHECK (kind IN ('public', 'direct')),
+  user_low_id INTEGER REFERENCES users (id) ON DELETE CASCADE,
+  user_high_id INTEGER REFERENCES users (id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (
+    (kind = 'public' AND user_low_id IS NULL AND user_high_id IS NULL)
+    OR (kind = 'direct' AND user_low_id IS NOT NULL AND user_high_id IS NOT NULL AND user_low_id < user_high_id)
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_channels_dm_users ON channels (user_low_id, user_high_id) WHERE kind = 'direct';
+
+INSERT INTO channels (slug, title, kind) VALUES
+  ('dreamteamdauns', 'DTD', 'public'),
+  ('lobby', 'Лобби', 'public')
+ON CONFLICT (slug) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS message_reactions (
   message_id INTEGER NOT NULL REFERENCES messages (id) ON DELETE CASCADE,
   user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
