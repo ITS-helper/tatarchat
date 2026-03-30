@@ -18,19 +18,20 @@
   }
 }
 
-/* Один слой без repeat — иначе появляется вертикальный шов между плитками */
-.chat-bg {
+/* Фон чата: смещается медленнее ленты (parallax), высота >100% — запас при translate */
+.chat-bg-parallax {
   background-color: #0d1118;
   background-image: url("/city-pattern.svg");
   background-repeat: no-repeat;
   background-size: cover;
   background-position: center center;
-}
-
-@media (min-width: 768px) {
-  .chat-bg {
-    background-attachment: fixed;
-  }
+  will-change: transform;
+  position: absolute;
+  left: 0;
+  right: 0;
+  width: 100%;
+  top: -12%;
+  height: 124%;
 }
 
 /* Scrollbar */

@@ -22,6 +22,9 @@ const SS_DTD_ROOM_PW = "tatarchat_room_pw_dreamteamdauns";
 /** Виртуальный раздел: не чат, только галерея (доступ на сервере по нику) */
 const GALLERY_ROOM = "__gallery";
 
+/** Фон паттерна движется при скролле медленнее, чем сообщения (0…1) */
+const CHAT_BG_PARALLAX = 0.22;
+
 /** Видеосообщения: удерживать кнопку записи, как в Telegram (превью — квадрат) */
 const VIDEO_NOTE_MAX_MS = 60_000;
 const VIDEO_NOTE_MIN_MS = 450;
@@ -422,6 +425,7 @@ export default function App() {
   const [roomJoined, setRoomJoined] = useState(false);
   const [banner, setBanner] = useState(null);
   const listRef = useRef(null);
+  const chatParallaxRef = useRef(null);
   const socketRef = useRef(null);
   const roomJoinedRef = useRef(false);
   const joinGenRef = useRef(0);
@@ -1073,6 +1077,18 @@ export default function App() {
     }
   }, [editingId, pendingFile, videoNoteUploading, voiceRecording, voiceUploading]);
 
+  const syncChatParallax = useCallback(() => {
+    const el = listRef.current;
+    const bg = chatParallaxRef.current;
+    if (!el || !bg) return;
+    const y = el.scrollTop * CHAT_BG_PARALLAX;
+    bg.style.transform = `translate3d(0, ${-y}px, 0)`;
+  }, []);
+
+  const handleChatScroll = useCallback(() => {
+    syncChatParallax();
+  }, [syncChatParallax]);
+
   const scrollToBottom = useCallback(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -1080,7 +1096,12 @@ export default function App() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, scrollToBottom]);
+    requestAnimationFrame(() => syncChatParallax());
+  }, [messages, scrollToBottom, syncChatParallax]);
+
+  useEffect(() => {
+    requestAnimationFrame(() => syncChatParallax());
+  }, [activeRoom, syncChatParallax]);
 
   const loadHistoryForRoom = useCallback(
     async (room) => {
@@ -2037,12 +2058,15 @@ export default function App() {
           <GalleryView getApiBase={getApiBase} getAuthHeaders={getAuthHeaders} onError={setBanner} />
         ) : (
           <>
-        {/* Messages */}
-        <div
-          ref={listRef}
-          className="chat-bg messages-scroll flex-1 overflow-y-auto px-4 py-3"
-          onClick={(e) => { if (e.target === e.currentTarget) setSelectedMsgId(null); }}
-        >
+        {/* Messages + parallax pattern (фон медленнее ленты) */}
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div ref={chatParallaxRef} className="chat-bg-parallax pointer-events-none z-0" aria-hidden />
+          <div
+            ref={listRef}
+            className="messages-scroll relative z-10 flex-1 overflow-y-auto bg-transparent px-4 py-3"
+            onScroll={handleChatScroll}
+            onClick={(e) => { if (e.target === e.currentTarget) setSelectedMsgId(null); }}
+          >
           {messages.length === 0 ? (
             <div className="flex h-full items-center justify-center">
               <p className="text-sm text-tc-text-muted">Нет сообщений</p>
@@ -2209,6 +2233,7 @@ export default function App() {
               })}
             </div>
           )}
+        </div>
         </div>
 
         {/* Reply / Edit bar */}
