@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420" viewBox="0 0 640 420">
-  <rect width="640" height="420" fill="#0d1118"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="420" viewBox="0 0 720 420">
+  <!-- Ширина 720: по краям плитки пустые поля ~55–65px — стык repeat-x не даёт сгущения в центре экрана -->
+  <rect width="720" height="420" fill="#0d1118"/>
 
   <defs>
     <style type="text/css"><![CDATA[
@@ -16,41 +17,41 @@
 
   <g fill="none" stroke-width="1.05" stroke-linecap="round" stroke-linejoin="round">
 
-    <g transform="translate(28,24) rotate(-8 15 52)" stroke="#00f5ff" opacity="0.52">
+    <g transform="translate(68,26) rotate(-8 15 52)" stroke="#00f5ff" opacity="0.52">
       <rect x="10" y="0" width="10" height="14" rx="2"/>
       <path d="M7 14 L7 22 Q0 36 0 54 L0 92 Q0 100 15 100 Q30 100 30 92 L30 54 Q30 36 23 22 L23 14"/>
       <rect x="5" y="40" width="20" height="22" rx="2"/>
       <text class="lbl" x="15" y="72" fill="#66ffff">VODKA</text>
     </g>
 
-    <g transform="translate(118,8) rotate(11 17 55)" stroke="#ff9100" opacity="0.52">
+    <g transform="translate(148,10) rotate(11 17 55)" stroke="#ff9100" opacity="0.52">
       <rect x="11" y="0" width="12" height="16" rx="2"/>
       <path d="M8 16 L8 26 Q2 40 2 58 L2 96 Q2 104 17 104 Q32 104 32 96 L32 58 Q32 40 26 26 L26 16"/>
       <ellipse cx="17" cy="52" rx="12" ry="18"/>
       <text class="lbl" x="17" y="78" fill="#ffe066">COGNAC</text>
     </g>
 
-    <g transform="translate(210,32) rotate(-14 16 48)" stroke="#ff00aa" opacity="0.5">
+    <g transform="translate(235,34) rotate(-14 16 48)" stroke="#ff00aa" opacity="0.5">
       <rect x="12" y="0" width="8" height="12" rx="2"/>
       <path d="M8 12 L8 20 L4 28 L4 94 Q4 100 16 100 Q28 100 28 94 L28 28 L24 20 L24 12"/>
       <line x1="10" y1="38" x2="22" y2="38"/>
       <text class="lbl" x="16" y="72" fill="#ff66dd">MARTINI</text>
     </g>
 
-    <g transform="translate(295,12) rotate(6 14 50)" stroke="#ffcc00" opacity="0.52">
+    <g transform="translate(318,14) rotate(6 14 50)" stroke="#ffcc00" opacity="0.52">
       <rect x="9" y="0" width="10" height="13" rx="2"/>
       <path d="M6 13 L6 22 Q1 34 1 52 L1 94 Q1 100 14 100 Q27 100 27 94 L27 52 Q27 34 22 22 L22 13"/>
       <text class="lbl" x="14" y="68" fill="#fff566">WHISKY</text>
     </g>
 
-    <g transform="translate(378,42) rotate(-18 15 45)" stroke="#ff3131" opacity="0.52">
+    <g transform="translate(402,44) rotate(-18 15 45)" stroke="#ff3131" opacity="0.52">
       <rect x="10" y="0" width="10" height="12" rx="2"/>
       <path d="M7 12 L7 22 Q2 34 2 50 L2 88 Q2 96 15 96 Q28 96 28 88 L28 50 Q28 34 23 22 L23 12"/>
       <rect x="6" y="36" width="18" height="16" rx="2"/>
       <text class="lbl" x="15" y="74" fill="#ff8888">RUM</text>
     </g>
 
-    <g transform="translate(455,18) rotate(9 14 48)" stroke="#00ffaa" opacity="0.5">
+    <g transform="translate(485,20) rotate(9 14 48)" stroke="#00ffaa" opacity="0.5">
       <rect x="9" y="0" width="10" height="15" rx="2"/>
       <path d="M6 15 L6 24 Q1 38 1 56 L1 92 Q1 98 14 98 Q27 98 27 92 L27 56 Q27 38 22 24 L22 15"/>
       <line x1="8" y1="44" x2="20" y2="44"/>
@@ -58,126 +59,126 @@
       <text class="lbl" x="14" y="78" fill="#88ffdd">GIN</text>
     </g>
 
-    <g transform="translate(538,28) rotate(-5 16 50)" stroke="#ddff00" opacity="0.53">
+    <g transform="translate(568,30) rotate(-5 16 50)" stroke="#ddff00" opacity="0.53">
       <rect x="11" y="0" width="10" height="14" rx="2"/>
       <path d="M8 14 L8 24 Q3 36 3 54 L3 96 Q3 102 16 102 Q29 102 29 96 L29 54 Q29 36 24 24 L24 14"/>
       <text class="lbl" x="16" y="72" fill="#eeff66">TEQUILA</text>
     </g>
 
-    <g transform="translate(48,145) rotate(12 15 48)" stroke="#d400ff" opacity="0.52">
+    <g transform="translate(88,148) rotate(12 15 48)" stroke="#d400ff" opacity="0.52">
       <rect x="10" y="0" width="10" height="13" rx="2"/>
       <path d="M7 13 L7 24 Q1 38 1 56 L1 92 Q1 98 15 98 Q29 98 29 92 L29 56 Q29 38 23 24 L23 13"/>
       <ellipse cx="15" cy="50" rx="10" ry="16"/>
       <text class="lbl" x="15" y="76" fill="#ee88ff">BRANDY</text>
     </g>
 
-    <g transform="translate(142,158) rotate(-11 15 45)" stroke="#39ff14" opacity="0.52">
+    <g transform="translate(178,160) rotate(-11 15 45)" stroke="#39ff14" opacity="0.52">
       <rect x="9" y="0" width="12" height="16" rx="2"/>
       <path d="M6 16 L6 26 Q1 40 1 58 L1 90 Q1 96 15 96 Q29 96 29 90 L29 58 Q29 40 24 26 L24 16"/>
       <line x1="7" y1="40" x2="23" y2="40"/>
       <text class="lbl" x="15" y="72" fill="#baff66">ABSINTHE</text>
     </g>
 
-    <g transform="translate(245,138) rotate(7 14 46)" stroke="#ff1493" opacity="0.5">
+    <g transform="translate(278,140) rotate(7 14 46)" stroke="#ff1493" opacity="0.5">
       <rect x="8" y="0" width="12" height="14" rx="2"/>
       <path d="M5 14 L5 24 Q0 36 0 52 L0 88 Q0 94 14 94 Q28 94 28 88 L28 52 Q28 36 23 24 L23 14"/>
       <text class="lbl" x="14" y="66" fill="#ff77bb">LIQUEUR</text>
     </g>
 
-    <g transform="translate(338,152) rotate(-16 14 52)" stroke="#e0ffff" opacity="0.48">
+    <g transform="translate(368,154) rotate(-16 14 52)" stroke="#e0ffff" opacity="0.48">
       <rect x="8" y="0" width="8" height="22" rx="2"/>
       <path d="M5 22 L5 30 Q0 42 0 58 L0 100 Q0 108 12 108 Q24 108 24 100 L24 58 Q24 42 19 30 L19 22"/>
       <path d="M10 6 Q12 -2 14 6"/>
       <text class="lbl" x="12" y="78" fill="#ffffff">CHAMPAGNE</text>
     </g>
 
-    <g transform="translate(428,140) rotate(14 15 48)" stroke="#00bfff" opacity="0.52">
+    <g transform="translate(458,142) rotate(14 15 48)" stroke="#00bfff" opacity="0.52">
       <rect x="10" y="0" width="10" height="13" rx="2"/>
       <path d="M7 13 L7 24 Q2 36 2 54 L2 94 Q2 100 15 100 Q28 100 28 94 L28 54 Q28 36 23 24 L23 13"/>
       <rect x="5" y="38" width="20" height="18" rx="2"/>
       <text class="lbl" x="15" y="76" fill="#66e5ff">SCOTCH</text>
     </g>
 
-    <g transform="translate(522,148) rotate(-9 14 46)" stroke="#ff6600" opacity="0.52">
+    <g transform="translate(548,150) rotate(-9 14 46)" stroke="#ff6600" opacity="0.52">
       <rect x="9" y="0" width="10" height="14" rx="2"/>
       <path d="M6 14 L6 24 Q1 38 1 56 L1 92 Q1 98 14 98 Q27 98 27 92 L27 56 Q27 38 22 24 L22 14"/>
       <text class="lbl" x="14" y="72" fill="#ffaa44">BOURBON</text>
     </g>
 
-    <g transform="translate(595,165) rotate(18 14 44)" stroke="#00d4ff" opacity="0.5">
+    <g transform="translate(638,168) rotate(18 14 44)" stroke="#00d4ff" opacity="0.5">
       <rect x="9" y="0" width="10" height="12" rx="2"/>
       <path d="M6 12 L6 22 Q1 34 1 52 L1 88 Q1 94 14 94 Q27 94 27 88 L27 52 Q27 34 22 22 L22 12"/>
       <text class="lbl" x="14" y="64" fill="#88ffff">VODKA</text>
     </g>
 
-    <g transform="translate(12,268) rotate(-6 15 48)" stroke="#bf40ff" opacity="0.52">
+    <g transform="translate(62,272) rotate(-6 15 48)" stroke="#bf40ff" opacity="0.52">
       <rect x="10" y="0" width="10" height="15" rx="2"/>
       <path d="M7 15 L7 26 Q2 40 2 58 L2 94 Q2 100 15 100 Q28 100 28 94 L28 58 Q28 40 23 26 L23 15"/>
       <text class="lbl" x="15" y="72" fill="#dd88ff">VERMOUTH</text>
     </g>
 
-    <g transform="translate(108,258) rotate(20 16 50)" stroke="#ffaa00" opacity="0.52">
+    <g transform="translate(152,262) rotate(20 16 50)" stroke="#ffaa00" opacity="0.52">
       <rect x="11" y="0" width="10" height="14" rx="2"/>
       <path d="M8 14 L8 24 Q3 38 3 56 L3 96 Q3 102 16 102 Q29 102 29 96 L29 56 Q29 38 24 24 L24 14"/>
       <ellipse cx="16" cy="50" rx="11" ry="17"/>
       <text class="lbl" x="16" y="78" fill="#ffee55">COGNAC</text>
     </g>
 
-    <g transform="translate(210,285) rotate(-12 15 46)" stroke="#ff00cc" opacity="0.5">
+    <g transform="translate(258,288) rotate(-12 15 46)" stroke="#ff00cc" opacity="0.5">
       <rect x="10" y="0" width="9" height="13" rx="2"/>
       <path d="M7 13 L7 22 L3 30 L3 92 Q3 98 14.5 98 Q26 98 26 92 L26 30 L22 22 L22 13"/>
       <text class="lbl" x="14.5" y="70" fill="#ff77dd">MARTINI</text>
     </g>
 
-    <g transform="translate(308,268) rotate(8 13 44)" stroke="#00ffee" opacity="0.5">
+    <g transform="translate(348,272) rotate(8 13 44)" stroke="#00ffee" opacity="0.5">
       <rect x="8" y="0" width="10" height="18" rx="2"/>
       <path d="M5 18 L5 28 Q0 40 0 56 L0 86 Q0 92 13 92 Q26 92 26 86 L26 56 Q26 40 21 28 L21 18"/>
       <text class="lbl" x="13" y="66" fill="#88ffff">GRAPPA</text>
     </g>
 
-    <g transform="translate(395,278) rotate(-15 13 42)" stroke="#ff0066" opacity="0.52">
+    <g transform="translate(438,282) rotate(-15 13 42)" stroke="#ff0066" opacity="0.52">
       <rect x="8" y="0" width="10" height="12" rx="2"/>
       <path d="M5 12 L5 22 Q0 34 0 50 L0 82 Q0 88 13 88 Q26 88 26 82 L26 50 Q26 34 21 22 L21 12"/>
       <text class="lbl" x="13" y="62" fill="#ff88aa">SAKÉ</text>
     </g>
 
-    <g transform="translate(478,262) rotate(11 14 46)" stroke="#cc00ff" opacity="0.52">
+    <g transform="translate(528,266) rotate(11 14 46)" stroke="#cc00ff" opacity="0.52">
       <rect x="9" y="0" width="10" height="14" rx="2"/>
       <path d="M6 14 L6 26 Q1 40 1 58 L1 92 Q1 98 14 98 Q27 98 27 92 L27 58 Q27 40 22 26 L22 14"/>
       <text class="lbl" x="14" y="72" fill="#ee99ff">PORT</text>
     </g>
 
-    <g transform="translate(556,275) rotate(-7 15 48)" stroke="#ffee00" opacity="0.52">
+    <g transform="translate(618,278) rotate(-7 15 48)" stroke="#ffee00" opacity="0.52">
       <rect x="10" y="0" width="10" height="13" rx="2"/>
       <path d="M7 13 L7 24 Q2 38 2 56 L2 96 Q2 102 15 102 Q28 102 28 96 L28 56 Q28 38 23 24 L23 13"/>
       <text class="lbl" x="15" y="76" fill="#ffff88">ARMAGNAC</text>
     </g>
 
-    <g transform="translate(75,365) rotate(15 13 40)" stroke="#88ff00" opacity="0.53">
+    <g transform="translate(115,368) rotate(15 13 40)" stroke="#88ff00" opacity="0.53">
       <rect x="8" y="0" width="10" height="12" rx="2"/>
       <path d="M5 12 L5 22 Q0 32 0 48 L0 78 Q0 84 13 84 Q26 84 26 78 L26 48 Q26 32 21 22 L21 12"/>
       <text class="lbl" x="13" y="58" fill="#ccff66">MEZCAL</text>
     </g>
 
-    <g transform="translate(175,355) rotate(-14 13 42)" stroke="#00e8ff" opacity="0.5">
+    <g transform="translate(208,358) rotate(-14 13 42)" stroke="#00e8ff" opacity="0.5">
       <rect x="8" y="0" width="10" height="14" rx="2"/>
       <path d="M5 14 L5 24 Q0 36 0 52 L0 84 Q0 90 13 90 Q26 90 26 84 L26 52 Q26 36 21 24 L21 14"/>
       <text class="lbl" x="13" y="64" fill="#99ffff">ARAK</text>
     </g>
 
-    <g transform="translate(275,348) rotate(6 15 44)" stroke="#ff5500" opacity="0.52">
+    <g transform="translate(298,352) rotate(6 15 44)" stroke="#ff5500" opacity="0.52">
       <rect x="10" y="0" width="10" height="13" rx="2"/>
       <path d="M7 13 L7 24 Q2 38 2 54 L2 88 Q2 94 15 94 Q28 94 28 88 L28 54 Q28 38 23 24 L23 13"/>
       <text class="lbl" x="15" y="68" fill="#ffaa77">CALVADOS</text>
     </g>
 
-    <g transform="translate(388,358) rotate(-10 14 44)" stroke="#ff0088" opacity="0.52">
+    <g transform="translate(398,362) rotate(-10 14 44)" stroke="#ff0088" opacity="0.52">
       <rect x="9" y="0" width="10" height="12" rx="2"/>
       <path d="M6 12 L6 22 Q1 34 1 50 L1 86 Q1 92 14 92 Q27 92 27 86 L27 50 Q27 34 22 22 L22 12"/>
       <text class="lbl" x="14" y="68" fill="#ff77aa">RUM</text>
     </g>
 
-    <g transform="translate(490,350) rotate(13 13 42)" stroke="#00ffc8" opacity="0.5">
+    <g transform="translate(498,354) rotate(13 13 42)" stroke="#00ffc8" opacity="0.5">
       <rect x="8" y="0" width="10" height="14" rx="2"/>
       <path d="M5 14 L5 24 Q0 36 0 52 L0 84 Q0 90 13 90 Q26 90 26 84 L26 52 Q26 36 21 24 L21 14"/>
       <text class="lbl" x="13" y="64" fill="#aaffee">GIN</text>
