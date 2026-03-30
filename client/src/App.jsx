@@ -18,6 +18,65 @@ const VIDEO_NOTE_MAX_MS = 60_000;
 const VIDEO_NOTE_MIN_MS = 450;
 const VIDEO_NOTE_MIN_BYTES = 1800;
 
+function pickRecorderMimeType() {
+  const candidates = [
+    "video/webm;codecs=vp8,opus",
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8",
+    "video/webm",
+    "video/mp4",
+  ];
+  for (const c of candidates) {
+    if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(c)) return c;
+  }
+  return "";
+}
+
+async function acquireVideoNoteStream() {
+  const strategies = [
+    () =>
+      navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 720, max: 1280 },
+          height: { ideal: 720, max: 1280 },
+          frameRate: { ideal: 24, max: 30 },
+        },
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      }),
+    () =>
+      navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: true,
+      }),
+    () =>
+      navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: true,
+      }),
+    () => navigator.mediaDevices.getUserMedia({ video: true, audio: true }),
+  ];
+  let lastErr;
+  for (const fn of strategies) {
+    try {
+      const stream = await fn();
+      await new Promise((r) => setTimeout(r, 200));
+      const vt = stream.getVideoTracks()[0];
+      if (!vt || vt.readyState !== "live") {
+        stream.getTracks().forEach((t) => t.stop());
+        lastErr = new Error("Нет видеодорожки");
+        continue;
+      }
+      return stream;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("Камера недоступна");
+}
+
 const PRODUCTION_API_ORIGIN = "https://tatarchat-server.onrender.com";
 
 function getApiBase() {
@@ -465,7 +524,10 @@ export default function App() {
 
   const uploadVideoNoteBlob = useCallback(
     async (blob) => {
-      const mime = blob.type || "video/webm";
+      let mime = blob.type || "";
+      if (!mime || mime === "audio/webm" || mime === "application/octet-stream") {
+        mime = pickRecorderMimeType() || "video/webm";
+      }
       const ext = mime.includes("mp4") ? "mp4" : "webm";
       const file = new File([blob], `videonote.${ext}`, { type: mime });
       setVideoNoteUploading(true);
@@ -475,13 +537,14 @@ export default function App() {
         const fd = new FormData();
         fd.append("room", activeRoomRef.current);
         fd.append("text", "");
-        fd.append("file", file);
         fd.append("videoNote", "1");
+        fd.append("video_note", "1");
         const rt = replyToRef.current;
         if (rt?.id != null) fd.append("replyToId", String(rt.id));
+        fd.append("file", file);
         const res = await fetch(`${base}/api/messages/send-with-file`, {
           method: "POST",
-          headers: getAuthHeaders(),
+          headers: { ...getAuthHeaders(), "X-Video-Note": "1" },
           body: fd,
         });
         const data = await res.json().catch(() => ({}));
@@ -524,14 +587,29 @@ export default function App() {
       return;
     }
 
+    if (rec.state === "recording") {
+      try {
+        rec.requestData();
+      } catch (_) {
+        /* ignore */
+      }
+      await new Promise((r) => setTimeout(r, 120));
+    }
     await new Promise((resolve) => {
       rec.addEventListener("stop", resolve, { once: true });
-      rec.stop();
+      try {
+        rec.stop();
+      } catch (_) {
+        resolve();
+      }
     });
 
     const chunks = videoNoteChunksRef.current;
     videoNoteChunksRef.current = [];
-    const blobType = rec.mimeType || "video/webm";
+    let blobType = rec.mimeType || "";
+    if (!blobType || blobType === "audio/webm") {
+      blobType = pickRecorderMimeType() || "video/webm";
+    }
     const blob = new Blob(chunks, { type: blobType });
     const elapsed = Date.now() - started;
     videoNoteStoppingRef.current = false;
@@ -556,16 +634,23 @@ export default function App() {
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 720 }, height: { ideal: 720 } },
-        audio: true,
-      });
+      const stream = await acquireVideoNoteStream();
       videoNoteStreamRef.current = stream;
       videoNoteChunksRef.current = [];
-      let mime = "video/webm;codecs=vp8,opus";
-      if (!MediaRecorder.isTypeSupported(mime)) mime = "video/webm";
-      if (!MediaRecorder.isTypeSupported(mime)) mime = "";
-      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      const mime = pickRecorderMimeType();
+      let rec;
+      try {
+        rec =
+          mime !== ""
+            ? new MediaRecorder(stream, {
+                mimeType: mime,
+                videoBitsPerSecond: 2_500_000,
+                audioBitsPerSecond: 128_000,
+              })
+            : new MediaRecorder(stream);
+      } catch {
+        rec = mime !== "" ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      }
       videoNoteRecorderRef.current = rec;
       rec.ondataavailable = (e) => {
         if (e.data?.size) videoNoteChunksRef.current.push(e.data);

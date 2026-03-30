@@ -108,6 +108,7 @@ app.use(
   cors({
     origin: corsOrigin,
     credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization", "X-Room-Password", "X-Video-Note"],
   })
 );
 app.use(express.json({ limit: "64kb" }));
@@ -158,6 +159,16 @@ function isVideoNoteFlag(body) {
   if (v == null || v === "") return false;
   const s = String(v).trim().toLowerCase();
   return s === "1" || s === "true" || s === "yes";
+}
+
+/** Тело multipart иногда без videoNote до конца парсинга — дублируем заголовком (доступен с первого байта запроса). */
+function isVideoNoteHeader(req) {
+  const h = req.headers["x-video-note"];
+  return h === "1" || String(h || "").trim().toLowerCase() === "true";
+}
+
+function isVideoNoteRequest(req) {
+  return isVideoNoteFlag(req.body) || isVideoNoteHeader(req);
 }
 
 function escapeLikePattern(s) {
@@ -401,9 +412,18 @@ const upload = multer({
     },
   }),
   limits: { fileSize: MAX_UPLOAD_BYTES },
-  fileFilter(_req, file, cb) {
-    if (ALLOWED_UPLOAD_MIMES.has(file.mimetype)) cb(null, true);
-    else cb(new Error("UNSUPPORTED_MIME"));
+  fileFilter(req, file, cb) {
+    const mime = file.mimetype || "";
+    if (ALLOWED_UPLOAD_MIMES.has(mime)) return cb(null, true);
+    const name = String(file.originalname || "").toLowerCase();
+    if (
+      isVideoNoteHeader(req) &&
+      /^videonote\.(webm|mp4)$/.test(name) &&
+      (mime === "application/octet-stream" || mime === "")
+    ) {
+      return cb(null, true);
+    }
+    cb(new Error("UNSUPPORTED_MIME"));
   },
 });
 
@@ -798,23 +818,34 @@ async function saveNewMessageWithOptionalFile({ room, userId, text, replyToId, m
   let attName = null;
   let attMime = null;
   let attSize = null;
+  let effectiveUploadMime = null;
   if (multerFile) {
-    if (!ALLOWED_UPLOAD_MIMES.has(multerFile.mimetype)) {
+    let fileMime = multerFile.mimetype || "";
+    const lowName = String(multerFile.originalname || "").toLowerCase();
+    if (
+      videoNote &&
+      /^videonote\.(webm|mp4)$/.test(lowName) &&
+      (fileMime === "application/octet-stream" || fileMime === "")
+    ) {
+      fileMime = lowName.endsWith(".mp4") ? "video/mp4" : "video/webm";
+    }
+    if (!ALLOWED_UPLOAD_MIMES.has(fileMime)) {
       await fsp.unlink(multerFile.path).catch(() => {});
       const e = new Error("Тип файла не разрешён");
       e.code = "BAD_MIME";
       throw e;
     }
-    if (IMAGE_MIMES.has(multerFile.mimetype)) {
+    if (IMAGE_MIMES.has(fileMime)) {
       attKind = "image";
-    } else if (videoNote && VIDEO_NOTE_MIMES.has(multerFile.mimetype)) {
+    } else if (videoNote && VIDEO_NOTE_MIMES.has(fileMime)) {
       attKind = "video_note";
     } else {
       attKind = "file";
     }
     attName = sanitizeOriginalName(multerFile.originalname);
-    attMime = multerFile.mimetype;
+    attMime = fileMime;
     attSize = multerFile.size;
+    effectiveUploadMime = fileMime;
   }
 
   const client = await pool.connect();
@@ -841,7 +872,7 @@ async function saveNewMessageWithOptionalFile({ room, userId, text, replyToId, m
     ]);
     const mid = rows[0].id;
     if (multerFile) {
-      const ext = pickSafeExt(multerFile);
+      const ext = pickSafeExt({ ...multerFile, mimetype: effectiveUploadMime || multerFile.mimetype });
       const storageKey = `rooms/${room}/${mid}${ext}`;
       const dest = path.join(UPLOAD_ROOT, storageKey);
       await fsp.mkdir(path.dirname(dest), { recursive: true });
@@ -1229,7 +1260,7 @@ app.post("/api/messages/send-with-file", requireAuth, handleUpload, async (req, 
       text: req.body?.text,
       replyToId,
       multerFile: req.file || null,
-      videoNote: isVideoNoteFlag(req.body),
+      videoNote: isVideoNoteRequest(req),
     });
     io.to(slug).emit("message", formatted);
     res.status(201).json({ ok: true, message: formatted });
