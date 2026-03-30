@@ -421,6 +421,23 @@ async function ensurePhase2Schema() {
   }
 }
 
+/** Лобби и групповые комнаты из GROUP_ROOMS — гарантируем строки в БД (в т.ч. после удаления). */
+async function ensureCorePublicChannelRows() {
+  for (const [slug, conf] of Object.entries(GROUP_ROOMS)) {
+    await pool.query(
+      `INSERT INTO channels (slug, title, kind)
+       SELECT $1, $2, 'public'
+       WHERE NOT EXISTS (SELECT 1 FROM channels WHERE slug = $1)`,
+      [slug, conf.title]
+    );
+  }
+  await pool.query(`
+    INSERT INTO channels (slug, title, kind)
+    SELECT 'lobby', 'Лобби', 'public'
+    WHERE NOT EXISTS (SELECT 1 FROM channels WHERE slug = 'lobby')
+  `);
+}
+
 async function ensurePhase3Schema() {
   try {
     await pool.query(`
@@ -441,22 +458,24 @@ async function ensurePhase3Schema() {
     await pool.query(
       `CREATE INDEX IF NOT EXISTS idx_channels_dm_users ON channels (user_low_id, user_high_id) WHERE kind = 'direct'`
     );
-    for (const [slug, conf] of Object.entries(GROUP_ROOMS)) {
-      await pool.query(
-        `INSERT INTO channels (slug, title, kind) VALUES ($1, $2, 'public')
-         ON CONFLICT (slug) DO NOTHING`,
-        [slug, conf.title]
-      );
-    }
-    await pool.query(`
-      INSERT INTO channels (slug, title, kind)
-      SELECT 'lobby', 'Лобби', 'public'
-      WHERE NOT EXISTS (SELECT 1 FROM channels WHERE slug = 'lobby')
-    `);
+    await ensureCorePublicChannelRows();
   } catch (err) {
     console.error("[schema] phase3:", err?.message || err);
     throw err;
   }
+}
+
+function mergeMissingCorePublicRows(rows) {
+  const bySlug = new Map(rows.map((r) => [r.slug, r]));
+  for (const [slug, conf] of Object.entries(GROUP_ROOMS)) {
+    if (!bySlug.has(slug)) {
+      bySlug.set(slug, { slug, title: conf.title, avatar_storage_key: null });
+    }
+  }
+  if (!bySlug.has("lobby")) {
+    bySlug.set("lobby", { slug: "lobby", title: "Лобби", avatar_storage_key: null });
+  }
+  return Array.from(bySlug.values()).sort((a, b) => String(a.slug).localeCompare(String(b.slug)));
 }
 
 async function ensureAvatarSchema() {
@@ -1099,10 +1118,14 @@ app.get("/api/health", (_req, res) => {
 
 app.get("/api/rooms", async (_req, res) => {
   try {
+    await ensureCorePublicChannelRows();
     const { rows } = await pool.query(
       `SELECT slug, title FROM channels WHERE kind = 'public' ORDER BY slug`
     );
-    const rooms = rows.map((r) => ({
+    const merged = mergeMissingCorePublicRows(
+      rows.map((r) => ({ slug: r.slug, title: r.title, avatar_storage_key: null }))
+    );
+    const rooms = merged.map((r) => ({
       slug: r.slug,
       title: r.title || GROUP_ROOMS[r.slug]?.title || r.slug,
       requiresPassword: !!(GROUP_ROOMS[r.slug]?.roomPassword != null),
@@ -1167,10 +1190,11 @@ app.get("/api/channels", requireAuth, async (req, res) => {
   try {
     const me = req.user.userId;
     await ensureSavedChannelRow(me);
+    await ensureCorePublicChannelRows();
     const { rows: pubRows } = await pool.query(
       `SELECT slug, title, avatar_storage_key FROM channels WHERE kind = 'public' ORDER BY slug`
     );
-    const filtered = pubRows.filter((r) => {
+    const filtered = mergeMissingCorePublicRows(pubRows).filter((r) => {
       const m = /^saved-(\d+)$/i.exec(r.slug);
       if (!m) return true;
       return parseInt(m[1], 10) === me;
@@ -1383,6 +1407,9 @@ app.post("/api/channels/open-dm", requireAuth, async (req, res) => {
 
 app.post("/api/auth/register", async (req, res) => {
   try {
+    if (process.env.ALLOW_REGISTRATION !== "true") {
+      return res.status(403).json({ error: "Регистрация закрыта" });
+    }
     const ip = req.ip || "unknown";
     if (!checkRegRateLimit(ip)) {
       return res.status(429).json({ error: "Слишком много попыток регистрации" });

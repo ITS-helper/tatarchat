@@ -374,7 +374,6 @@ function ChannelIconThumb({ slug, enabled, getAuthHeaders, className }) {
 export default function App() {
   const [token, setToken] = useState(() => getStoredToken());
   const [nickname, setNickname] = useState(() => localStorage.getItem(LS_NICKNAME) || "");
-  const [authMode, setAuthMode] = useState("login");
   const [nameInput, setNameInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
   const [dtdChannelUnlocked, setDtdChannelUnlocked] = useState(() => hasStoredDtdChannelPw());
@@ -1282,7 +1281,7 @@ export default function App() {
     }
 
     const base = getApiBase();
-    const path = authMode === "register" ? "/api/auth/register" : "/api/auth/login";
+    const path = "/api/auth/login";
     try {
       const res = await fetch(`${base}${path}`, {
         method: "POST",
@@ -1604,33 +1603,8 @@ export default function App() {
           </div>
           <h1 className="mb-1 text-center text-2xl font-bold text-tc-text">TatarChat</h1>
           <p className="mb-6 text-center text-sm text-tc-text-sec">
-            Вход по имени и паролю. Новый пользователь — регистрация.
+            Вход по имени и паролю.
           </p>
-
-          <div className="mb-5 flex overflow-hidden rounded-lg bg-tc-bg">
-            <button
-              type="button"
-              onClick={() => { setAuthMode("login"); setBanner(null); }}
-              className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
-                authMode === "login"
-                  ? "bg-tc-accent text-white"
-                  : "text-tc-text-sec hover:text-tc-text"
-              }`}
-            >
-              Вход
-            </button>
-            <button
-              type="button"
-              onClick={() => { setAuthMode("register"); setBanner(null); }}
-              className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
-                authMode === "register"
-                  ? "bg-tc-accent text-white"
-                  : "text-tc-text-sec hover:text-tc-text"
-              }`}
-            >
-              Регистрация
-            </button>
-          </div>
 
           <form onSubmit={submitAuth} className="space-y-4">
             <div>
@@ -1651,9 +1625,9 @@ export default function App() {
                 className="w-full rounded-lg border border-tc-border bg-tc-input px-4 py-3 text-sm text-tc-text outline-none transition placeholder:text-tc-text-muted focus:border-tc-accent"
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
-                placeholder={authMode === "register" ? "Пароль (от 6 символов)" : "Пароль"}
+                placeholder="Пароль"
                 maxLength={128}
-                autoComplete={authMode === "register" ? "new-password" : "current-password"}
+                autoComplete="current-password"
               />
             </div>
             {banner && (
@@ -1665,7 +1639,7 @@ export default function App() {
               type="submit"
               className="w-full rounded-lg bg-tc-accent py-3 text-sm font-semibold text-white transition hover:bg-tc-accent/85 active:scale-[0.98]"
             >
-              {authMode === "register" ? "Зарегистрироваться" : "Войти"}
+              Войти
             </button>
           </form>
         </div>
