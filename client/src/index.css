@@ -21,9 +21,8 @@
 .chat-bg {
   background-color: #141c2e;
   background-image: url("/city-pattern.svg");
-  background-size: 800px 400px;
-  background-position: bottom;
-  background-repeat: repeat-x;
+  background-size: 600px 300px;
+  background-repeat: repeat;
 }
 
 /* Scrollbar */

@@ -1,111 +1,204 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="800" height="400" viewBox="0 0 800 400">
-  <defs>
-    <pattern id="windows" width="6" height="8" patternUnits="userSpaceOnUse">
-      <rect width="2" height="3" x="2" y="2" fill="#2a4a7a" opacity="0.5" rx="0.3"/>
-    </pattern>
-  </defs>
-  <rect width="800" height="400" fill="#141c2e"/>
-  <!-- Back row -->
-  <g fill="#1a2d4a" stroke="#1f3555" stroke-width="0.5">
-    <rect x="0" y="120" width="50" height="280" rx="1"/>
-    <rect x="55" y="80" width="35" height="320" rx="1"/>
-    <rect x="100" y="140" width="60" height="260" rx="2"/>
-    <rect x="170" y="60" width="28" height="340" rx="1"/>
-    <rect x="205" y="110" width="45" height="290" rx="1"/>
-    <rect x="260" y="90" width="55" height="310" rx="2"/>
-    <rect x="325" y="130" width="40" height="270" rx="1"/>
-    <rect x="375" y="50" width="30" height="350" rx="1"/>
-    <rect x="415" y="100" width="50" height="300" rx="2"/>
-    <rect x="475" y="70" width="35" height="330" rx="1"/>
-    <rect x="520" y="120" width="60" height="280" rx="2"/>
-    <rect x="590" y="85" width="40" height="315" rx="1"/>
-    <rect x="640" y="55" width="28" height="345" rx="1"/>
-    <rect x="675" y="110" width="50" height="290" rx="2"/>
-    <rect x="735" y="130" width="65" height="270" rx="1"/>
-  </g>
-  <!-- Mid row -->
-  <g fill="#1e3558" stroke="#24406a" stroke-width="0.5">
-    <rect x="10" y="180" width="70" height="220" rx="2"/>
-    <rect x="90" y="200" width="45" height="200" rx="1"/>
-    <rect x="145" y="160" width="55" height="240" rx="2"/>
-    <rect x="215" y="190" width="40" height="210" rx="1"/>
-    <rect x="268" y="170" width="65" height="230" rx="2"/>
-    <rect x="345" y="195" width="50" height="205" rx="1"/>
-    <rect x="408" y="175" width="55" height="225" rx="2"/>
-    <rect x="472" y="155" width="40" height="245" rx="1"/>
-    <rect x="525" y="185" width="60" height="215" rx="2"/>
-    <rect x="598" y="165" width="48" height="235" rx="1"/>
-    <rect x="660" y="180" width="55" height="220" rx="2"/>
-    <rect x="728" y="190" width="72" height="210" rx="1"/>
-  </g>
-  <!-- Front row -->
-  <g fill="#223d65" stroke="#2a4a7a" stroke-width="0.5">
-    <rect x="0" y="240" width="55" height="160" rx="2"/>
-    <rect x="65" y="260" width="40" height="140" rx="1"/>
-    <rect x="115" y="250" width="65" height="150" rx="2"/>
-    <rect x="195" y="270" width="50" height="130" rx="1"/>
-    <rect x="255" y="245" width="45" height="155" rx="2"/>
-    <rect x="310" y="265" width="60" height="135" rx="1"/>
-    <rect x="385" y="255" width="48" height="145" rx="2"/>
-    <rect x="445" y="275" width="55" height="125" rx="1"/>
-    <rect x="510" y="250" width="42" height="150" rx="2"/>
-    <rect x="565" y="260" width="60" height="140" rx="1"/>
-    <rect x="635" y="270" width="50" height="130" rx="2"/>
-    <rect x="698" y="255" width="45" height="145" rx="1"/>
-    <rect x="755" y="240" width="45" height="160" rx="2"/>
-  </g>
-  <!-- Windows glow -->
-  <g fill="#2a5590" opacity="0.6">
-    <!-- Back windows -->
-    <rect x="8" y="135" width="3" height="4" rx="0.5"/><rect x="16" y="145" width="3" height="4" rx="0.5"/>
-    <rect x="25" y="138" width="3" height="4" rx="0.5"/><rect x="35" y="155" width="3" height="4" rx="0.5"/>
-    <rect x="63" y="95" width="3" height="4" rx="0.5"/><rect x="72" y="105" width="3" height="4" rx="0.5"/>
-    <rect x="110" y="155" width="3" height="4" rx="0.5"/><rect x="125" y="160" width="3" height="4" rx="0.5"/>
-    <rect x="140" y="165" width="3" height="4" rx="0.5"/><rect x="175" y="75" width="3" height="4" rx="0.5"/>
-    <rect x="215" y="125" width="3" height="4" rx="0.5"/><rect x="230" y="130" width="3" height="4" rx="0.5"/>
-    <rect x="270" y="105" width="3" height="4" rx="0.5"/><rect x="285" y="110" width="3" height="4" rx="0.5"/>
-    <rect x="300" y="115" width="3" height="4" rx="0.5"/><rect x="335" y="145" width="3" height="4" rx="0.5"/>
-    <rect x="382" y="65" width="3" height="4" rx="0.5"/><rect x="392" y="75" width="3" height="4" rx="0.5"/>
-    <rect x="425" y="115" width="3" height="4" rx="0.5"/><rect x="440" y="120" width="3" height="4" rx="0.5"/>
-    <rect x="485" y="85" width="3" height="4" rx="0.5"/><rect x="495" y="95" width="3" height="4" rx="0.5"/>
-    <rect x="535" y="135" width="3" height="4" rx="0.5"/><rect x="555" y="140" width="3" height="4" rx="0.5"/>
-    <rect x="600" y="100" width="3" height="4" rx="0.5"/><rect x="615" y="105" width="3" height="4" rx="0.5"/>
-    <rect x="648" y="70" width="3" height="4" rx="0.5"/><rect x="658" y="80" width="3" height="4" rx="0.5"/>
-    <rect x="685" y="125" width="3" height="4" rx="0.5"/><rect x="700" y="130" width="3" height="4" rx="0.5"/>
-    <rect x="745" y="145" width="3" height="4" rx="0.5"/><rect x="770" y="150" width="3" height="4" rx="0.5"/>
-  </g>
-  <!-- Lit windows (gold) -->
-  <g fill="#c9a84c" opacity="0.35">
-    <rect x="12" y="175" width="3" height="4" rx="0.5"/><rect x="30" y="165" width="3" height="4" rx="0.5"/>
-    <rect x="68" y="120" width="3" height="4" rx="0.5"/><rect x="120" y="180" width="3" height="4" rx="0.5"/>
-    <rect x="180" y="90" width="3" height="4" rx="0.5"/><rect x="222" y="145" width="3" height="4" rx="0.5"/>
-    <rect x="278" y="125" width="3" height="4" rx="0.5"/><rect x="340" y="160" width="3" height="4" rx="0.5"/>
-    <rect x="388" y="85" width="3" height="4" rx="0.5"/><rect x="430" y="135" width="3" height="4" rx="0.5"/>
-    <rect x="490" y="110" width="3" height="4" rx="0.5"/><rect x="545" y="155" width="3" height="4" rx="0.5"/>
-    <rect x="608" y="120" width="3" height="4" rx="0.5"/><rect x="652" y="90" width="3" height="4" rx="0.5"/>
-    <rect x="695" y="145" width="3" height="4" rx="0.5"/><rect x="760" y="160" width="3" height="4" rx="0.5"/>
-  </g>
-  <!-- Decorative elements (domes, towers) -->
-  <g fill="#1e3558" stroke="#24406a" stroke-width="0.5">
-    <!-- Tower spires -->
-    <polygon points="184,60 182,40 186,40"/>
-    <polygon points="389,50 386,25 392,25"/>
-    <polygon points="654,55 651,30 657,30"/>
-    <!-- Dome shapes -->
-    <ellipse cx="130" cy="140" rx="20" ry="12"/>
-    <ellipse cx="290" cy="90" rx="18" ry="10"/>
-    <ellipse cx="445" cy="100" rx="22" ry="13"/>
-    <ellipse cx="610" cy="85" rx="16" ry="9"/>
-    <ellipse cx="755" cy="130" rx="25" ry="14"/>
-  </g>
-  <!-- Arches on front buildings -->
-  <g fill="none" stroke="#2a5590" stroke-width="0.8" opacity="0.4">
-    <path d="M22,395 Q30,380 38,395"/>
-    <path d="M135,395 Q148,378 161,395"/>
-    <path d="M275,395 Q285,380 295,395"/>
-    <path d="M405,395 Q418,378 431,395"/>
-    <path d="M530,395 Q540,380 550,395"/>
-    <path d="M655,395 Q668,378 681,395"/>
-    <path d="M775,395 Q785,380 795,395"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="300" viewBox="0 0 600 300">
+  <rect width="600" height="300" fill="#141c2e"/>
+
+  <g opacity="0.12" fill="none" stroke="#3a6aa0" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Bottle 1 (wine) -->
+    <g transform="translate(30,20)">
+      <rect x="8" y="0" width="6" height="8" rx="2"/>
+      <path d="M6 8 L6 18 Q0 28 0 40 L0 70 Q0 75 5 75 L17 75 Q22 75 22 70 L22 40 Q22 28 16 18 L16 8"/>
+    </g>
+
+    <!-- Shaker -->
+    <g transform="translate(100,30)">
+      <path d="M5 0 L15 0 L15 8 L18 8 L18 15 L2 15 L2 8 L5 8Z"/>
+      <rect x="2" y="15" width="16" height="45" rx="2"/>
+      <line x1="2" y1="25" x2="18" y2="25"/>
+    </g>
+
+    <!-- Lemon slice -->
+    <g transform="translate(170,50)">
+      <circle cx="15" cy="15" r="14"/>
+      <circle cx="15" cy="15" r="10"/>
+      <line x1="15" y1="5" x2="15" y2="25"/>
+      <line x1="5" y1="15" x2="25" y2="15"/>
+      <line x1="8" y1="8" x2="22" y2="22"/>
+      <line x1="22" y1="8" x2="8" y2="22"/>
+    </g>
+
+    <!-- Cocktail glass (martini) -->
+    <g transform="translate(240,25)">
+      <path d="M0 0 L24 0 L12 25 L12 45"/>
+      <line x1="4" y1="45" x2="20" y2="45"/>
+      <circle cx="20" cy="3" r="4"/>
+    </g>
+
+    <!-- Bottle 2 (tall) -->
+    <g transform="translate(310,10)">
+      <rect x="7" y="0" width="6" height="10" rx="1"/>
+      <path d="M5 10 L5 15 Q2 20 2 30 L2 75 Q2 80 6 80 L14 80 Q18 80 18 75 L18 30 Q18 20 15 15 L15 10"/>
+      <rect x="3" y="28" width="14" height="20" rx="1"/>
+    </g>
+
+    <!-- Wine glass -->
+    <g transform="translate(380,35)">
+      <ellipse cx="12" cy="5" rx="12" ry="5"/>
+      <path d="M0 5 Q0 25 12 30 Q24 25 24 5"/>
+      <line x1="12" y1="30" x2="12" y2="48"/>
+      <line x1="4" y1="48" x2="20" y2="48"/>
+    </g>
+
+    <!-- Ice cubes -->
+    <g transform="translate(440,55)">
+      <rect x="0" y="0" width="12" height="12" rx="2" transform="rotate(10 6 6)"/>
+      <rect x="10" y="5" width="12" height="12" rx="2" transform="rotate(-5 16 11)"/>
+    </g>
+
+    <!-- Shot glass -->
+    <g transform="translate(500,45)">
+      <path d="M0 0 L20 0 L17 30 Q17 35 10 35 Q3 35 3 30Z"/>
+      <line x1="2" y1="10" x2="18" y2="10"/>
+    </g>
+
+    <!-- Lemon wedge -->
+    <g transform="translate(555,30)">
+      <path d="M0 20 Q15 -5 30 20Z"/>
+      <path d="M5 18 Q15 5 25 18"/>
+      <line x1="15" y1="5" x2="15" y2="18"/>
+      <line x1="10" y1="8" x2="12" y2="18"/>
+      <line x1="20" y1="8" x2="18" y2="18"/>
+    </g>
+
+    <!-- Row 2 — offset -->
+
+    <!-- Highball glass -->
+    <g transform="translate(55,130)">
+      <path d="M0 0 L22 0 L20 55 Q20 60 11 60 Q2 60 2 55Z"/>
+      <line x1="1" y1="20" x2="21" y2="20"/>
+      <circle cx="8" cy="35" r="3"/>
+      <circle cx="15" cy="30" r="3"/>
+    </g>
+
+    <!-- Bottle 3 (short/flask) -->
+    <g transform="translate(140,120)">
+      <rect x="8" y="0" width="8" height="7" rx="2"/>
+      <path d="M4 7 Q0 12 0 20 L0 55 Q0 60 5 60 L19 60 Q24 60 24 55 L24 20 Q24 12 20 7Z"/>
+      <ellipse cx="12" cy="35" rx="7" ry="10"/>
+    </g>
+
+    <!-- Cherry -->
+    <g transform="translate(215,145)">
+      <circle cx="8" cy="12" r="7"/>
+      <path d="M8 5 Q10 -5 18 -2"/>
+      <circle cx="18" cy="12" r="7"/>
+      <path d="M18 5 Q16 -5 8 -2"/>
+    </g>
+
+    <!-- Shaker 2 -->
+    <g transform="translate(280,115)">
+      <ellipse cx="10" cy="5" rx="10" ry="5"/>
+      <path d="M0 5 L0 10 Q0 15 3 15 L17 15 Q20 15 20 10 L20 5"/>
+      <rect x="2" y="15" width="16" height="50" rx="3"/>
+    </g>
+
+    <!-- Lemon slice 2 -->
+    <g transform="translate(350,155)">
+      <circle cx="12" cy="12" r="11"/>
+      <circle cx="12" cy="12" r="7"/>
+      <line x1="12" y1="1" x2="12" y2="23"/>
+      <line x1="1" y1="12" x2="23" y2="12"/>
+      <line x1="4" y1="4" x2="20" y2="20"/>
+      <line x1="20" y1="4" x2="4" y2="20"/>
+    </g>
+
+    <!-- Beer mug -->
+    <g transform="translate(410,120)">
+      <rect x="0" y="0" width="22" height="50" rx="3"/>
+      <path d="M22 10 Q32 10 32 20 L32 30 Q32 40 22 40"/>
+      <line x1="3" y1="15" x2="19" y2="15"/>
+      <path d="M5 5 Q8 -2 11 5 Q14 -2 17 5" fill="none"/>
+    </g>
+
+    <!-- Corkscrew -->
+    <g transform="translate(490,130)">
+      <line x1="10" y1="0" x2="10" y2="15"/>
+      <line x1="3" y1="0" x2="17" y2="0"/>
+      <path d="M10 15 Q5 22 10 28 Q15 34 10 40 Q5 46 10 52"/>
+    </g>
+
+    <!-- Cocktail umbrella -->
+    <g transform="translate(545,125)">
+      <path d="M0 20 Q15 -5 30 20"/>
+      <line x1="15" y1="-2" x2="15" y2="50"/>
+      <line x1="5" y1="15" x2="10" y2="20"/>
+      <line x1="15" y1="5" x2="15" y2="20"/>
+      <line x1="25" y1="15" x2="20" y2="20"/>
+    </g>
+
+    <!-- Row 3 -->
+
+    <!-- Martini glass 2 -->
+    <g transform="translate(20,230)">
+      <path d="M0 0 L26 0 L13 22 L13 42"/>
+      <line x1="5" y1="42" x2="21" y2="42"/>
+      <line x1="4" y1="8" x2="22" y2="8"/>
+    </g>
+
+    <!-- Bottle 4 -->
+    <g transform="translate(95,215)">
+      <rect x="6" y="0" width="5" height="6" rx="1"/>
+      <path d="M4 6 L4 12 L0 18 L0 65 Q0 70 4 70 L13 70 Q17 70 17 65 L17 18 L13 12 L13 6"/>
+    </g>
+
+    <!-- Lime/lemon half -->
+    <g transform="translate(160,240)">
+      <path d="M0 15 A15 15 0 0 1 30 15Z"/>
+      <line x1="15" y1="0" x2="15" y2="15"/>
+      <line x1="7" y1="2" x2="10" y2="13"/>
+      <line x1="23" y1="2" x2="20" y2="13"/>
+    </g>
+
+    <!-- Rocks glass -->
+    <g transform="translate(230,235)">
+      <path d="M2 0 L22 0 L20 35 Q20 40 12 40 Q4 40 4 35Z"/>
+      <rect x="5" y="8" width="8" height="8" rx="1" transform="rotate(8 9 12)"/>
+      <rect x="11" y="12" width="8" height="8" rx="1" transform="rotate(-5 15 16)"/>
+    </g>
+
+    <!-- Straw + cherry -->
+    <g transform="translate(300,220)">
+      <line x1="5" y1="0" x2="12" y2="55"/>
+      <line x1="5" y1="0" x2="0" y2="5"/>
+      <circle cx="16" cy="50" r="5"/>
+      <path d="M16 45 Q18 38 22 40"/>
+    </g>
+
+    <!-- Jigger -->
+    <g transform="translate(360,230)">
+      <path d="M4 0 L16 0 L14 20 L6 20Z"/>
+      <path d="M6 20 L16 20 L18 40 L2 40Z"/>
+    </g>
+
+    <!-- Bottle 5 (round) -->
+    <g transform="translate(420,210)">
+      <rect x="7" y="0" width="6" height="8" rx="2"/>
+      <path d="M5 8 Q0 16 0 28 L0 55 Q0 65 10 65 Q20 65 20 55 L20 28 Q20 16 15 8Z"/>
+      <ellipse cx="10" cy="38" rx="6" ry="8"/>
+    </g>
+
+    <!-- Pineapple slice -->
+    <g transform="translate(485,235)">
+      <ellipse cx="12" cy="12" rx="12" ry="10"/>
+      <path d="M6 0 L8 -8 M12 0 L12 -10 M18 0 L16 -8"/>
+      <line x1="4" y1="8" x2="20" y2="8"/>
+      <line x1="3" y1="14" x2="21" y2="14"/>
+    </g>
+
+    <!-- Wine glass 2 -->
+    <g transform="translate(545,220)">
+      <ellipse cx="14" cy="6" rx="14" ry="6"/>
+      <path d="M0 6 Q0 28 14 33 Q28 28 28 6"/>
+      <line x1="14" y1="33" x2="14" y2="52"/>
+      <line x1="5" y1="52" x2="23" y2="52"/>
+    </g>
   </g>
 </svg>

@@ -1525,7 +1525,7 @@ export default function App() {
               <p className="text-sm text-tc-text-muted">Нет сообщений</p>
             </div>
           ) : (
-            <div className="mx-auto max-w-2xl space-y-1">
+            <div className="space-y-1">
               {messages.map((m, i) => {
                 const key = m.id != null ? m.id : `leg-${i}-${m.time}-${m.user_nick}`;
                 const mine = myUserId != null && m.user_id === myUserId;
