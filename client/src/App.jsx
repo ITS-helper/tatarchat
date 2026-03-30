@@ -565,11 +565,41 @@ export default function App() {
         setPublicChannels(data.publicChannels || []);
         setDirectChannels(data.directChannels || []);
       }
-      if (meRes.ok) setCanUseGallery(!!me.canUseGallery);
+      if (meRes.ok) {
+        setCanUseGallery(!!me.canUseGallery);
+      }
     } catch (e) {
       console.error(e);
     }
   }, [token]);
+
+  /** Текущая комната недоступна этому пользователю — уводим на первую из списка */
+  useEffect(() => {
+    if (!token.trim()) return;
+    if (publicChannels.length === 0 && directChannels.length === 0) return;
+
+    const inPub = publicChannels.some((c) => c.slug === activeRoom);
+    const inDm = directChannels.some((c) => c.slug === activeRoom);
+    const okGallery = activeRoom === GALLERY_ROOM && canUseGallery;
+
+    if (inPub || inDm || okGallery) return;
+
+    const next =
+      publicChannels.find((c) => !c.isSaved)?.slug ||
+      publicChannels.find((c) => c.isSaved)?.slug ||
+      directChannels[0]?.slug ||
+      (canUseGallery ? GALLERY_ROOM : null);
+    if (next) {
+      setActiveRoom(next);
+      if (next === GALLERY_ROOM) setRoomTitle("Галерея");
+      else {
+        const row =
+          publicChannels.find((x) => x.slug === next) || directChannels.find((x) => x.slug === next);
+        setRoomTitle(next.startsWith("dm-") ? "ЛС" : row?.title || next);
+      }
+      setBanner(null);
+    }
+  }, [token, activeRoom, publicChannels, directChannels, canUseGallery]);
 
   useEffect(() => {
     if (token.trim()) refreshChannels();

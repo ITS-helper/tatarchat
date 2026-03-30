@@ -81,6 +81,26 @@ function isGalleryMember(nickname) {
   return GALLERY_MEMBER_NICKNAMES.includes(String(nickname || "").trim().toLowerCase());
 }
 
+/** Канал lobby («Семья») в списке и доступ — только эти ники */
+const LOBBY_VISIBLE_NICKNAMES = (process.env.LOBBY_VISIBLE_NICKNAMES || "макс,рена")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+
+/** DTD в списке и вход для всех, кроме перечисленных ников */
+const DTD_HIDDEN_NICKNAMES = (process.env.DTD_HIDDEN_NICKNAMES || "рена")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+
+function canUserSeeLobby(nickname) {
+  return LOBBY_VISIBLE_NICKNAMES.includes(String(nickname || "").trim().toLowerCase());
+}
+
+function canUserSeeDtd(nickname) {
+  return !DTD_HIDDEN_NICKNAMES.includes(String(nickname || "").trim().toLowerCase());
+}
+
 const MAX_GALLERY_BYTES = Number(process.env.MAX_GALLERY_FILE_MB || 32) * 1024 * 1024;
 
 const JWT_SECRET =
@@ -312,8 +332,16 @@ async function userCanAccessChannel(slug, userId, roomPassword) {
     await ensureDmChannelRow(slug, a, b);
     return true;
   }
+  if (slug === "lobby") {
+    const { rows } = await pool.query(`SELECT nickname FROM users WHERE id = $1`, [userId]);
+    return rows[0] ? canUserSeeLobby(rows[0].nickname) : false;
+  }
   const conf = GROUP_ROOMS[slug];
   if (conf) {
+    const { rows } = await pool.query(`SELECT nickname FROM users WHERE id = $1`, [userId]);
+    const nick = rows[0]?.nickname;
+    if (!nick) return false;
+    if (slug === "dreamteamdauns" && !canUserSeeDtd(nick)) return false;
     if (conf.roomPassword == null) return true;
     return conf.roomPassword === String(roomPassword ?? "");
   }
@@ -1224,15 +1252,20 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/rooms", async (_req, res) => {
+app.get("/api/rooms", requireAuth, async (req, res) => {
   try {
     await ensureCorePublicChannelRows();
+    const nick = req.user.nickname;
     const { rows } = await pool.query(
       `SELECT slug, title FROM channels WHERE kind = 'public' ORDER BY slug`
     );
     const merged = mergeMissingCorePublicRows(
       rows.map((r) => ({ slug: r.slug, title: r.title, avatar_storage_key: null }))
-    );
+    ).filter((r) => {
+      if (r.slug === "lobby") return canUserSeeLobby(nick);
+      if (r.slug === "dreamteamdauns") return canUserSeeDtd(nick);
+      return true;
+    });
     const rooms = merged.map((r) => ({
       slug: r.slug,
       title: r.title || GROUP_ROOMS[r.slug]?.title || r.slug,
@@ -1305,11 +1338,18 @@ app.get("/api/channels", requireAuth, async (req, res) => {
     const { rows: pubRows } = await pool.query(
       `SELECT slug, title, avatar_storage_key FROM channels WHERE kind = 'public' ORDER BY slug`
     );
-    const filtered = mergeMissingCorePublicRows(pubRows).filter((r) => {
-      const m = /^saved-(\d+)$/i.exec(r.slug);
-      if (!m) return true;
-      return parseInt(m[1], 10) === me;
-    });
+    const nick = req.user.nickname;
+    const filtered = mergeMissingCorePublicRows(pubRows)
+      .filter((r) => {
+        const m = /^saved-(\d+)$/i.exec(r.slug);
+        if (!m) return true;
+        return parseInt(m[1], 10) === me;
+      })
+      .filter((r) => {
+        if (r.slug === "lobby") return canUserSeeLobby(nick);
+        if (r.slug === "dreamteamdauns") return canUserSeeDtd(nick);
+        return true;
+      });
     const mapChannel = (r) => ({
       slug: r.slug,
       title: r.title || GROUP_ROOMS[r.slug]?.title || r.slug,
@@ -1370,6 +1410,8 @@ app.get("/api/me", requireAuth, async (req, res) => {
       isAdmin: req.user.isAdmin,
       hasAvatar: !!u.has_avatar,
       canUseGallery: isGalleryMember(u.nickname),
+      canSeeLobby: canUserSeeLobby(u.nickname),
+      canSeeDtd: canUserSeeDtd(u.nickname),
     });
   } catch (err) {
     console.error("GET /api/me", err);
@@ -1848,6 +1890,8 @@ app.post("/api/auth/register", async (req, res) => {
         isAdmin: isAdmin(user.nickname),
         hasAvatar: false,
         canUseGallery: isGalleryMember(user.nickname),
+        canSeeLobby: canUserSeeLobby(user.nickname),
+        canSeeDtd: canUserSeeDtd(user.nickname),
       },
     });
   } catch (err) {
@@ -1897,6 +1941,8 @@ app.post("/api/auth/login", async (req, res) => {
         isAdmin: isAdmin(user.nickname),
         hasAvatar: !!avRows[0]?.ha,
         canUseGallery: isGalleryMember(user.nickname),
+        canSeeLobby: canUserSeeLobby(user.nickname),
+        canSeeDtd: canUserSeeDtd(user.nickname),
       },
     });
   } catch (err) {
