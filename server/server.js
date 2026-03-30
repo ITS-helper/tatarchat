@@ -57,6 +57,12 @@ const GROUP_ROOMS = {
   },
 };
 
+const ADMIN_NICKNAMES = (process.env.ADMIN_NICKNAMES || "Макс").split(",").map((s) => s.trim().toLowerCase());
+
+function isAdmin(nickname) {
+  return ADMIN_NICKNAMES.includes(String(nickname || "").trim().toLowerCase());
+}
+
 const JWT_SECRET =
   process.env.JWT_SECRET ||
   (process.env.NODE_ENV === "production" ? null : "dev-tatarchat-jwt-secret-do-not-use-in-prod");
@@ -951,7 +957,7 @@ async function requireAuth(req, res, next) {
     if (!user?.password_hash) {
       return res.status(401).json({ error: "Требуется вход" });
     }
-    req.user = { userId: user.id, nickname: user.nickname };
+    req.user = { userId: user.id, nickname: user.nickname, isAdmin: isAdmin(user.nickname) };
     next();
   } catch {
     return res.status(401).json({ error: "Сессия устарела, войдите снова" });
@@ -987,6 +993,50 @@ app.get("/api/rooms", async (_req, res) => {
   } catch (err) {
     console.error("GET /api/rooms", err);
     res.status(500).json({ error: "Не удалось загрузить комнаты" });
+  }
+});
+
+app.post("/api/rooms", requireAuth, async (req, res) => {
+  try {
+    if (!req.user.isAdmin) return res.status(403).json({ error: "Только для админов" });
+    const slug = sanitizeNickname(req.body?.slug);
+    const title = String(req.body?.title || "").trim().slice(0, 64);
+    if (!slug || !title) return res.status(400).json({ error: "slug и title обязательны" });
+    await pool.query(
+      `INSERT INTO channels (slug, title, kind) VALUES ($1, $2, 'public') ON CONFLICT (slug) DO NOTHING`,
+      [slug.toLowerCase(), title]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("POST /api/rooms", err);
+    res.status(500).json({ error: "Не удалось создать комнату" });
+  }
+});
+
+app.put("/api/rooms/:slug", requireAuth, async (req, res) => {
+  try {
+    if (!req.user.isAdmin) return res.status(403).json({ error: "Только для админов" });
+    const slug = req.params.slug;
+    const title = String(req.body?.title || "").trim().slice(0, 64);
+    if (!title) return res.status(400).json({ error: "title обязателен" });
+    await pool.query(`UPDATE channels SET title = $1 WHERE slug = $2 AND kind = 'public'`, [title, slug]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("PUT /api/rooms/:slug", err);
+    res.status(500).json({ error: "Не удалось обновить комнату" });
+  }
+});
+
+app.delete("/api/rooms/:slug", requireAuth, async (req, res) => {
+  try {
+    if (!req.user.isAdmin) return res.status(403).json({ error: "Только для админов" });
+    const slug = req.params.slug;
+    if (slug === "lobby") return res.status(400).json({ error: "Нельзя удалить лобби" });
+    await pool.query(`DELETE FROM channels WHERE slug = $1 AND kind = 'public'`, [slug]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("DELETE /api/rooms/:slug", err);
+    res.status(500).json({ error: "Не удалось удалить комнату" });
   }
 });
 
@@ -1092,7 +1142,7 @@ app.post("/api/auth/register", async (req, res) => {
     );
     const user = rows[0];
     const token = signToken(user.id);
-    res.status(201).json({ token, user: { id: user.id, nickname: user.nickname } });
+    res.status(201).json({ token, user: { id: user.id, nickname: user.nickname, isAdmin: isAdmin(user.nickname) } });
   } catch (err) {
     if (err.code === "23505") {
       return res.status(409).json({ error: "Такое имя уже занято" });
@@ -1128,7 +1178,7 @@ app.post("/api/auth/login", async (req, res) => {
     }
 
     const token = signToken(user.id);
-    res.json({ token, user: { id: user.id, nickname: user.nickname } });
+    res.json({ token, user: { id: user.id, nickname: user.nickname, isAdmin: isAdmin(user.nickname) } });
   } catch (err) {
     console.error("POST /api/auth/login", err);
     res.status(500).json({ error: "Ошибка входа" });
@@ -1396,10 +1446,17 @@ app.delete("/api/messages/:id", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Некорректный id" });
     }
     const rp = getRoomPasswordFromRequest(req);
-    const { rows } = await pool.query(
-      `SELECT id, room FROM messages WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
-      [id, req.user.userId]
-    );
+    let rows;
+    if (req.user.isAdmin) {
+      ({ rows } = await pool.query(
+        `SELECT id, room FROM messages WHERE id = $1 AND deleted_at IS NULL`, [id]
+      ));
+    } else {
+      ({ rows } = await pool.query(
+        `SELECT id, room FROM messages WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
+        [id, req.user.userId]
+      ));
+    }
     if (!rows[0]) {
       return res.status(404).json({ error: "Сообщение не найдено" });
     }
@@ -1627,10 +1684,18 @@ io.on("connection", (socket) => {
         if (typeof ack === "function") ack(e);
         return;
       }
-      const { rows } = await pool.query(
-        `SELECT id, room FROM messages WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
-        [id, uid]
-      );
+      const userIsAdmin = isAdmin(socket.data.nickname);
+      let rows;
+      if (userIsAdmin) {
+        ({ rows } = await pool.query(
+          `SELECT id, room FROM messages WHERE id = $1 AND deleted_at IS NULL`, [id]
+        ));
+      } else {
+        ({ rows } = await pool.query(
+          `SELECT id, room FROM messages WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
+          [id, uid]
+        ));
+      }
       if (!rows[0] || rows[0].room !== slug) {
         const e = { ok: false, error: "Сообщение не найдено" };
         if (typeof ack === "function") ack(e);

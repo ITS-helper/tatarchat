@@ -272,6 +272,9 @@ export default function App() {
   const [directChannels, setDirectChannels] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dmModalOpen, setDmModalOpen] = useState(false);
+  const [roomModalOpen, setRoomModalOpen] = useState(false);
+  const [roomModalSlug, setRoomModalSlug] = useState("");
+  const [roomModalTitle, setRoomModalTitle] = useState("");
   const [dmUsers, setDmUsers] = useState([]);
   const [dmUsersLoading, setDmUsersLoading] = useState(false);
   const publicChannelsRef = useRef([]);
@@ -283,6 +286,7 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [myUserId, setMyUserId] = useState(() => readUserId());
+  const [imAdmin, setImAdmin] = useState(() => localStorage.getItem("tatarchat_admin") === "1");
   const [replyTo, setReplyTo] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [selectedMsgId, setSelectedMsgId] = useState(null);
@@ -424,6 +428,23 @@ export default function App() {
 
   useEffect(() => {
     if (token.trim()) refreshChannels();
+  }, [token, refreshChannels]);
+
+  const createRoom = useCallback(async (slug, title) => {
+    try {
+      const base = getApiBase();
+      const res = await fetch(`${base}/api/rooms`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ slug, title }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setBanner(data.error || "Ошибка"); return; }
+      refreshChannels();
+      setRoomModalOpen(false);
+      setRoomModalSlug("");
+      setRoomModalTitle("");
+    } catch { setBanner("Не удалось создать комнату"); }
   }, [token, refreshChannels]);
 
   const openDmModal = useCallback(async () => {
@@ -957,6 +978,9 @@ export default function App() {
         localStorage.setItem(LS_USER_ID, String(data.user.id));
         setMyUserId(data.user.id);
       }
+      const adm = !!data.user?.isAdmin;
+      localStorage.setItem("tatarchat_admin", adm ? "1" : "0");
+      setImAdmin(adm);
       setNickname(data.user?.nickname || name);
       setToken(data.token);
       setPasswordInput("");
@@ -985,6 +1009,8 @@ export default function App() {
     setPasswordInput("");
     setMessages([]);
     setMyUserId(null);
+    setImAdmin(false);
+    localStorage.removeItem("tatarchat_admin");
     setReplyTo(null);
     setEditingId(null);
     setTypingPeers([]);
@@ -1315,7 +1341,17 @@ export default function App() {
       >
         <div className="flex items-center justify-between px-4 py-3">
           <h2 className="text-base font-semibold text-tc-text">Чаты</h2>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            {imAdmin && (
+              <button
+                type="button"
+                onClick={() => setRoomModalOpen(true)}
+                className="rounded-full p-1.5 text-tc-text-sec transition hover:bg-tc-hover"
+                title="Создать комнату"
+              >
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => openDmModal()}
@@ -1383,11 +1419,6 @@ export default function App() {
                 activeRoom === r.slug ? "bg-tc-accent/20" : "hover:bg-tc-hover"
               }`}
             >
-              <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white ${
-                r.slug === "lobby" ? "bg-blue-600" : r.slug === "dreamteamdauns" ? "bg-purple-600" : "bg-teal-600"
-              }`}>
-                {r.title?.[0]?.toUpperCase() || "#"}
-              </div>
               <div className="min-w-0 flex-1 text-left">
                 <div className="flex items-center justify-between">
                   <span className={`truncate text-sm font-medium ${activeRoom === r.slug ? "text-tc-accent" : "text-tc-text"}`}>
@@ -1415,9 +1446,6 @@ export default function App() {
                 activeRoom === r.slug ? "bg-tc-accent/20" : "hover:bg-tc-hover"
               }`}
             >
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-orange-600 text-sm font-semibold text-white">
-                {r.peer?.nickname?.[0]?.toUpperCase() || "?"}
-              </div>
               <div className="min-w-0 flex-1 text-left">
                 <span className={`block truncate text-sm font-medium ${activeRoom === r.slug ? "text-tc-accent" : "text-tc-text"}`}>
                   {r.peer?.nickname || r.title}
@@ -1643,30 +1671,30 @@ export default function App() {
                             </button>
                           )}
                           {mine && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditingId(m.id);
-                                  setInput(m.text || "");
-                                  setReplyTo(null);
-                                  setPendingFile(null);
-                                  if (fileInputRef.current) fileInputRef.current.value = "";
-                                  setSelectedMsgId(null);
-                                }}
-                                className="rounded-full px-2 py-1 text-xs text-tc-text-sec transition hover:bg-white/10 hover:text-tc-accent"
-                              >
-                                Изменить
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); deleteMessage(m.id); setSelectedMsgId(null); }}
-                                className="rounded-full px-2 py-1 text-xs text-tc-danger transition hover:bg-tc-danger/10"
-                              >
-                                Удалить
-                              </button>
-                            </>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingId(m.id);
+                                setInput(m.text || "");
+                                setReplyTo(null);
+                                setPendingFile(null);
+                                if (fileInputRef.current) fileInputRef.current.value = "";
+                                setSelectedMsgId(null);
+                              }}
+                              className="rounded-full px-2 py-1 text-xs text-tc-text-sec transition hover:bg-white/10 hover:text-tc-accent"
+                            >
+                              Изменить
+                            </button>
+                          )}
+                          {(mine || imAdmin) && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); deleteMessage(m.id); setSelectedMsgId(null); }}
+                              className="rounded-full px-2 py-1 text-xs text-tc-danger transition hover:bg-tc-danger/10"
+                            >
+                              Удалить
+                            </button>
                           )}
                         </div>
                       )}
@@ -1832,15 +1860,52 @@ export default function App() {
                       className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-tc-hover"
                       onClick={() => startDmWithPeer(u.id)}
                     >
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-orange-600 text-sm font-semibold text-white">
-                        {u.nickname?.[0]?.toUpperCase() || "?"}
-                      </div>
                       <span className="truncate text-sm text-tc-text">{u.nickname}</span>
                     </button>
                   </li>
                 ))}
               </ul>
             )}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Room create modal (admin) */}
+      {roomModalOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => { if (e.target === e.currentTarget) setRoomModalOpen(false); }}
+        >
+          <div className="w-full max-w-sm rounded-xl bg-tc-panel p-5 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-base font-semibold text-tc-text">Новая комната</h3>
+              <button type="button" className="rounded-full p-1 text-tc-text-muted transition hover:bg-tc-hover hover:text-tc-text" onClick={() => setRoomModalOpen(false)}>✕</button>
+            </div>
+            <form onSubmit={(e) => { e.preventDefault(); createRoom(roomModalSlug, roomModalTitle); }} className="space-y-3">
+              <input
+                type="text"
+                placeholder="slug (eng, без пробелов)"
+                value={roomModalSlug}
+                onChange={(e) => setRoomModalSlug(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""))}
+                className="w-full rounded-lg bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted focus:ring-1 focus:ring-tc-accent"
+              />
+              <input
+                type="text"
+                placeholder="Название"
+                value={roomModalTitle}
+                onChange={(e) => setRoomModalTitle(e.target.value)}
+                className="w-full rounded-lg bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted focus:ring-1 focus:ring-tc-accent"
+              />
+              <button
+                type="submit"
+                disabled={!roomModalSlug.trim() || !roomModalTitle.trim()}
+                className="w-full rounded-lg bg-tc-accent py-2 text-sm font-medium text-white transition hover:bg-tc-accent-hover disabled:opacity-40"
+              >
+                Создать
+              </button>
+            </form>
           </div>
         </div>
       ) : null}
