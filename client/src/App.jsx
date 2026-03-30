@@ -13,6 +13,11 @@ const SS_DTD_ROOM_PW = "tatarchat_room_pw_dreamteamdauns";
 
 const GATE_PASSWORD_DTD = "1488";
 
+/** Видеосообщения: удерживать кнопку записи, как в Telegram (превью — квадрат) */
+const VIDEO_NOTE_MAX_MS = 60_000;
+const VIDEO_NOTE_MIN_MS = 450;
+const VIDEO_NOTE_MIN_BYTES = 1800;
+
 const PRODUCTION_API_ORIGIN = "https://tatarchat-server.onrender.com";
 
 function getApiBase() {
@@ -120,6 +125,7 @@ function messagePreviewForReply(m) {
   if (!m || m.deleted) return "";
   const t = (m.text || "").trim();
   if (t) return t.slice(0, 120);
+  if (m.attachment?.kind === "video_note") return "Видеосообщение";
   if (m.attachment?.name) return `📎 ${m.attachment.name}`;
   return "📎 файл";
 }
@@ -151,6 +157,25 @@ function MessageAttachment({ messageId, attachment, getAuthHeaders }) {
   }, [messageId, attachment, getAuthHeaders]);
 
   if (!attachment) return null;
+  if (attachment.kind === "video_note" && url) {
+    return (
+      <div className="mt-2 w-52 max-w-[min(100%,13rem)]">
+        <div className="aspect-square overflow-hidden rounded-lg border-2 border-neon-cyan/40 bg-black shadow-[inset_0_0_20px_rgba(0,229,255,0.08)]">
+          <video
+            src={url}
+            className="h-full w-full object-cover"
+            controls
+            playsInline
+            preload="metadata"
+            aria-label={attachment.name || "Видеосообщение"}
+          />
+        </div>
+      </div>
+    );
+  }
+  if (attachment.kind === "video_note" && !url) {
+    return <p className="mt-2 font-mono text-xs text-cyan-700">Загрузка видео…</p>;
+  }
   if (attachment.kind === "image" && url) {
     return (
       <a href={url} target="_blank" rel="noreferrer" className="mt-2 block max-h-56 overflow-hidden rounded border border-neon-cyan/30">
@@ -204,6 +229,9 @@ export default function App() {
   const [editingId, setEditingId] = useState(null);
   const [typingPeers, setTypingPeers] = useState([]);
   const [pendingFile, setPendingFile] = useState(null);
+  const [videoNoteRecording, setVideoNoteRecording] = useState(false);
+  const [videoNoteUploading, setVideoNoteUploading] = useState(false);
+  const [recordingPreviewStream, setRecordingPreviewStream] = useState(null);
   const [searchInput, setSearchInput] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -217,11 +245,49 @@ export default function App() {
   const activeRoomRef = useRef(activeRoom);
   const typingIdleRef = useRef(null);
   const fileInputRef = useRef(null);
+  const videoNoteLiveRef = useRef(null);
+  const videoNoteChunksRef = useRef([]);
+  const videoNoteStreamRef = useRef(null);
+  const videoNoteRecorderRef = useRef(null);
+  const videoNoteMaxTimerRef = useRef(null);
+  const videoNoteStoppingRef = useRef(false);
+  const videoNoteStartedAtRef = useRef(0);
+  const stopVideoNoteRecordRef = useRef(() => {});
+  const videoNoteWindowCleanRef = useRef(null);
+  const replyToRef = useRef(null);
   const nicknameRef = useRef(nickname);
 
   useEffect(() => {
     nicknameRef.current = nickname;
   }, [nickname]);
+
+  useEffect(() => {
+    replyToRef.current = replyTo;
+  }, [replyTo]);
+
+  useEffect(() => {
+    const el = videoNoteLiveRef.current;
+    if (!el || !recordingPreviewStream) return;
+    el.srcObject = recordingPreviewStream;
+    return () => {
+      el.srcObject = null;
+    };
+  }, [recordingPreviewStream]);
+
+  useEffect(() => {
+    return () => {
+      clearTimeout(videoNoteMaxTimerRef.current);
+      videoNoteWindowCleanRef.current?.();
+      videoNoteWindowCleanRef.current = null;
+      videoNoteStreamRef.current?.getTracks().forEach((t) => t.stop());
+      const r = videoNoteRecorderRef.current;
+      if (r && r.state !== "inactive") {
+        try {
+          r.stop();
+        } catch (_) {}
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!token.trim()) {
@@ -396,6 +462,135 @@ export default function App() {
     const s = socketRef.current;
     if (s?.connected) s.emit("typing", { typing: false });
   }, []);
+
+  const uploadVideoNoteBlob = useCallback(
+    async (blob) => {
+      const mime = blob.type || "video/webm";
+      const ext = mime.includes("mp4") ? "mp4" : "webm";
+      const file = new File([blob], `videonote.${ext}`, { type: mime });
+      setVideoNoteUploading(true);
+      stopTyping();
+      try {
+        const base = getApiBase();
+        const fd = new FormData();
+        fd.append("room", activeRoomRef.current);
+        fd.append("text", "");
+        fd.append("file", file);
+        fd.append("videoNote", "1");
+        const rt = replyToRef.current;
+        if (rt?.id != null) fd.append("replyToId", String(rt.id));
+        const res = await fetch(`${base}/api/messages/send-with-file`, {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: fd,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setBanner(data.error || "Не удалось отправить видео");
+          return;
+        }
+        if (data.message) setMessages((prev) => upsertMessageList(prev, data.message));
+        setReplyTo(null);
+        setBanner(null);
+      } catch (e) {
+        console.error(e);
+        setBanner("Сеть: видеосообщение");
+      } finally {
+        setVideoNoteUploading(false);
+      }
+    },
+    [getAuthHeaders, stopTyping]
+  );
+
+  const stopVideoNoteRecord = useCallback(async () => {
+    if (videoNoteStoppingRef.current) return;
+    videoNoteStoppingRef.current = true;
+    videoNoteWindowCleanRef.current?.();
+    videoNoteWindowCleanRef.current = null;
+    clearTimeout(videoNoteMaxTimerRef.current);
+    videoNoteMaxTimerRef.current = null;
+    setVideoNoteRecording(false);
+    setRecordingPreviewStream(null);
+
+    const rec = videoNoteRecorderRef.current;
+    const stream = videoNoteStreamRef.current;
+    videoNoteRecorderRef.current = null;
+    videoNoteStreamRef.current = null;
+    stream?.getTracks().forEach((t) => t.stop());
+
+    const started = videoNoteStartedAtRef.current;
+    if (!rec || rec.state === "inactive") {
+      videoNoteStoppingRef.current = false;
+      return;
+    }
+
+    await new Promise((resolve) => {
+      rec.addEventListener("stop", resolve, { once: true });
+      rec.stop();
+    });
+
+    const chunks = videoNoteChunksRef.current;
+    videoNoteChunksRef.current = [];
+    const blobType = rec.mimeType || "video/webm";
+    const blob = new Blob(chunks, { type: blobType });
+    const elapsed = Date.now() - started;
+    videoNoteStoppingRef.current = false;
+
+    if (elapsed < VIDEO_NOTE_MIN_MS || blob.size < VIDEO_NOTE_MIN_BYTES) {
+      setBanner("Видео слишком короткое");
+      return;
+    }
+    await uploadVideoNoteBlob(blob);
+  }, [uploadVideoNoteBlob]);
+
+  useEffect(() => {
+    stopVideoNoteRecordRef.current = () => {
+      void stopVideoNoteRecord();
+    };
+  }, [stopVideoNoteRecord]);
+
+  const startVideoNoteRecord = useCallback(async () => {
+    if (editingId != null || pendingFile != null || videoNoteUploading) return;
+    if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setBanner("Запись видео не поддерживается в этом браузере");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 720 }, height: { ideal: 720 } },
+        audio: true,
+      });
+      videoNoteStreamRef.current = stream;
+      videoNoteChunksRef.current = [];
+      let mime = "video/webm;codecs=vp8,opus";
+      if (!MediaRecorder.isTypeSupported(mime)) mime = "video/webm";
+      if (!MediaRecorder.isTypeSupported(mime)) mime = "";
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      videoNoteRecorderRef.current = rec;
+      rec.ondataavailable = (e) => {
+        if (e.data?.size) videoNoteChunksRef.current.push(e.data);
+      };
+      rec.start(250);
+      videoNoteStartedAtRef.current = Date.now();
+      setRecordingPreviewStream(stream);
+      setVideoNoteRecording(true);
+      const onGlobalUp = () => stopVideoNoteRecordRef.current();
+      window.addEventListener("pointerup", onGlobalUp, true);
+      window.addEventListener("pointercancel", onGlobalUp, true);
+      videoNoteWindowCleanRef.current = () => {
+        window.removeEventListener("pointerup", onGlobalUp, true);
+        window.removeEventListener("pointercancel", onGlobalUp, true);
+      };
+      videoNoteMaxTimerRef.current = setTimeout(() => {
+        stopVideoNoteRecordRef.current();
+      }, VIDEO_NOTE_MAX_MS);
+    } catch (e) {
+      console.error(e);
+      setBanner("Нет доступа к камере или микрофону");
+      videoNoteStreamRef.current?.getTracks().forEach((t) => t.stop());
+      videoNoteStreamRef.current = null;
+    }
+  }, [editingId, pendingFile, videoNoteUploading]);
 
   const scrollToBottom = useCallback(() => {
     const el = listRef.current;
@@ -1130,7 +1325,11 @@ export default function App() {
                   {r.deleted
                     ? "удалено"
                     : (r.text || "").trim().slice(0, 80) ||
-                      (r.attachment ? `📎 ${r.attachment.name}` : "—")}
+                      (r.attachment?.kind === "video_note"
+                        ? "Видеосообщение"
+                        : r.attachment
+                          ? `📎 ${r.attachment.name}`
+                          : "—")}
                 </button>
               ))}
             </div>
@@ -1375,6 +1574,28 @@ export default function App() {
             </div>
           )}
 
+          {videoNoteRecording && recordingPreviewStream ? (
+            <div className="flex flex-shrink-0 items-center gap-3 border-t border-neon-hot/35 bg-neon-hot/10 px-3 py-2">
+              <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-neon-cyan/40 bg-black">
+                <video
+                  ref={videoNoteLiveRef}
+                  className="h-full w-full scale-x-[-1] object-cover"
+                  muted
+                  playsInline
+                  autoPlay
+                />
+              </div>
+              <p className="font-mono text-[11px] text-neon-hot">
+                Запись… отпустите в любом месте экрана или до 60 с
+              </p>
+            </div>
+          ) : null}
+          {videoNoteUploading && !videoNoteRecording ? (
+            <div className="flex-shrink-0 border-t border-neon-cyan/25 bg-black/50 px-3 py-2 font-mono text-[11px] text-cyan-600">
+              Отправка видеосообщения…
+            </div>
+          ) : null}
+
           <form
             onSubmit={sendMessage}
             className="flex flex-shrink-0 flex-wrap items-center gap-2 border-t-2 border-neon-cyan/20 bg-black/50 p-3"
@@ -1397,6 +1618,28 @@ export default function App() {
               onClick={() => fileInputRef.current?.click()}
             >
               📎
+            </button>
+            <button
+              type="button"
+              disabled={
+                editingId != null ||
+                !!pendingFile ||
+                videoNoteUploading ||
+                (status === "online" && !roomJoined)
+              }
+              title="Зажмите для видеосообщения (квадрат). Отпустите — отправка."
+              className={`shrink-0 touch-none select-none border px-2 py-2 font-mono text-base leading-none transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                videoNoteRecording
+                  ? "animate-pulse border-neon-hot bg-neon-hot/30 text-neon-hot shadow-neon-magenta"
+                  : "border-neon-cyan/50 bg-black/50 text-neon-cyan hover:border-neon-cyan hover:bg-neon-cyan/10"
+              }`}
+              onPointerDown={(e) => {
+                e.preventDefault();
+                if (e.button !== 0) return;
+                void startVideoNoteRecord();
+              }}
+            >
+              ⬤
             </button>
             {pendingFile && editingId == null ? (
               <span className="flex max-w-[140px] items-center gap-1 truncate font-mono text-[10px] text-cyan-600">

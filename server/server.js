@@ -25,7 +25,7 @@ const MAX_PASSWORD_LEN = 128;
 const MESSAGES_PER_MINUTE = 30;
 const BCRYPT_ROUNDS = 10;
 const JWT_EXPIRES = "7d";
-const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_MB || 8) * 1024 * 1024;
+const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_MB || 16) * 1024 * 1024;
 const UPLOAD_ROOT = path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, "data", "uploads"));
 const STAGING_DIR = path.join(UPLOAD_ROOT, "staging");
 const ALLOWED_UPLOAD_MIMES = new Set([
@@ -33,10 +33,14 @@ const ALLOWED_UPLOAD_MIMES = new Set([
   "image/png",
   "image/gif",
   "image/webp",
+  "video/webm",
+  "video/mp4",
   "application/pdf",
   "text/plain",
 ]);
 const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+/** Короткие видеосообщения («кружки»), на клиенте в квадрате */
+const VIDEO_NOTE_MIMES = new Set(["video/webm", "video/mp4"]);
 
 /** slug → отображаемое имя и пароль комнаты (null = без пароля) */
 const GROUP_ROOMS = {
@@ -141,10 +145,19 @@ function pickSafeExt(file) {
     "image/png": ".png",
     "image/gif": ".gif",
     "image/webp": ".webp",
+    "video/webm": ".webm",
+    "video/mp4": ".mp4",
     "application/pdf": ".pdf",
     "text/plain": ".txt",
   };
   return map[file.mimetype] || ".bin";
+}
+
+function isVideoNoteFlag(body) {
+  const v = body?.videoNote ?? body?.video_note;
+  if (v == null || v === "") return false;
+  const s = String(v).trim().toLowerCase();
+  return s === "1" || s === "true" || s === "yes";
 }
 
 function escapeLikePattern(s) {
@@ -774,7 +787,7 @@ async function unlinkAttachmentForMessage(id) {
   } catch (_) {}
 }
 
-async function saveNewMessageWithOptionalFile({ room, userId, text, replyToId, multerFile }) {
+async function saveNewMessageWithOptionalFile({ room, userId, text, replyToId, multerFile, videoNote = false }) {
   const normalizedText = normalizeMessageText(text);
   if (!normalizedText && !multerFile) {
     const e = new Error("Пустое сообщение");
@@ -792,7 +805,13 @@ async function saveNewMessageWithOptionalFile({ room, userId, text, replyToId, m
       e.code = "BAD_MIME";
       throw e;
     }
-    attKind = IMAGE_MIMES.has(multerFile.mimetype) ? "image" : "file";
+    if (IMAGE_MIMES.has(multerFile.mimetype)) {
+      attKind = "image";
+    } else if (videoNote && VIDEO_NOTE_MIMES.has(multerFile.mimetype)) {
+      attKind = "video_note";
+    } else {
+      attKind = "file";
+    }
     attName = sanitizeOriginalName(multerFile.originalname);
     attMime = multerFile.mimetype;
     attSize = multerFile.size;
@@ -1157,7 +1176,10 @@ app.get("/api/files/:messageId", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "Файл не найден" });
     }
     res.setHeader("Content-Type", row.attachment_mime || "application/octet-stream");
-    const disp = IMAGE_MIMES.has(row.attachment_mime) ? "inline" : "attachment";
+    const disp =
+      IMAGE_MIMES.has(row.attachment_mime) || VIDEO_NOTE_MIMES.has(row.attachment_mime)
+        ? "inline"
+        : "attachment";
     res.setHeader(
       "Content-Disposition",
       `${disp}; filename*=UTF-8''${encodeURIComponent(row.attachment_name || "file")}`
@@ -1207,6 +1229,7 @@ app.post("/api/messages/send-with-file", requireAuth, handleUpload, async (req, 
       text: req.body?.text,
       replyToId,
       multerFile: req.file || null,
+      videoNote: isVideoNoteFlag(req.body),
     });
     io.to(slug).emit("message", formatted);
     res.status(201).json({ ok: true, message: formatted });
