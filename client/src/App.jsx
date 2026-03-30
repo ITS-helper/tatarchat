@@ -717,7 +717,7 @@ export default function App() {
           setMessages([]);
           return;
         }
-        setMessages(data.messages || []);
+        setMessages((data.messages || []).filter((m) => !m.deleted));
         if (data.title) setRoomTitle(data.title);
         setBanner(null);
       } catch (e) {
@@ -821,7 +821,7 @@ export default function App() {
         return;
       }
       if (room && room !== activeRoomRef.current) return;
-      setMessages(rows);
+      setMessages(rows.filter((m) => !m.deleted));
       setRoomJoined(true);
       roomJoinedRef.current = true;
     });
