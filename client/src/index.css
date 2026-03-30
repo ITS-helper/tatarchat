@@ -18,11 +18,19 @@
   }
 }
 
+/* Один слой без repeat — иначе появляется вертикальный шов между плитками */
 .chat-bg {
-  background-color: #141c2e;
+  background-color: #0d1118;
   background-image: url("/city-pattern.svg");
-  background-size: 720px 420px;
-  background-repeat: repeat;
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center center;
+}
+
+@media (min-width: 768px) {
+  .chat-bg {
+    background-attachment: fixed;
+  }
 }
 
 /* Scrollbar */
