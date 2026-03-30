@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="400" viewBox="0 0 800 400">
+  <defs>
+    <pattern id="windows" width="6" height="8" patternUnits="userSpaceOnUse">
+      <rect width="2" height="3" x="2" y="2" fill="#2a4a7a" opacity="0.5" rx="0.3"/>
+    </pattern>
+  </defs>
+  <rect width="800" height="400" fill="#141c2e"/>
+  <!-- Back row -->
+  <g fill="#1a2d4a" stroke="#1f3555" stroke-width="0.5">
+    <rect x="0" y="120" width="50" height="280" rx="1"/>
+    <rect x="55" y="80" width="35" height="320" rx="1"/>
+    <rect x="100" y="140" width="60" height="260" rx="2"/>
+    <rect x="170" y="60" width="28" height="340" rx="1"/>
+    <rect x="205" y="110" width="45" height="290" rx="1"/>
+    <rect x="260" y="90" width="55" height="310" rx="2"/>
+    <rect x="325" y="130" width="40" height="270" rx="1"/>
+    <rect x="375" y="50" width="30" height="350" rx="1"/>
+    <rect x="415" y="100" width="50" height="300" rx="2"/>
+    <rect x="475" y="70" width="35" height="330" rx="1"/>
+    <rect x="520" y="120" width="60" height="280" rx="2"/>
+    <rect x="590" y="85" width="40" height="315" rx="1"/>
+    <rect x="640" y="55" width="28" height="345" rx="1"/>
+    <rect x="675" y="110" width="50" height="290" rx="2"/>
+    <rect x="735" y="130" width="65" height="270" rx="1"/>
+  </g>
+  <!-- Mid row -->
+  <g fill="#1e3558" stroke="#24406a" stroke-width="0.5">
+    <rect x="10" y="180" width="70" height="220" rx="2"/>
+    <rect x="90" y="200" width="45" height="200" rx="1"/>
+    <rect x="145" y="160" width="55" height="240" rx="2"/>
+    <rect x="215" y="190" width="40" height="210" rx="1"/>
+    <rect x="268" y="170" width="65" height="230" rx="2"/>
+    <rect x="345" y="195" width="50" height="205" rx="1"/>
+    <rect x="408" y="175" width="55" height="225" rx="2"/>
+    <rect x="472" y="155" width="40" height="245" rx="1"/>
+    <rect x="525" y="185" width="60" height="215" rx="2"/>
+    <rect x="598" y="165" width="48" height="235" rx="1"/>
+    <rect x="660" y="180" width="55" height="220" rx="2"/>
+    <rect x="728" y="190" width="72" height="210" rx="1"/>
+  </g>
+  <!-- Front row -->
+  <g fill="#223d65" stroke="#2a4a7a" stroke-width="0.5">
+    <rect x="0" y="240" width="55" height="160" rx="2"/>
+    <rect x="65" y="260" width="40" height="140" rx="1"/>
+    <rect x="115" y="250" width="65" height="150" rx="2"/>
+    <rect x="195" y="270" width="50" height="130" rx="1"/>
+    <rect x="255" y="245" width="45" height="155" rx="2"/>
+    <rect x="310" y="265" width="60" height="135" rx="1"/>
+    <rect x="385" y="255" width="48" height="145" rx="2"/>
+    <rect x="445" y="275" width="55" height="125" rx="1"/>
+    <rect x="510" y="250" width="42" height="150" rx="2"/>
+    <rect x="565" y="260" width="60" height="140" rx="1"/>
+    <rect x="635" y="270" width="50" height="130" rx="2"/>
+    <rect x="698" y="255" width="45" height="145" rx="1"/>
+    <rect x="755" y="240" width="45" height="160" rx="2"/>
+  </g>
+  <!-- Windows glow -->
+  <g fill="#2a5590" opacity="0.6">
+    <!-- Back windows -->
+    <rect x="8" y="135" width="3" height="4" rx="0.5"/><rect x="16" y="145" width="3" height="4" rx="0.5"/>
+    <rect x="25" y="138" width="3" height="4" rx="0.5"/><rect x="35" y="155" width="3" height="4" rx="0.5"/>
+    <rect x="63" y="95" width="3" height="4" rx="0.5"/><rect x="72" y="105" width="3" height="4" rx="0.5"/>
+    <rect x="110" y="155" width="3" height="4" rx="0.5"/><rect x="125" y="160" width="3" height="4" rx="0.5"/>
+    <rect x="140" y="165" width="3" height="4" rx="0.5"/><rect x="175" y="75" width="3" height="4" rx="0.5"/>
+    <rect x="215" y="125" width="3" height="4" rx="0.5"/><rect x="230" y="130" width="3" height="4" rx="0.5"/>
+    <rect x="270" y="105" width="3" height="4" rx="0.5"/><rect x="285" y="110" width="3" height="4" rx="0.5"/>
+    <rect x="300" y="115" width="3" height="4" rx="0.5"/><rect x="335" y="145" width="3" height="4" rx="0.5"/>
+    <rect x="382" y="65" width="3" height="4" rx="0.5"/><rect x="392" y="75" width="3" height="4" rx="0.5"/>
+    <rect x="425" y="115" width="3" height="4" rx="0.5"/><rect x="440" y="120" width="3" height="4" rx="0.5"/>
+    <rect x="485" y="85" width="3" height="4" rx="0.5"/><rect x="495" y="95" width="3" height="4" rx="0.5"/>
+    <rect x="535" y="135" width="3" height="4" rx="0.5"/><rect x="555" y="140" width="3" height="4" rx="0.5"/>
+    <rect x="600" y="100" width="3" height="4" rx="0.5"/><rect x="615" y="105" width="3" height="4" rx="0.5"/>
+    <rect x="648" y="70" width="3" height="4" rx="0.5"/><rect x="658" y="80" width="3" height="4" rx="0.5"/>
+    <rect x="685" y="125" width="3" height="4" rx="0.5"/><rect x="700" y="130" width="3" height="4" rx="0.5"/>
+    <rect x="745" y="145" width="3" height="4" rx="0.5"/><rect x="770" y="150" width="3" height="4" rx="0.5"/>
+  </g>
+  <!-- Lit windows (gold) -->
+  <g fill="#c9a84c" opacity="0.35">
+    <rect x="12" y="175" width="3" height="4" rx="0.5"/><rect x="30" y="165" width="3" height="4" rx="0.5"/>
+    <rect x="68" y="120" width="3" height="4" rx="0.5"/><rect x="120" y="180" width="3" height="4" rx="0.5"/>
+    <rect x="180" y="90" width="3" height="4" rx="0.5"/><rect x="222" y="145" width="3" height="4" rx="0.5"/>
+    <rect x="278" y="125" width="3" height="4" rx="0.5"/><rect x="340" y="160" width="3" height="4" rx="0.5"/>
+    <rect x="388" y="85" width="3" height="4" rx="0.5"/><rect x="430" y="135" width="3" height="4" rx="0.5"/>
+    <rect x="490" y="110" width="3" height="4" rx="0.5"/><rect x="545" y="155" width="3" height="4" rx="0.5"/>
+    <rect x="608" y="120" width="3" height="4" rx="0.5"/><rect x="652" y="90" width="3" height="4" rx="0.5"/>
+    <rect x="695" y="145" width="3" height="4" rx="0.5"/><rect x="760" y="160" width="3" height="4" rx="0.5"/>
+  </g>
+  <!-- Decorative elements (domes, towers) -->
+  <g fill="#1e3558" stroke="#24406a" stroke-width="0.5">
+    <!-- Tower spires -->
+    <polygon points="184,60 182,40 186,40"/>
+    <polygon points="389,50 386,25 392,25"/>
+    <polygon points="654,55 651,30 657,30"/>
+    <!-- Dome shapes -->
+    <ellipse cx="130" cy="140" rx="20" ry="12"/>
+    <ellipse cx="290" cy="90" rx="18" ry="10"/>
+    <ellipse cx="445" cy="100" rx="22" ry="13"/>
+    <ellipse cx="610" cy="85" rx="16" ry="9"/>
+    <ellipse cx="755" cy="130" rx="25" ry="14"/>
+  </g>
+  <!-- Arches on front buildings -->
+  <g fill="none" stroke="#2a5590" stroke-width="0.8" opacity="0.4">
+    <path d="M22,395 Q30,380 38,395"/>
+    <path d="M135,395 Q148,378 161,395"/>
+    <path d="M275,395 Q285,380 295,395"/>
+    <path d="M405,395 Q418,378 431,395"/>
+    <path d="M530,395 Q540,380 550,395"/>
+    <path d="M655,395 Q668,378 681,395"/>
+    <path d="M775,395 Q785,380 795,395"/>
+  </g>
+</svg>

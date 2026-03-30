@@ -7,6 +7,13 @@ const LS_USER_ID = "tatarchat_user_id";
 const LS_LAST_ROOM = "tatarchat_last_room";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "👎"];
+const REACTION_SVG = {
+  "👍": "/reactions/thumbsup.svg",
+  "❤️": "/reactions/heart.svg",
+  "😂": "/reactions/laugh.svg",
+  "🔥": "/reactions/fire.svg",
+  "👎": "/reactions/thumbsdown.svg",
+};
 /** sessionStorage: выбранный раздел и пароли комнат (не путать с паролем аккаунта) */
 const SS_DTD_ROOM_PW = "tatarchat_room_pw_dreamteamdauns";
 
@@ -226,7 +233,7 @@ function MessageAttachment({ messageId, attachment, getAuthHeaders }) {
     );
   }
   if (attachment.kind === "video_note" && !url) {
-    return <p className="mt-1 text-xs text-tg-text-muted">Загрузка видео…</p>;
+    return <p className="mt-1 text-xs text-tc-text-muted">Загрузка видео…</p>;
   }
   if (attachment.kind === "image" && url) {
     return (
@@ -236,19 +243,19 @@ function MessageAttachment({ messageId, attachment, getAuthHeaders }) {
     );
   }
   if (attachment.kind === "image" && !url) {
-    return <p className="mt-1 text-xs text-tg-text-muted">Загрузка изображения…</p>;
+    return <p className="mt-1 text-xs text-tc-text-muted">Загрузка изображения…</p>;
   }
   if (!url) {
-    return <p className="mt-1 text-xs text-tg-text-muted">Загрузка файла…</p>;
+    return <p className="mt-1 text-xs text-tc-text-muted">Загрузка файла…</p>;
   }
   return (
     <a
       href={url}
       download={attachment.name}
-      className="mt-1.5 inline-flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-tg-link transition hover:bg-white/10"
+      className="mt-1.5 inline-flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-tc-link transition hover:bg-white/10"
     >
       📎 {attachment.name}
-      {attachment.size != null ? <span className="text-tg-text-muted">({formatFileSize(attachment.size)})</span> : null}
+      {attachment.size != null ? <span className="text-tc-text-muted">({formatFileSize(attachment.size)})</span> : null}
     </a>
   );
 }
@@ -1220,26 +1227,26 @@ export default function App() {
 
   if (!token) {
     return (
-      <div className="flex min-h-full items-center justify-center bg-tg-bg p-4">
-        <div className="w-full max-w-sm rounded-xl bg-tg-panel p-8 shadow-xl">
-          <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-tg-accent/20">
-            <svg viewBox="0 0 24 24" className="h-10 w-10 text-tg-accent" fill="currentColor">
+      <div className="flex min-h-full items-center justify-center bg-tc-bg p-4">
+        <div className="w-full max-w-sm rounded-xl bg-tc-panel p-8 shadow-xl">
+          <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-tc-accent/20">
+            <svg viewBox="0 0 24 24" className="h-10 w-10 text-tc-accent" fill="currentColor">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
             </svg>
           </div>
-          <h1 className="mb-1 text-center text-2xl font-bold text-tg-text">TatarChat</h1>
-          <p className="mb-6 text-center text-sm text-tg-text-sec">
+          <h1 className="mb-1 text-center text-2xl font-bold text-tc-text">TatarChat</h1>
+          <p className="mb-6 text-center text-sm text-tc-text-sec">
             Вход по имени и паролю. Новый пользователь — регистрация.
           </p>
 
-          <div className="mb-5 flex overflow-hidden rounded-lg bg-tg-bg">
+          <div className="mb-5 flex overflow-hidden rounded-lg bg-tc-bg">
             <button
               type="button"
               onClick={() => { setAuthMode("login"); setBanner(null); }}
               className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
                 authMode === "login"
-                  ? "bg-tg-accent text-white"
-                  : "text-tg-text-sec hover:text-tg-text"
+                  ? "bg-tc-accent text-white"
+                  : "text-tc-text-sec hover:text-tc-text"
               }`}
             >
               Вход
@@ -1249,8 +1256,8 @@ export default function App() {
               onClick={() => { setAuthMode("register"); setBanner(null); }}
               className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
                 authMode === "register"
-                  ? "bg-tg-accent text-white"
-                  : "text-tg-text-sec hover:text-tg-text"
+                  ? "bg-tc-accent text-white"
+                  : "text-tc-text-sec hover:text-tc-text"
               }`}
             >
               Регистрация
@@ -1261,7 +1268,7 @@ export default function App() {
             <div>
               <input
                 type="text"
-                className="w-full rounded-lg border border-tg-border bg-tg-input px-4 py-3 text-sm text-tg-text outline-none transition placeholder:text-tg-text-muted focus:border-tg-accent"
+                className="w-full rounded-lg border border-tc-border bg-tc-input px-4 py-3 text-sm text-tc-text outline-none transition placeholder:text-tc-text-muted focus:border-tc-accent"
                 value={nameInput}
                 onChange={(e) => setNameInput(e.target.value)}
                 placeholder="Имя"
@@ -1273,7 +1280,7 @@ export default function App() {
             <div>
               <input
                 type="password"
-                className="w-full rounded-lg border border-tg-border bg-tg-input px-4 py-3 text-sm text-tg-text outline-none transition placeholder:text-tg-text-muted focus:border-tg-accent"
+                className="w-full rounded-lg border border-tc-border bg-tc-input px-4 py-3 text-sm text-tc-text outline-none transition placeholder:text-tc-text-muted focus:border-tc-accent"
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
                 placeholder={authMode === "register" ? "Пароль (от 6 символов)" : "Пароль"}
@@ -1282,13 +1289,13 @@ export default function App() {
               />
             </div>
             {banner && (
-              <p className="rounded-lg bg-tg-danger/15 px-4 py-2.5 text-sm text-tg-danger">
+              <p className="rounded-lg bg-tc-danger/15 px-4 py-2.5 text-sm text-tc-danger">
                 {banner}
               </p>
             )}
             <button
               type="submit"
-              className="w-full rounded-lg bg-tg-accent py-3 text-sm font-semibold text-white transition hover:bg-tg-accent/85 active:scale-[0.98]"
+              className="w-full rounded-lg bg-tc-accent py-3 text-sm font-semibold text-white transition hover:bg-tc-accent/85 active:scale-[0.98]"
             >
               {authMode === "register" ? "Зарегистрироваться" : "Войти"}
             </button>
@@ -1299,27 +1306,27 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden bg-tg-bg">
+    <div className="flex h-full overflow-hidden bg-tc-bg">
       {/* Sidebar */}
       <aside
         className={`${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        } fixed inset-y-0 left-0 z-40 flex w-72 flex-col bg-tg-sidebar transition-transform duration-200 md:static md:translate-x-0`}
+        } fixed inset-y-0 left-0 z-40 flex w-72 flex-col bg-tc-sidebar transition-transform duration-200 md:static md:translate-x-0`}
       >
         <div className="flex items-center justify-between px-4 py-3">
-          <h2 className="text-base font-semibold text-tg-text">Чаты</h2>
+          <h2 className="text-base font-semibold text-tc-text">Чаты</h2>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => openDmModal()}
-              className="rounded-full p-1.5 text-tg-text-sec transition hover:bg-tg-hover"
+              className="rounded-full p-1.5 text-tc-text-sec transition hover:bg-tc-hover"
               title="Написать"
             >
               <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 000-1.42l-2.34-2.33a1.003 1.003 0 00-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.83z"/></svg>
             </button>
             <button
               type="button"
-              className="rounded-full p-1.5 text-tg-text-sec transition hover:bg-tg-hover md:hidden"
+              className="rounded-full p-1.5 text-tc-text-sec transition hover:bg-tc-hover md:hidden"
               onClick={() => setSidebarOpen(false)}
             >
               ✕
@@ -1330,18 +1337,18 @@ export default function App() {
         <div className="px-3 pb-2">
           <input
             type="search"
-            className="w-full rounded-lg bg-tg-input px-3 py-2 text-sm text-tg-text outline-none placeholder:text-tg-text-muted"
+            className="w-full rounded-lg bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted"
             placeholder="Поиск"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
           />
           {searchInput.trim() && searchResults.length > 0 ? (
-            <div className="mt-1 max-h-40 overflow-y-auto rounded-lg bg-tg-panel">
+            <div className="mt-1 max-h-40 overflow-y-auto rounded-lg bg-tc-panel">
               {searchResults.map((r) => (
                 <button
                   key={r.id}
                   type="button"
-                  className="block w-full truncate px-3 py-2 text-left text-sm text-tg-text-sec transition hover:bg-tg-hover"
+                  className="block w-full truncate px-3 py-2 text-left text-sm text-tc-text-sec transition hover:bg-tc-hover"
                   onClick={() => {
                     const el = document.querySelector(`[data-message-id="${r.id}"]`);
                     el?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1349,8 +1356,8 @@ export default function App() {
                     setSidebarOpen(false);
                   }}
                 >
-                  <span className="font-medium text-tg-accent">{r.user_nick}</span>{" "}
-                  <span className="text-tg-text-muted">
+                  <span className="font-medium text-tc-accent">{r.user_nick}</span>{" "}
+                  <span className="text-tc-text-muted">
                     {r.deleted
                       ? "удалено"
                       : (r.text || "").trim().slice(0, 60) ||
@@ -1373,7 +1380,7 @@ export default function App() {
               type="button"
               onClick={() => { selectChannel(r.slug); setSidebarOpen(false); }}
               className={`flex w-full items-center gap-3 px-4 py-3 transition ${
-                activeRoom === r.slug ? "bg-tg-accent/20" : "hover:bg-tg-hover"
+                activeRoom === r.slug ? "bg-tc-accent/20" : "hover:bg-tc-hover"
               }`}
             >
               <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white ${
@@ -1383,19 +1390,19 @@ export default function App() {
               </div>
               <div className="min-w-0 flex-1 text-left">
                 <div className="flex items-center justify-between">
-                  <span className={`truncate text-sm font-medium ${activeRoom === r.slug ? "text-tg-accent" : "text-tg-text"}`}>
+                  <span className={`truncate text-sm font-medium ${activeRoom === r.slug ? "text-tc-accent" : "text-tc-text"}`}>
                     {r.title}
                   </span>
                   {r.requiresPassword ? (
-                    <span className="ml-1 text-[10px] text-tg-text-muted">🔒</span>
+                    <span className="ml-1 text-[10px] text-tc-text-muted">🔒</span>
                   ) : null}
                 </div>
-                <p className="truncate text-xs text-tg-text-muted">Канал</p>
+                <p className="truncate text-xs text-tc-text-muted">Канал</p>
               </div>
             </button>
           ))}
           {directChannels.length > 0 && (
-            <div className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-tg-text-muted">
+            <div className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-tc-text-muted">
               Личные
             </div>
           )}
@@ -1405,27 +1412,27 @@ export default function App() {
               type="button"
               onClick={() => { selectChannel(r.slug); setSidebarOpen(false); }}
               className={`flex w-full items-center gap-3 px-4 py-3 transition ${
-                activeRoom === r.slug ? "bg-tg-accent/20" : "hover:bg-tg-hover"
+                activeRoom === r.slug ? "bg-tc-accent/20" : "hover:bg-tc-hover"
               }`}
             >
               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-orange-600 text-sm font-semibold text-white">
                 {r.peer?.nickname?.[0]?.toUpperCase() || "?"}
               </div>
               <div className="min-w-0 flex-1 text-left">
-                <span className={`block truncate text-sm font-medium ${activeRoom === r.slug ? "text-tg-accent" : "text-tg-text"}`}>
+                <span className={`block truncate text-sm font-medium ${activeRoom === r.slug ? "text-tc-accent" : "text-tc-text"}`}>
                   {r.peer?.nickname || r.title}
                 </span>
-                <p className="truncate text-xs text-tg-text-muted">Личное сообщение</p>
+                <p className="truncate text-xs text-tc-text-muted">Личное сообщение</p>
               </div>
             </button>
           ))}
         </nav>
 
-        <div className="border-t border-tg-border p-3">
+        <div className="border-t border-tc-border p-3">
           <button
             type="button"
             onClick={handleLogout}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-tg-danger transition hover:bg-tg-danger/10"
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-tc-danger transition hover:bg-tc-danger/10"
           >
             <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5-5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
             Выйти
@@ -1450,17 +1457,17 @@ export default function App() {
             aria-modal="true"
             aria-labelledby="dtd-pw-title"
           >
-            <div className="w-full max-w-sm rounded-xl bg-tg-panel p-6 shadow-xl">
-              <h2 id="dtd-pw-title" className="mb-2 text-lg font-semibold text-tg-text">
+            <div className="w-full max-w-sm rounded-xl bg-tc-panel p-6 shadow-xl">
+              <h2 id="dtd-pw-title" className="mb-2 text-lg font-semibold text-tc-text">
                 🔒 Пароль канала
               </h2>
-              <p className="mb-4 text-sm text-tg-text-sec">
+              <p className="mb-4 text-sm text-tc-text-sec">
                 Канал DTD защищён паролем.
               </p>
               <form onSubmit={submitDtdChannelPassword} className="space-y-4">
                 <input
                   type="password"
-                  className="w-full rounded-lg border border-tg-border bg-tg-input px-4 py-3 text-sm text-tg-text outline-none placeholder:text-tg-text-muted focus:border-tg-accent"
+                  className="w-full rounded-lg border border-tc-border bg-tc-input px-4 py-3 text-sm text-tc-text outline-none placeholder:text-tc-text-muted focus:border-tc-accent"
                   value={dtdPwModalDraft}
                   onChange={(e) => setDtdPwModalDraft(e.target.value)}
                   placeholder="Пароль"
@@ -1469,11 +1476,11 @@ export default function App() {
                   autoFocus
                 />
                 {banner && (
-                  <p className="rounded-lg bg-tg-danger/15 px-4 py-2.5 text-sm text-tg-danger">{banner}</p>
+                  <p className="rounded-lg bg-tc-danger/15 px-4 py-2.5 text-sm text-tc-danger">{banner}</p>
                 )}
                 <button
                   type="submit"
-                  className="w-full rounded-lg bg-tg-accent py-3 text-sm font-semibold text-white transition hover:bg-tg-accent/85"
+                  className="w-full rounded-lg bg-tc-accent py-3 text-sm font-semibold text-white transition hover:bg-tc-accent/85"
                 >
                   Войти
                 </button>
@@ -1483,20 +1490,20 @@ export default function App() {
         ) : null}
 
         {/* Chat header */}
-        <header className="flex h-14 flex-shrink-0 items-center gap-3 border-b border-tg-border bg-tg-header px-4">
+        <header className="flex h-14 flex-shrink-0 items-center gap-3 border-b border-tc-border bg-tc-header px-4">
           <button
             type="button"
-            className="rounded-full p-1.5 text-tg-text-sec transition hover:bg-tg-hover md:hidden"
+            className="rounded-full p-1.5 text-tc-text-sec transition hover:bg-tc-hover md:hidden"
             onClick={() => setSidebarOpen(true)}
           >
             <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
           </button>
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-base font-semibold text-tg-text">{roomTitle}</h2>
-            <div className="flex items-center gap-2 text-xs text-tg-text-muted">
-              <span className={`inline-block h-2 w-2 rounded-full ${status === "online" ? "bg-tg-online" : "bg-tg-text-muted"}`} />
+            <h2 className="truncate text-base font-semibold text-tc-text">{roomTitle}</h2>
+            <div className="flex items-center gap-2 text-xs text-tc-text-muted">
+              <span className={`inline-block h-2 w-2 rounded-full ${status === "online" ? "bg-tc-online" : "bg-tc-text-muted"}`} />
               {status === "online" ? "подключено" : "нет связи"}
-              <span className="text-tg-text-muted">·</span>
+              <span className="text-tc-text-muted">·</span>
               <span className="truncate">{nickname}</span>
             </div>
           </div>
@@ -1504,18 +1511,18 @@ export default function App() {
 
         {/* Banner */}
         {banner && !(activeRoom === "dreamteamdauns" && !dtdChannelUnlocked) && (
-          <div className="bg-tg-danger/15 px-4 py-2 text-sm text-tg-danger">{banner}</div>
+          <div className="bg-tc-danger/15 px-4 py-2 text-sm text-tc-danger">{banner}</div>
         )}
 
         {/* Messages */}
         <div
           ref={listRef}
-          className="messages-scroll flex-1 overflow-y-auto px-4 py-3"
+          className="chat-bg messages-scroll flex-1 overflow-y-auto px-4 py-3"
           onClick={(e) => { if (e.target === e.currentTarget) setSelectedMsgId(null); }}
         >
           {messages.length === 0 ? (
             <div className="flex h-full items-center justify-center">
-              <p className="text-sm text-tg-text-muted">Нет сообщений</p>
+              <p className="text-sm text-tc-text-muted">Нет сообщений</p>
             </div>
           ) : (
             <div className="mx-auto max-w-2xl space-y-1">
@@ -1533,32 +1540,32 @@ export default function App() {
                     <div
                       className={`relative max-w-[85%] cursor-pointer rounded-xl px-3 py-2 transition-colors sm:max-w-[70%] ${
                         mine
-                          ? "rounded-br-sm bg-tg-msg-own"
-                          : "rounded-bl-sm bg-tg-msg"
-                      } ${selected ? "ring-2 ring-tg-accent/60" : ""}`}
+                          ? "rounded-br-sm bg-tc-msg-own"
+                          : "rounded-bl-sm bg-tc-msg"
+                      } ${selected ? "ring-2 ring-tc-accent/60" : ""}`}
                       onClick={() => setSelectedMsgId(selected ? null : m.id)}
                     >
                       {!mine && (
-                        <p className="mb-0.5 text-[13px] font-semibold text-tg-accent">{m.user_nick}</p>
+                        <p className="mb-0.5 text-[13px] font-semibold text-tc-accent">{m.user_nick}</p>
                       )}
                       {m.reply_to && (
-                        <div className="mb-1.5 rounded-md border-l-2 border-tg-accent bg-white/5 py-1 pl-2 pr-2">
-                          <p className="text-xs font-medium text-tg-accent">{m.reply_to.user_nick}</p>
+                        <div className="mb-1.5 rounded-md border-l-2 border-tc-accent bg-white/5 py-1 pl-2 pr-2">
+                          <p className="text-xs font-medium text-tc-accent">{m.reply_to.user_nick}</p>
                           {m.reply_to.deleted ? (
-                            <p className="text-xs italic text-tg-text-muted">удалено</p>
+                            <p className="text-xs italic text-tc-text-muted">удалено</p>
                           ) : (
-                            <p className="truncate text-xs text-tg-text-sec">
+                            <p className="truncate text-xs text-tc-text-sec">
                               {m.reply_to.preview?.trim() || "📎 файл"}
                             </p>
                           )}
                         </div>
                       )}
                       {deleted ? (
-                        <p className="text-sm italic text-tg-text-muted">Сообщение удалено</p>
+                        <p className="text-sm italic text-tc-text-muted">Сообщение удалено</p>
                       ) : (
                         <>
                           {(m.text || "").trim() ? (
-                            <p className="select-text whitespace-pre-wrap break-words text-sm text-tg-text">{m.text}</p>
+                            <p className="select-text whitespace-pre-wrap break-words text-sm text-tc-text">{m.text}</p>
                           ) : null}
                           {m.attachment && m.id != null ? (
                             <MessageAttachment
@@ -1585,13 +1592,15 @@ export default function App() {
                                 key={r.emoji}
                                 type="button"
                                 onClick={(e) => { e.stopPropagation(); m.id != null && toggleReaction(m.id, r.emoji); }}
-                                className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs transition ${
+                                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs transition ${
                                   me
-                                    ? "bg-tg-accent/25 text-tg-accent"
-                                    : "bg-white/5 text-tg-text-sec hover:bg-white/10"
+                                    ? "bg-tc-accent/25 text-tc-accent"
+                                    : "bg-white/5 text-tc-text-sec hover:bg-white/10"
                                 }`}
                               >
-                                {r.emoji}
+                                {REACTION_SVG[r.emoji]
+                                  ? <img src={REACTION_SVG[r.emoji]} alt={r.emoji} className="reaction-icon" />
+                                  : r.emoji}
                                 <span className="text-[10px]">{r.count}</span>
                               </button>
                             );
@@ -1606,9 +1615,9 @@ export default function App() {
                               key={em}
                               type="button"
                               onClick={(e) => { e.stopPropagation(); m.id != null && toggleReaction(m.id, em); }}
-                              className="rounded-full px-1.5 py-1 text-sm transition hover:bg-white/10 active:scale-110"
+                              className="rounded-full p-1 transition hover:bg-white/10 active:scale-110"
                             >
-                              {em}
+                              <img src={REACTION_SVG[em]} alt={em} className="reaction-icon" />
                             </button>
                           ))}
                           <span className="mx-1 h-4 w-px bg-white/10" />
@@ -1620,7 +1629,7 @@ export default function App() {
                               setEditingId(null);
                               setSelectedMsgId(null);
                             }}
-                            className="rounded-full px-2 py-1 text-xs text-tg-text-sec transition hover:bg-white/10 hover:text-tg-accent"
+                            className="rounded-full px-2 py-1 text-xs text-tc-text-sec transition hover:bg-white/10 hover:text-tc-accent"
                           >
                             Ответить
                           </button>
@@ -1628,7 +1637,7 @@ export default function App() {
                             <button
                               type="button"
                               onClick={(e) => { e.stopPropagation(); startDmWithPeer(m.user_id); setSelectedMsgId(null); }}
-                              className="rounded-full px-2 py-1 text-xs text-tg-text-sec transition hover:bg-white/10 hover:text-tg-accent"
+                              className="rounded-full px-2 py-1 text-xs text-tc-text-sec transition hover:bg-white/10 hover:text-tc-accent"
                             >
                               В ЛС
                             </button>
@@ -1646,14 +1655,14 @@ export default function App() {
                                   if (fileInputRef.current) fileInputRef.current.value = "";
                                   setSelectedMsgId(null);
                                 }}
-                                className="rounded-full px-2 py-1 text-xs text-tg-text-sec transition hover:bg-white/10 hover:text-tg-accent"
+                                className="rounded-full px-2 py-1 text-xs text-tc-text-sec transition hover:bg-white/10 hover:text-tc-accent"
                               >
                                 Изменить
                               </button>
                               <button
                                 type="button"
                                 onClick={(e) => { e.stopPropagation(); deleteMessage(m.id); setSelectedMsgId(null); }}
-                                className="rounded-full px-2 py-1 text-xs text-tg-danger transition hover:bg-tg-danger/10"
+                                className="rounded-full px-2 py-1 text-xs text-tc-danger transition hover:bg-tc-danger/10"
                               >
                                 Удалить
                               </button>
@@ -1671,19 +1680,19 @@ export default function App() {
 
         {/* Reply / Edit bar */}
         {(replyTo || editingId != null) && (
-          <div className="flex items-center gap-3 border-t border-tg-border bg-tg-header px-4 py-2">
-            <div className="h-8 w-0.5 rounded-full bg-tg-accent" />
+          <div className="flex items-center gap-3 border-t border-tc-border bg-tc-header px-4 py-2">
+            <div className="h-8 w-0.5 rounded-full bg-tc-accent" />
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-medium text-tg-accent">
+              <p className="text-xs font-medium text-tc-accent">
                 {editingId != null ? "Редактирование" : `Ответ для ${replyTo?.user_nick}`}
               </p>
-              <p className="truncate text-xs text-tg-text-sec">
+              <p className="truncate text-xs text-tc-text-sec">
                 {editingId != null ? input.slice(0, 80) : replyTo?.preview || ""}
               </p>
             </div>
             <button
               type="button"
-              className="shrink-0 rounded-full p-1 text-tg-text-muted transition hover:bg-tg-hover hover:text-tg-text"
+              className="shrink-0 rounded-full p-1 text-tc-text-muted transition hover:bg-tc-hover hover:text-tc-text"
               onClick={() => { setReplyTo(null); setEditingId(null); setInput(""); }}
             >
               ✕
@@ -1693,7 +1702,7 @@ export default function App() {
 
         {/* Typing indicator */}
         {typingPeers.length > 0 && (
-          <div className="border-t border-tg-border px-4 py-1.5 text-xs text-tg-accent">
+          <div className="border-t border-tc-border px-4 py-1.5 text-xs text-tc-accent">
             {typingPeers.length === 1
               ? `${typingPeers[0]} печатает…`
               : `${typingPeers.slice(0, 4).join(", ")} печатают…`}
@@ -1702,24 +1711,24 @@ export default function App() {
 
         {/* Video note recording / uploading */}
         {videoNoteRecording && recordingPreviewStream ? (
-          <div className="flex items-center gap-3 border-t border-tg-border bg-tg-header px-4 py-2">
+          <div className="flex items-center gap-3 border-t border-tc-border bg-tc-header px-4 py-2">
             <div className="h-12 w-12 shrink-0 overflow-hidden rounded-full border-2 border-red-500 bg-black">
               <video ref={videoNoteLiveRef} className="h-full w-full scale-x-[-1] object-cover" muted playsInline autoPlay />
             </div>
             <div className="flex-1">
               <p className="text-sm font-medium text-red-400">Запись видео…</p>
-              <p className="text-xs text-tg-text-muted">Отпустите для отправки</p>
+              <p className="text-xs text-tc-text-muted">Отпустите для отправки</p>
             </div>
           </div>
         ) : null}
         {videoNoteUploading && !videoNoteRecording ? (
-          <div className="border-t border-tg-border px-4 py-2 text-xs text-tg-accent">
+          <div className="border-t border-tc-border px-4 py-2 text-xs text-tc-accent">
             Отправка видеосообщения…
           </div>
         ) : null}
 
         {/* Input area */}
-        <form onSubmit={sendMessage} className="flex items-end gap-2 border-t border-tg-border bg-tg-header px-3 py-2">
+        <form onSubmit={sendMessage} className="flex items-end gap-2 border-t border-tc-border bg-tc-header px-3 py-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -1731,7 +1740,7 @@ export default function App() {
             type="button"
             disabled={editingId != null}
             title="Прикрепить файл"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-tg-text-sec transition hover:bg-tg-hover hover:text-tg-accent disabled:opacity-40"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent disabled:opacity-40"
             onClick={() => fileInputRef.current?.click()}
           >
             <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 015 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 005 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/></svg>
@@ -1739,11 +1748,11 @@ export default function App() {
 
           <div className="min-w-0 flex-1">
             {pendingFile && editingId == null ? (
-              <div className="mb-1 flex items-center gap-2 rounded-lg bg-tg-input px-3 py-1.5 text-xs text-tg-text-sec">
+              <div className="mb-1 flex items-center gap-2 rounded-lg bg-tc-input px-3 py-1.5 text-xs text-tc-text-sec">
                 <span className="truncate">📎 {pendingFile.name}</span>
                 <button
                   type="button"
-                  className="shrink-0 text-tg-danger hover:underline"
+                  className="shrink-0 text-tc-danger hover:underline"
                   onClick={() => { setPendingFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
                 >
                   ✕
@@ -1751,7 +1760,7 @@ export default function App() {
               </div>
             ) : null}
             <input
-              className="w-full rounded-xl bg-tg-input px-4 py-2.5 text-sm text-tg-text outline-none placeholder:text-tg-text-muted"
+              className="w-full rounded-xl bg-tc-input px-4 py-2.5 text-sm text-tc-text outline-none placeholder:text-tc-text-muted"
               value={input}
               onChange={onInputChange}
               placeholder={editingId != null ? "Редактирование…" : "Сообщение"}
@@ -1767,7 +1776,7 @@ export default function App() {
             className={`flex h-10 w-10 shrink-0 touch-none select-none items-center justify-center rounded-full transition disabled:opacity-40 ${
               videoNoteRecording
                 ? "animate-pulse bg-red-500 text-white"
-                : "text-tg-text-sec hover:bg-tg-hover hover:text-tg-accent"
+                : "text-tc-text-sec hover:bg-tc-hover hover:text-tc-accent"
             }`}
             onPointerDown={(e) => { e.preventDefault(); if (e.button !== 0) return; void startVideoNoteRecord(); }}
           >
@@ -1783,7 +1792,7 @@ export default function App() {
                   ? !input.trim()
                   : !input.trim() && !pendingFile
             }
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-tg-accent text-white transition hover:bg-tg-accent/85 disabled:opacity-40"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-tc-accent text-white transition hover:bg-tc-accent/85 disabled:opacity-40"
           >
             <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
           </button>
@@ -1799,34 +1808,34 @@ export default function App() {
           aria-labelledby="dm-modal-title"
           onClick={(e) => { if (e.target === e.currentTarget) setDmModalOpen(false); }}
         >
-          <div className="w-full max-w-sm rounded-xl bg-tg-panel p-5 shadow-xl">
+          <div className="w-full max-w-sm rounded-xl bg-tc-panel p-5 shadow-xl">
             <div className="mb-4 flex items-center justify-between">
-              <h3 id="dm-modal-title" className="text-base font-semibold text-tg-text">Написать</h3>
+              <h3 id="dm-modal-title" className="text-base font-semibold text-tc-text">Написать</h3>
               <button
                 type="button"
-                className="rounded-full p-1 text-tg-text-muted transition hover:bg-tg-hover hover:text-tg-text"
+                className="rounded-full p-1 text-tc-text-muted transition hover:bg-tc-hover hover:text-tc-text"
                 onClick={() => setDmModalOpen(false)}
               >
                 ✕
               </button>
             </div>
             {dmUsersLoading ? (
-              <p className="py-8 text-center text-sm text-tg-text-muted">Загрузка…</p>
+              <p className="py-8 text-center text-sm text-tc-text-muted">Загрузка…</p>
             ) : dmUsers.length === 0 ? (
-              <p className="py-8 text-center text-sm text-tg-text-muted">Нет других пользователей</p>
+              <p className="py-8 text-center text-sm text-tc-text-muted">Нет других пользователей</p>
             ) : (
               <ul className="max-h-72 space-y-0.5 overflow-y-auto">
                 {dmUsers.map((u) => (
                   <li key={u.id}>
                     <button
                       type="button"
-                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-tg-hover"
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-tc-hover"
                       onClick={() => startDmWithPeer(u.id)}
                     >
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-orange-600 text-sm font-semibold text-white">
                         {u.nickname?.[0]?.toUpperCase() || "?"}
                       </div>
-                      <span className="truncate text-sm text-tg-text">{u.nickname}</span>
+                      <span className="truncate text-sm text-tc-text">{u.nickname}</span>
                     </button>
                   </li>
                 ))}

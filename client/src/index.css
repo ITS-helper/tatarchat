@@ -14,8 +14,16 @@
   }
 
   body {
-    @apply min-h-full bg-tg-bg font-sans text-tg-text antialiased;
+    @apply min-h-full bg-tc-bg font-sans text-tc-text antialiased;
   }
+}
+
+.chat-bg {
+  background-color: #141c2e;
+  background-image: url("/city-pattern.svg");
+  background-size: 800px 400px;
+  background-position: bottom;
+  background-repeat: repeat-x;
 }
 
 /* Scrollbar */
@@ -26,11 +34,11 @@
   background: transparent;
 }
 .messages-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.1);
   border-radius: 3px;
 }
 .messages-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .sidebar-scroll::-webkit-scrollbar {
@@ -40,6 +48,13 @@
   background: transparent;
 }
 .sidebar-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
   border-radius: 3px;
+}
+
+.reaction-icon {
+  width: 20px;
+  height: 20px;
+  display: inline-block;
+  vertical-align: middle;
 }
