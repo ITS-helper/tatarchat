@@ -842,7 +842,10 @@ export default function App() {
     socket.on("message-deleted", (payload) => {
       const msg = payload?.message;
       if (!msg || (msg.room && msg.room !== activeRoomRef.current)) return;
-      setMessages((prev) => upsertMessageList(prev, msg));
+      const id = payload.id ?? msg.id;
+      if (id != null) {
+        setMessages((prev) => prev.filter((m) => m.id !== id));
+      }
     });
 
     socket.on("message-reactions", (payload) => {
@@ -1068,7 +1071,7 @@ export default function App() {
           setBanner(data.error || "Не удалось удалить");
           return;
         }
-        if (data.message) setMessages((prev) => upsertMessageList(prev, data.message));
+        setMessages((prev) => prev.filter((m) => m.id !== id));
         if (editingId === id) {
           setEditingId(null);
           setInput("");
