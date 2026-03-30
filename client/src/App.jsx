@@ -401,6 +401,7 @@ export default function App() {
   const [nickname, setNickname] = useState(() => localStorage.getItem(LS_NICKNAME) || "");
   const [nameInput, setNameInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
+  const [authScreenMode, setAuthScreenMode] = useState("login");
   const [publicChannels, setPublicChannels] = useState([]);
   const [directChannels, setDirectChannels] = useState([]);
   const [canUseGallery, setCanUseGallery] = useState(false);
@@ -1339,6 +1340,31 @@ export default function App() {
     emitJoinRoom(s);
   }, [activeRoom, token, emitJoinRoom]);
 
+  function applyAuthPayload(data, fallbackName) {
+    if (!data?.token) {
+      setBanner("Неверный ответ сервера (нет token)");
+      return;
+    }
+    const name = fallbackName;
+    localStorage.setItem(LS_TOKEN, data.token);
+    localStorage.setItem(LS_NICKNAME, data.user?.nickname || name);
+    if (data.user?.id != null) {
+      localStorage.setItem(LS_USER_ID, String(data.user.id));
+      setMyUserId(data.user.id);
+    }
+    const adm = !!data.user?.isAdmin;
+    localStorage.setItem("tatarchat_admin", adm ? "1" : "0");
+    setImAdmin(adm);
+    const ha = !!data.user?.hasAvatar;
+    localStorage.setItem(LS_HAS_AVATAR, ha ? "1" : "0");
+    setHasAvatar(ha);
+    setCanUseGallery(!!data.user?.canUseGallery);
+    setNickname(data.user?.nickname || name);
+    setToken(data.token);
+    setPasswordInput("");
+    setBanner(null);
+  }
+
   const submitAuth = async (e) => {
     e.preventDefault();
     setBanner(null);
@@ -1350,9 +1376,8 @@ export default function App() {
     }
 
     const base = getApiBase();
-    const path = "/api/auth/login";
     try {
-      const res = await fetch(`${base}${path}`, {
+      const res = await fetch(`${base}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, password }),
@@ -1373,27 +1398,51 @@ export default function App() {
         setBanner(msg || "Неизвестная ошибка");
         return;
       }
-      if (!data.token) {
-        setBanner("Неверный ответ сервера (нет token)");
+      applyAuthPayload(data, name);
+    } catch (err) {
+      console.error(err);
+      setBanner("Сеть: не удалось связаться с сервером");
+    }
+  };
+
+  const submitRegister = async (e) => {
+    e.preventDefault();
+    setBanner(null);
+    const name = nameInput.trim();
+    const password = passwordInput;
+    if (!name || !password) {
+      setBanner("Введите имя и пароль");
+      return;
+    }
+    if (password.length < 6 || password.length > 128) {
+      setBanner("Пароль: от 6 до 128 символов");
+      return;
+    }
+
+    const base = getApiBase();
+    try {
+      const res = await fetch(`${base}/api/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, password }),
+      });
+      const raw = await res.text();
+      let data = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        data = {};
+      }
+      if (!res.ok) {
+        const msg =
+          data.error ||
+          data.message ||
+          (raw && !raw.startsWith("<") && raw.length < 300 ? raw.trim() : "") ||
+          `Сервер ответил ${res.status} ${res.statusText || ""}`.trim();
+        setBanner(msg || "Неизвестная ошибка");
         return;
       }
-      localStorage.setItem(LS_TOKEN, data.token);
-      localStorage.setItem(LS_NICKNAME, data.user?.nickname || name);
-      if (data.user?.id != null) {
-        localStorage.setItem(LS_USER_ID, String(data.user.id));
-        setMyUserId(data.user.id);
-      }
-      const adm = !!data.user?.isAdmin;
-      localStorage.setItem("tatarchat_admin", adm ? "1" : "0");
-      setImAdmin(adm);
-      const ha = !!data.user?.hasAvatar;
-      localStorage.setItem(LS_HAS_AVATAR, ha ? "1" : "0");
-      setHasAvatar(ha);
-      setCanUseGallery(!!data.user?.canUseGallery);
-      setNickname(data.user?.nickname || name);
-      setToken(data.token);
-      setPasswordInput("");
-      setBanner(null);
+      applyAuthPayload(data, name);
     } catch (err) {
       console.error(err);
       setBanner("Сеть: не удалось связаться с сервером");
@@ -1723,11 +1772,43 @@ export default function App() {
             </svg>
           </div>
           <h1 className="mb-1 text-center text-2xl font-bold text-tc-text">TatarChat</h1>
-          <p className="mb-6 text-center text-sm text-tc-text-sec">
-            Вход по имени и паролю.
+          <p className="mb-4 text-center text-sm text-tc-text-sec">
+            {authScreenMode === "register"
+              ? "Создайте имя и пароль (от 6 символов)."
+              : "Вход по имени и паролю."}
           </p>
+          <div className="mb-4 flex rounded-lg border border-tc-border p-0.5 text-sm">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthScreenMode("login");
+                setBanner(null);
+              }}
+              className={`flex-1 rounded-md py-2 font-medium transition ${
+                authScreenMode === "login"
+                  ? "bg-tc-accent text-white"
+                  : "text-tc-text-sec hover:text-tc-text"
+              }`}
+            >
+              Вход
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthScreenMode("register");
+                setBanner(null);
+              }}
+              className={`flex-1 rounded-md py-2 font-medium transition ${
+                authScreenMode === "register"
+                  ? "bg-tc-accent text-white"
+                  : "text-tc-text-sec hover:text-tc-text"
+              }`}
+            >
+              Регистрация
+            </button>
+          </div>
 
-          <form onSubmit={submitAuth} className="space-y-4">
+          <form onSubmit={authScreenMode === "register" ? submitRegister : submitAuth} className="space-y-4">
             <div>
               <input
                 type="text"
@@ -1748,7 +1829,7 @@ export default function App() {
                 onChange={(e) => setPasswordInput(e.target.value)}
                 placeholder="Пароль"
                 maxLength={128}
-                autoComplete="current-password"
+                autoComplete={authScreenMode === "register" ? "new-password" : "current-password"}
               />
             </div>
             {banner && (
@@ -1760,7 +1841,7 @@ export default function App() {
               type="submit"
               className="w-full rounded-lg bg-tc-accent py-3 text-sm font-semibold text-white transition hover:bg-tc-accent/85 active:scale-[0.98]"
             >
-              Войти
+              {authScreenMode === "register" ? "Зарегистрироваться" : "Войти"}
             </button>
           </form>
         </div>

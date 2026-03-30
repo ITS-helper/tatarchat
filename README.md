@@ -95,7 +95,7 @@ npm run dev
 - Фронтенд: [http://localhost:5173](http://localhost:5173) (Vite, `npm run dev` в `client/`)
 - API и Socket.io: [http://localhost:3001](http://localhost:3001)
 
-Сначала **зарегистрируйте** пользователя (имя + пароль), затем войдите. Доступ к **DTD** и **Семья** по нику (см. `DTD_HIDDEN_NICKNAMES`, `LOBBY_VISIBLE_NICKNAMES` на сервере). История и отправка — с JWT; отдельного пароля комнаты для DTD нет.
+На экране входа вкладка **Регистрация** создаёт аккаунт; **Вход** — для существующих. Чтобы отключить регистрацию на сервере, задайте **`ALLOW_REGISTRATION=false`** в окружении. Доступ к **DTD** и **Семья** по нику (см. `DTD_HIDDEN_NICKNAMES`, `LOBBY_VISIBLE_NICKNAMES`). История и отправка — с JWT.
 
 В **production** на Render задайте **`JWT_SECRET`** (длинная случайная строка), иначе сервер не запустится.
 

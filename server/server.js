@@ -1857,7 +1857,7 @@ app.post("/api/channels/open-dm", requireAuth, async (req, res) => {
 
 app.post("/api/auth/register", async (req, res) => {
   try {
-    if (process.env.ALLOW_REGISTRATION !== "true") {
+    if (process.env.ALLOW_REGISTRATION === "false") {
       return res.status(403).json({ error: "Регистрация закрыта" });
     }
     const ip = req.ip || "unknown";
