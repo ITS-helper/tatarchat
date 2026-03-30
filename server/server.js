@@ -452,8 +452,8 @@ async function ensureCorePublicChannelRows() {
   for (const [slug, conf] of Object.entries(GROUP_ROOMS)) {
     await pool.query(
       `INSERT INTO channels (slug, title, kind)
-       SELECT $1, $2, 'public'
-       WHERE NOT EXISTS (SELECT 1 FROM channels WHERE slug = $1)`,
+       SELECT $1::varchar, $2::varchar, 'public'::varchar
+       WHERE NOT EXISTS (SELECT 1 FROM channels WHERE slug = $1::varchar)`,
       [slug, conf.title]
     );
   }
