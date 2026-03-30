@@ -211,8 +211,8 @@ function MessageAttachment({ messageId, attachment, getAuthHeaders }) {
   if (!attachment) return null;
   if (attachment.kind === "video_note" && url) {
     return (
-      <div className="mt-2 w-52 max-w-[min(100%,13rem)]">
-        <div className="aspect-square overflow-hidden rounded-lg border-2 border-neon-cyan/40 bg-black shadow-[inset_0_0_20px_rgba(0,229,255,0.08)]">
+      <div className="mt-1.5 w-48">
+        <div className="aspect-square overflow-hidden rounded-full bg-black">
           <video
             src={url}
             className="h-full w-full object-cover"
@@ -226,29 +226,29 @@ function MessageAttachment({ messageId, attachment, getAuthHeaders }) {
     );
   }
   if (attachment.kind === "video_note" && !url) {
-    return <p className="mt-2 font-mono text-xs text-cyan-700">Загрузка видео…</p>;
+    return <p className="mt-1 text-xs text-tg-text-muted">Загрузка видео…</p>;
   }
   if (attachment.kind === "image" && url) {
     return (
-      <a href={url} target="_blank" rel="noreferrer" className="mt-2 block max-h-56 overflow-hidden rounded border border-neon-cyan/30">
-        <img src={url} alt={attachment.name} className="max-h-56 w-auto max-w-full object-contain" />
+      <a href={url} target="_blank" rel="noreferrer" className="mt-1.5 block max-h-64 overflow-hidden rounded-lg">
+        <img src={url} alt={attachment.name} className="max-h-64 w-auto max-w-full rounded-lg object-contain" />
       </a>
     );
   }
   if (attachment.kind === "image" && !url) {
-    return <p className="mt-2 font-mono text-xs text-cyan-700">Загрузка изображения…</p>;
+    return <p className="mt-1 text-xs text-tg-text-muted">Загрузка изображения…</p>;
   }
   if (!url) {
-    return <p className="mt-2 font-mono text-xs text-cyan-700">Загрузка файла…</p>;
+    return <p className="mt-1 text-xs text-tg-text-muted">Загрузка файла…</p>;
   }
   return (
     <a
       href={url}
       download={attachment.name}
-      className="mt-2 inline-flex items-center gap-2 border border-neon-purple/40 bg-black/40 px-2 py-1 font-mono text-xs text-neon-purple hover:border-neon-cyan/50 hover:text-neon-cyan"
+      className="mt-1.5 inline-flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-tg-link transition hover:bg-white/10"
     >
       📎 {attachment.name}
-      {attachment.size != null ? <span className="text-cyan-700">({formatFileSize(attachment.size)})</span> : null}
+      {attachment.size != null ? <span className="text-tg-text-muted">({formatFileSize(attachment.size)})</span> : null}
     </a>
   );
 }
@@ -263,6 +263,7 @@ export default function App() {
   const [dtdPwModalDraft, setDtdPwModalDraft] = useState("");
   const [publicChannels, setPublicChannels] = useState([]);
   const [directChannels, setDirectChannels] = useState([]);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dmModalOpen, setDmModalOpen] = useState(false);
   const [dmUsers, setDmUsers] = useState([]);
   const [dmUsersLoading, setDmUsersLoading] = useState(false);
@@ -1218,58 +1219,37 @@ export default function App() {
 
   if (!token) {
     return (
-      <div className="relative min-h-full">
-        <div className="cyber-vignette" aria-hidden />
-        <div className="cyber-scanlines" aria-hidden />
-        <div className="relative z-10 flex min-h-full flex-col items-center justify-center p-4">
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-neon-purple/10 via-transparent to-neon-hot/5" />
-        <div className="cyber-panel relative w-full max-w-md p-6 shadow-neon-cyan">
-          <p className="mb-2 text-center font-mono text-[10px] uppercase tracking-[0.35em] text-neon-cyan/60">
-            // secure uplink
+      <div className="flex min-h-full items-center justify-center bg-tg-bg p-4">
+        <div className="w-full max-w-sm rounded-xl bg-tg-panel p-8 shadow-xl">
+          <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-tg-accent/20">
+            <svg viewBox="0 0 24 24" className="h-10 w-10 text-tg-accent" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+            </svg>
+          </div>
+          <h1 className="mb-1 text-center text-2xl font-bold text-tg-text">TatarChat</h1>
+          <p className="mb-6 text-center text-sm text-tg-text-sec">
+            Вход по имени и паролю. Новый пользователь — регистрация.
           </p>
-          <h1 className="font-display mb-1 text-center text-2xl font-bold tracking-wide text-neon-bright text-glow-cyan">
-            TatarChat
-          </h1>
-          <p className="mb-4 text-center text-sm text-cyan-600/90">
-            Чат <span className="font-semibold text-neon-cyan">DTD</span>. Вход по имени и паролю. Новый пользователь — регистрация.
-          </p>
-          <button
-            type="button"
-            onClick={() => {
-              clearGateSession();
-              setDtdPwModalDraft("");
-              setBanner(null);
-            }}
-            className="mb-4 w-full border border-cyan-800/60 py-2 text-xs font-mono uppercase tracking-widest text-cyan-700 transition hover:border-neon-cyan/50 hover:text-neon-cyan"
-          >
-            Сбросить пароль канала DTD
-          </button>
 
-          <div className="mb-4 flex border border-neon-cyan/35 bg-black/60 p-px">
+          <div className="mb-5 flex overflow-hidden rounded-lg bg-tg-bg">
             <button
               type="button"
-              onClick={() => {
-                setAuthMode("login");
-                setBanner(null);
-              }}
-              className={`flex-1 py-2.5 text-sm font-medium transition ${
+              onClick={() => { setAuthMode("login"); setBanner(null); }}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
                 authMode === "login"
-                  ? "bg-neon-cyan/25 text-neon-bright shadow-neon-cyan"
-                  : "text-cyan-800 hover:text-neon-cyan"
+                  ? "bg-tg-accent text-white"
+                  : "text-tg-text-sec hover:text-tg-text"
               }`}
             >
               Вход
             </button>
             <button
               type="button"
-              onClick={() => {
-                setAuthMode("register");
-                setBanner(null);
-              }}
-              className={`flex-1 py-2.5 text-sm font-medium transition ${
+              onClick={() => { setAuthMode("register"); setBanner(null); }}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
                 authMode === "register"
-                  ? "bg-neon-hot/20 text-neon-magenta text-glow-magenta shadow-neon-magenta"
-                  : "text-cyan-800 hover:text-neon-magenta"
+                  ? "bg-tg-accent text-white"
+                  : "text-tg-text-sec hover:text-tg-text"
               }`}
             >
               Регистрация
@@ -1277,251 +1257,267 @@ export default function App() {
           </div>
 
           <form onSubmit={submitAuth} className="space-y-4">
-            <label className="block text-sm text-cyan-400/90">
-              Имя
+            <div>
               <input
                 type="text"
-                className="cyber-input mt-1 w-full"
+                className="w-full rounded-lg border border-tg-border bg-tg-input px-4 py-3 text-sm text-tg-text outline-none transition placeholder:text-tg-text-muted focus:border-tg-accent"
                 value={nameInput}
                 onChange={(e) => setNameInput(e.target.value)}
-                placeholder="Ваше имя в чате"
+                placeholder="Имя"
                 maxLength={64}
                 autoComplete="username"
                 autoFocus
               />
-            </label>
-            <label className="block text-sm text-cyan-400/90">
-              Пароль
+            </div>
+            <div>
               <input
                 type="password"
-                className="cyber-input mt-1 w-full"
+                className="w-full rounded-lg border border-tg-border bg-tg-input px-4 py-3 text-sm text-tg-text outline-none transition placeholder:text-tg-text-muted focus:border-tg-accent"
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
-                placeholder={authMode === "register" ? "Не короче 6 символов" : "••••••"}
+                placeholder={authMode === "register" ? "Пароль (от 6 символов)" : "Пароль"}
                 maxLength={128}
                 autoComplete={authMode === "register" ? "new-password" : "current-password"}
               />
-            </label>
+            </div>
             {banner && (
-              <p className="border border-neon-amber/40 bg-neon-amber/10 px-3 py-2 font-mono text-sm text-neon-amber">
+              <p className="rounded-lg bg-tg-danger/15 px-4 py-2.5 text-sm text-tg-danger">
                 {banner}
               </p>
             )}
             <button
               type="submit"
-              className="font-display w-full bg-gradient-to-r from-cyan-600 via-neon-purple to-neon-hot py-2.5 font-semibold tracking-[0.2em] text-black shadow-neon-cyan transition hover:brightness-110"
+              className="w-full rounded-lg bg-tg-accent py-3 text-sm font-semibold text-white transition hover:bg-tg-accent/85 active:scale-[0.98]"
             >
               {authMode === "register" ? "Зарегистрироваться" : "Войти"}
             </button>
           </form>
-        </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="relative min-h-full">
-      <div className="cyber-vignette" aria-hidden />
-      <div className="cyber-scanlines" aria-hidden />
-      <div className="relative z-10 flex min-h-full flex-col">
-      {activeRoom === "dreamteamdauns" && !dtdChannelUnlocked ? (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="dtd-pw-title"
-        >
-          <div className="cyber-panel w-full max-w-md p-6 shadow-neon-cyan">
-            <h2
-              id="dtd-pw-title"
-              className="font-display mb-2 text-lg font-bold tracking-wide text-neon-bright text-glow-cyan"
+    <div className="flex h-full overflow-hidden bg-tg-bg">
+      {/* Sidebar */}
+      <aside
+        className={`${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        } fixed inset-y-0 left-0 z-40 flex w-72 flex-col bg-tg-sidebar transition-transform duration-200 md:static md:translate-x-0`}
+      >
+        <div className="flex items-center justify-between px-4 py-3">
+          <h2 className="text-base font-semibold text-tg-text">Чаты</h2>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => openDmModal()}
+              className="rounded-full p-1.5 text-tg-text-sec transition hover:bg-tg-hover"
+              title="Написать"
             >
-              Пароль канала DTD
-            </h2>
-            <p className="mb-4 text-sm text-cyan-600/90">
-              Этот канал защищён паролем. Введите его, чтобы загрузить историю и подключиться к сокету.
-            </p>
-            <form onSubmit={submitDtdChannelPassword} className="space-y-4">
-              <label className="block text-sm text-cyan-400/90">
-                Пароль канала
-                <input
-                  type="password"
-                  className="cyber-input mt-1 w-full"
-                  value={dtdPwModalDraft}
-                  onChange={(e) => setDtdPwModalDraft(e.target.value)}
-                  placeholder="••••••"
-                  maxLength={128}
-                  autoComplete="off"
-                  autoFocus
-                />
-              </label>
-              {banner && (
-                <p className="border border-neon-amber/40 bg-neon-amber/10 px-3 py-2 font-mono text-sm text-neon-amber">
-                  {banner}
-                </p>
-              )}
-              <button
-                type="submit"
-                className="font-display w-full bg-gradient-to-r from-cyan-600 via-neon-purple to-neon-hot py-2.5 font-semibold tracking-[0.2em] text-black shadow-neon-cyan transition hover:brightness-110"
-              >
-                Войти в канал
-              </button>
-            </form>
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 000-1.42l-2.34-2.33a1.003 1.003 0 00-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.83z"/></svg>
+            </button>
+            <button
+              type="button"
+              className="rounded-full p-1.5 text-tg-text-sec transition hover:bg-tg-hover md:hidden"
+              onClick={() => setSidebarOpen(false)}
+            >
+              ✕
+            </button>
           </div>
         </div>
-      ) : null}
-      <header className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b-2 border-neon-cyan/35 bg-black/85 px-4 py-3 shadow-neon-cyan backdrop-blur-md">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-3">
-            <h1 className="font-display text-lg font-bold tracking-[0.35em] text-neon-bright text-glow-cyan md:text-xl">
-              TATARCHAT
-            </h1>
-            <span className="hidden font-mono text-[9px] uppercase tracking-widest text-cyan-900 sm:inline">v1</span>
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <span className="hud-chip max-w-[160px] truncate border-neon-cyan/55 text-neon-cyan" title={`Вы: ${nickname}`}>
-              {nickname}
-            </span>
-            <span className="hud-chip border-neon-purple/50 text-neon-purple">{roomTitle}</span>
-            <span
-              className={`hud-chip ${
-                status === "online"
-                  ? "border-neon-bright/80 text-neon-bright text-glow-cyan"
-                  : "border-neon-amber/70 text-neon-amber"
-              }`}
-            >
-              {status === "online" ? "LINK_OK" : "NO_LINK"}
-            </span>
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <input
-              type="search"
-              className="cyber-input max-w-[min(100%,280px)] flex-1 py-1.5 text-xs"
-              placeholder="Поиск в чате…"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              aria-label="Поиск в чате"
-            />
-            {searchLoading ? (
-              <span className="font-mono text-[10px] text-cyan-700">…</span>
-            ) : null}
-          </div>
+
+        <div className="px-3 pb-2">
+          <input
+            type="search"
+            className="w-full rounded-lg bg-tg-input px-3 py-2 text-sm text-tg-text outline-none placeholder:text-tg-text-muted"
+            placeholder="Поиск"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+          />
           {searchInput.trim() && searchResults.length > 0 ? (
-            <div className="mt-2 max-h-36 overflow-y-auto rounded border border-neon-cyan/25 bg-black/80 p-2 font-mono text-[11px]">
+            <div className="mt-1 max-h-40 overflow-y-auto rounded-lg bg-tg-panel">
               {searchResults.map((r) => (
                 <button
                   key={r.id}
                   type="button"
-                  className="block w-full truncate py-1 text-left text-cyan-400 hover:text-neon-cyan"
+                  className="block w-full truncate px-3 py-2 text-left text-sm text-tg-text-sec transition hover:bg-tg-hover"
                   onClick={() => {
                     const el = document.querySelector(`[data-message-id="${r.id}"]`);
                     el?.scrollIntoView({ behavior: "smooth", block: "center" });
                     setSearchInput("");
+                    setSidebarOpen(false);
                   }}
                 >
-                  <span className="text-neon-purple">{r.user_nick}</span>
-                  {" · "}
-                  {r.deleted
-                    ? "удалено"
-                    : (r.text || "").trim().slice(0, 80) ||
-                      (r.attachment?.kind === "video_note"
-                        ? "Видеосообщение"
-                        : r.attachment
-                          ? `📎 ${r.attachment.name}`
-                          : "—")}
+                  <span className="font-medium text-tg-accent">{r.user_nick}</span>{" "}
+                  <span className="text-tg-text-muted">
+                    {r.deleted
+                      ? "удалено"
+                      : (r.text || "").trim().slice(0, 60) ||
+                        (r.attachment?.kind === "video_note"
+                          ? "Видео"
+                          : r.attachment
+                            ? `📎 ${r.attachment.name}`
+                            : "—")}
+                  </span>
                 </button>
               ))}
             </div>
           ) : null}
         </div>
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="hud-chip border-neon-hot/60 text-neon-hot transition hover:bg-neon-hot/15 hover:shadow-neon-magenta"
-        >
-          Выйти
-        </button>
-      </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:flex-row md:p-4">
-        <aside className="cyber-panel order-2 flex w-full max-h-[min(70vh,560px)] flex-shrink-0 flex-col p-3 md:order-1 md:max-h-none md:w-72">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h2 className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-neon-cyan/50">Каналы</h2>
+        <nav className="sidebar-scroll flex-1 overflow-y-auto">
+          {publicChannels.map((r) => (
             <button
+              key={r.slug}
               type="button"
-              onClick={() => openDmModal()}
-              className="hud-chip shrink-0 border-neon-purple/50 px-2 py-1 font-mono text-[9px] text-neon-purple hover:border-neon-cyan/50 hover:text-neon-cyan"
+              onClick={() => { selectChannel(r.slug); setSidebarOpen(false); }}
+              className={`flex w-full items-center gap-3 px-4 py-3 transition ${
+                activeRoom === r.slug ? "bg-tg-accent/20" : "hover:bg-tg-hover"
+              }`}
             >
-              + Личка
-            </button>
-          </div>
-          <ul className="mb-4 space-y-1.5 overflow-y-auto text-sm">
-            {publicChannels.map((r) => (
-              <li key={r.slug}>
-                <button
-                  type="button"
-                  onClick={() => selectChannel(r.slug)}
-                  className={`flex w-full items-center justify-between border px-2.5 py-2 text-left font-mono transition ${
-                    activeRoom === r.slug
-                      ? "border-neon-cyan bg-neon-cyan/10 text-neon-bright shadow-neon-cyan"
-                      : "border-transparent bg-black/40 text-cyan-600 hover:border-neon-cyan/30 hover:text-neon-cyan"
-                  }`}
-                >
-                  <span className="truncate">{r.title}</span>
+              <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white ${
+                r.slug === "lobby" ? "bg-blue-600" : r.slug === "dreamteamdauns" ? "bg-purple-600" : "bg-teal-600"
+              }`}>
+                {r.title?.[0]?.toUpperCase() || "#"}
+              </div>
+              <div className="min-w-0 flex-1 text-left">
+                <div className="flex items-center justify-between">
+                  <span className={`truncate text-sm font-medium ${activeRoom === r.slug ? "text-tg-accent" : "text-tg-text"}`}>
+                    {r.title}
+                  </span>
                   {r.requiresPassword ? (
-                    <span
-                      className="hud-chip ml-1 shrink-0 border-neon-hot/70 bg-black/60 text-[8px] text-neon-hot"
-                      title="Защищённый канал"
-                    >
-                      SEC
-                    </span>
+                    <span className="ml-1 text-[10px] text-tg-text-muted">🔒</span>
                   ) : null}
-                </button>
-              </li>
-            ))}
-          </ul>
-          <h2 className="mb-2 font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-neon-purple/50">Лички</h2>
-          <ul className="min-h-0 flex-1 space-y-1.5 overflow-y-auto text-sm">
-            {directChannels.length === 0 ? (
-              <li className="font-mono text-[11px] text-cyan-800">Пока нет — «+ Личка»</li>
-            ) : (
-              directChannels.map((r) => (
-                <li key={r.slug}>
-                  <button
-                    type="button"
-                    onClick={() => selectChannel(r.slug)}
-                    className={`flex w-full items-center justify-between border px-2.5 py-2 text-left font-mono transition ${
-                      activeRoom === r.slug
-                        ? "border-neon-purple bg-neon-purple/15 text-neon-bright shadow-neon-magenta"
-                        : "border-transparent bg-black/40 text-cyan-600 hover:border-neon-purple/35 hover:text-neon-purple"
-                    }`}
-                  >
-                    <span className="truncate">{r.title}</span>
-                  </button>
-                </li>
-              ))
-            )}
-          </ul>
-        </aside>
-
-        <section className="cyber-panel order-1 flex min-h-0 flex-1 flex-col md:order-2">
-          {banner && (
-            <div className="border-b-2 border-neon-amber/35 bg-neon-amber/10 px-3 py-2 font-mono text-xs text-neon-amber">
-              {banner}
+                </div>
+                <p className="truncate text-xs text-tg-text-muted">Канал</p>
+              </div>
+            </button>
+          ))}
+          {directChannels.length > 0 && (
+            <div className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-tg-text-muted">
+              Личные
             </div>
           )}
-          <div
-            ref={listRef}
-            className="messages-scroll min-h-0 flex-1 space-y-3 overflow-y-auto p-3 md:p-4"
-            style={{ maxHeight: "min(60vh, 520px)" }}
+          {directChannels.map((r) => (
+            <button
+              key={r.slug}
+              type="button"
+              onClick={() => { selectChannel(r.slug); setSidebarOpen(false); }}
+              className={`flex w-full items-center gap-3 px-4 py-3 transition ${
+                activeRoom === r.slug ? "bg-tg-accent/20" : "hover:bg-tg-hover"
+              }`}
+            >
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-orange-600 text-sm font-semibold text-white">
+                {r.peer?.nickname?.[0]?.toUpperCase() || "?"}
+              </div>
+              <div className="min-w-0 flex-1 text-left">
+                <span className={`block truncate text-sm font-medium ${activeRoom === r.slug ? "text-tg-accent" : "text-tg-text"}`}>
+                  {r.peer?.nickname || r.title}
+                </span>
+                <p className="truncate text-xs text-tg-text-muted">Личное сообщение</p>
+              </div>
+            </button>
+          ))}
+        </nav>
+
+        <div className="border-t border-tg-border p-3">
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-tg-danger transition hover:bg-tg-danger/10"
           >
-            {messages.length === 0 ? (
-              <p className="text-center font-mono text-sm uppercase tracking-widest text-cyan-900">
-                Нет данных в буфере — передача открыта
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5-5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+            Выйти
+          </button>
+        </div>
+      </aside>
+
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Main area */}
+      <main className="flex min-w-0 flex-1 flex-col">
+        {/* DTD password modal */}
+        {activeRoom === "dreamteamdauns" && !dtdChannelUnlocked ? (
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dtd-pw-title"
+          >
+            <div className="w-full max-w-sm rounded-xl bg-tg-panel p-6 shadow-xl">
+              <h2 id="dtd-pw-title" className="mb-2 text-lg font-semibold text-tg-text">
+                🔒 Пароль канала
+              </h2>
+              <p className="mb-4 text-sm text-tg-text-sec">
+                Канал DTD защищён паролем.
               </p>
-            ) : (
-              messages.map((m, i) => {
+              <form onSubmit={submitDtdChannelPassword} className="space-y-4">
+                <input
+                  type="password"
+                  className="w-full rounded-lg border border-tg-border bg-tg-input px-4 py-3 text-sm text-tg-text outline-none placeholder:text-tg-text-muted focus:border-tg-accent"
+                  value={dtdPwModalDraft}
+                  onChange={(e) => setDtdPwModalDraft(e.target.value)}
+                  placeholder="Пароль"
+                  maxLength={128}
+                  autoComplete="off"
+                  autoFocus
+                />
+                {banner && (
+                  <p className="rounded-lg bg-tg-danger/15 px-4 py-2.5 text-sm text-tg-danger">{banner}</p>
+                )}
+                <button
+                  type="submit"
+                  className="w-full rounded-lg bg-tg-accent py-3 text-sm font-semibold text-white transition hover:bg-tg-accent/85"
+                >
+                  Войти
+                </button>
+              </form>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Chat header */}
+        <header className="flex h-14 flex-shrink-0 items-center gap-3 border-b border-tg-border bg-tg-header px-4">
+          <button
+            type="button"
+            className="rounded-full p-1.5 text-tg-text-sec transition hover:bg-tg-hover md:hidden"
+            onClick={() => setSidebarOpen(true)}
+          >
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+          </button>
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-base font-semibold text-tg-text">{roomTitle}</h2>
+            <div className="flex items-center gap-2 text-xs text-tg-text-muted">
+              <span className={`inline-block h-2 w-2 rounded-full ${status === "online" ? "bg-tg-online" : "bg-tg-text-muted"}`} />
+              {status === "online" ? "подключено" : "нет связи"}
+              <span className="text-tg-text-muted">·</span>
+              <span className="truncate">{nickname}</span>
+            </div>
+          </div>
+        </header>
+
+        {/* Banner */}
+        {banner && !(activeRoom === "dreamteamdauns" && !dtdChannelUnlocked) && (
+          <div className="bg-tg-danger/15 px-4 py-2 text-sm text-tg-danger">{banner}</div>
+        )}
+
+        {/* Messages */}
+        <div
+          ref={listRef}
+          className="messages-scroll flex-1 overflow-y-auto px-4 py-3"
+        >
+          {messages.length === 0 ? (
+            <div className="flex h-full items-center justify-center">
+              <p className="text-sm text-tg-text-muted">Нет сообщений</p>
+            </div>
+          ) : (
+            <div className="mx-auto max-w-2xl space-y-1">
+              {messages.map((m, i) => {
                 const key = m.id != null ? m.id : `leg-${i}-${m.time}-${m.user_nick}`;
                 const mine = myUserId != null && m.user_id === myUserId;
                 const deleted = !!m.deleted;
@@ -1529,298 +1525,304 @@ export default function App() {
                   <div
                     key={key}
                     data-message-id={m.id != null ? m.id : undefined}
-                    className="border border-neon-cyan/25 border-l-2 border-l-neon-hot bg-black/55 px-3 py-2 shadow-[inset_0_0_28px_rgba(0,229,255,0.04)]"
+                    className={`flex ${mine ? "justify-end" : "justify-start"}`}
                   >
-                    {m.reply_to && (
-                      <div className="mb-2 border-l-2 border-neon-purple/60 pl-2 text-xs text-cyan-600">
-                        <span className="font-medium text-neon-purple">{m.reply_to.user_nick}</span>
-                        {m.reply_to.deleted ? (
-                          <span className="italic"> — удалено</span>
-                        ) : (
-                          <span className="mt-0.5 block truncate text-cyan-500/90">
-                            {m.reply_to.preview?.trim() || "📎 файл"}
-                          </span>
-                        )}
+                    <div
+                      className={`group relative max-w-[85%] rounded-xl px-3 py-2 sm:max-w-[70%] ${
+                        mine
+                          ? "rounded-br-sm bg-tg-msg-own"
+                          : "rounded-bl-sm bg-tg-msg"
+                      }`}
+                    >
+                      {!mine && (
+                        <p className="mb-0.5 text-[13px] font-semibold text-tg-accent">{m.user_nick}</p>
+                      )}
+                      {m.reply_to && (
+                        <div className="mb-1.5 rounded-md border-l-2 border-tg-accent bg-white/5 py-1 pl-2 pr-2">
+                          <p className="text-xs font-medium text-tg-accent">{m.reply_to.user_nick}</p>
+                          {m.reply_to.deleted ? (
+                            <p className="text-xs italic text-tg-text-muted">удалено</p>
+                          ) : (
+                            <p className="truncate text-xs text-tg-text-sec">
+                              {m.reply_to.preview?.trim() || "📎 файл"}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      {deleted ? (
+                        <p className="text-sm italic text-tg-text-muted">Сообщение удалено</p>
+                      ) : (
+                        <>
+                          {(m.text || "").trim() ? (
+                            <p className="whitespace-pre-wrap break-words text-sm text-tg-text">{m.text}</p>
+                          ) : null}
+                          {m.attachment && m.id != null ? (
+                            <MessageAttachment
+                              messageId={m.id}
+                              attachment={m.attachment}
+                              getAuthHeaders={getAuthHeaders}
+                            />
+                          ) : null}
+                        </>
+                      )}
+                      <div className="mt-1 flex items-center justify-end gap-1">
+                        <span className="text-[10px] text-white/40">
+                          {formatTime(m.time)}
+                          {m.edited_at ? " · изм." : ""}
+                        </span>
                       </div>
-                    )}
-                    <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-                      <span className="font-medium text-neon-cyan">{m.user_nick}</span>
-                      <span className="font-mono text-[9px] uppercase tracking-widest text-cyan-900">
-                        {formatTime(m.time)}
-                        {m.edited_at ? " · изм." : ""}
-                      </span>
-                    </div>
-                    {deleted ? (
-                      <p className="italic text-cyan-800">Сообщение удалено</p>
-                    ) : (
-                      <>
-                        {(m.text || "").trim() ? (
-                          <p className="whitespace-pre-wrap break-words text-cyan-50/95">{m.text}</p>
-                        ) : null}
-                        {m.attachment && m.id != null ? (
-                          <MessageAttachment
-                            messageId={m.id}
-                            attachment={m.attachment}
-                            getAuthHeaders={getAuthHeaders}
-                          />
-                        ) : null}
-                      </>
-                    )}
-                    <div className="mt-2 flex flex-wrap gap-1 border-t border-neon-cyan/10 pt-2">
-                      {QUICK_REACTIONS.map((em) => {
-                        const r = (m.reactions || []).find((x) => x.emoji === em);
-                        const cnt = r?.count ?? 0;
-                        const me = myUserId != null && r?.user_ids?.includes(myUserId);
-                        return (
+                      {/* Reactions */}
+                      {(m.reactions || []).some((r) => r.count > 0) && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {(m.reactions || []).filter((r) => r.count > 0).map((r) => {
+                            const me = myUserId != null && r.user_ids?.includes(myUserId);
+                            return (
+                              <button
+                                key={r.emoji}
+                                type="button"
+                                onClick={() => m.id != null && toggleReaction(m.id, r.emoji)}
+                                className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs transition ${
+                                  me
+                                    ? "bg-tg-accent/25 text-tg-accent"
+                                    : "bg-white/5 text-tg-text-sec hover:bg-white/10"
+                                }`}
+                              >
+                                {r.emoji}
+                                <span className="text-[10px]">{r.count}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {/* Actions on hover */}
+                      <div className="absolute -top-7 right-1 hidden rounded-lg bg-tg-panel px-1 py-0.5 shadow-lg group-hover:flex">
+                        {QUICK_REACTIONS.map((em) => (
                           <button
                             key={em}
                             type="button"
                             disabled={deleted || m.id == null}
                             onClick={() => m.id != null && toggleReaction(m.id, em)}
-                            className={`rounded border px-1.5 py-0.5 text-xs transition ${
-                              me
-                                ? "border-neon-cyan bg-neon-cyan/20 text-neon-bright"
-                                : "border-cyan-900/60 bg-black/40 text-cyan-500 hover:border-neon-cyan/40"
-                            }`}
+                            className="px-1 text-sm transition hover:scale-125 disabled:opacity-30"
                           >
                             {em}
-                            {cnt > 0 ? <span className="ml-0.5 font-mono text-[10px]">{cnt}</span> : null}
                           </button>
-                        );
-                      })}
-                    </div>
-                    <div className="mt-1.5 flex flex-wrap gap-3 font-mono text-[10px] uppercase tracking-wide">
-                      <button
-                        type="button"
-                        disabled={deleted}
-                        className="text-cyan-600 hover:text-neon-cyan disabled:opacity-40"
-                        onClick={() => {
-                          if (deleted || m.id == null) return;
-                          setReplyTo({
-                            id: m.id,
-                            user_nick: m.user_nick,
-                            preview: messagePreviewForReply(m),
-                          });
-                          setEditingId(null);
-                        }}
-                      >
-                        Ответить
-                      </button>
-                      {!mine && !deleted && m.user_id != null && myUserId != null ? (
-                        <button
-                          type="button"
-                          className="text-neon-purple hover:text-neon-cyan"
-                          onClick={() => startDmWithPeer(m.user_id)}
-                        >
-                          В ЛС
-                        </button>
-                      ) : null}
-                      {mine && !deleted && m.id != null && (
-                        <>
+                        ))}
+                        {!deleted && m.id != null && (
                           <button
                             type="button"
-                            className="text-cyan-600 hover:text-neon-cyan"
                             onClick={() => {
-                              setEditingId(m.id);
-                              setInput(m.text || "");
-                              setReplyTo(null);
-                              setPendingFile(null);
-                              if (fileInputRef.current) fileInputRef.current.value = "";
+                              setReplyTo({ id: m.id, user_nick: m.user_nick, preview: messagePreviewForReply(m) });
+                              setEditingId(null);
                             }}
+                            className="px-1 text-sm text-tg-text-sec transition hover:text-tg-accent"
+                            title="Ответить"
                           >
-                            Изменить
+                            ↩
                           </button>
+                        )}
+                        {!mine && !deleted && m.user_id != null && myUserId != null && (
                           <button
                             type="button"
-                            className="text-neon-amber hover:text-neon-hot"
-                            onClick={() => deleteMessage(m.id)}
+                            onClick={() => startDmWithPeer(m.user_id)}
+                            className="px-1 text-sm text-tg-text-sec transition hover:text-tg-accent"
+                            title="В ЛС"
                           >
-                            Удалить
+                            ✉
                           </button>
-                        </>
-                      )}
+                        )}
+                        {mine && !deleted && m.id != null && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingId(m.id);
+                                setInput(m.text || "");
+                                setReplyTo(null);
+                                setPendingFile(null);
+                                if (fileInputRef.current) fileInputRef.current.value = "";
+                              }}
+                              className="px-1 text-sm text-tg-text-sec transition hover:text-tg-accent"
+                              title="Изменить"
+                            >
+                              ✏
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteMessage(m.id)}
+                              className="px-1 text-sm text-tg-text-sec transition hover:text-tg-danger"
+                              title="Удалить"
+                            >
+                              🗑
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
-              })
-            )}
-          </div>
-
-          {(replyTo || editingId != null) && (
-            <div className="flex flex-shrink-0 items-center justify-between gap-2 border-t border-neon-cyan/20 bg-black/50 px-3 py-2 text-xs text-cyan-500">
-              <span className="min-w-0 truncate">
-                {editingId != null
-                  ? `Правка сообщения #${editingId}`
-                  : `Ответ ${replyTo?.user_nick}: ${replyTo?.preview || ""}`}
-              </span>
-              <button
-                type="button"
-                className="shrink-0 font-mono text-neon-hot hover:underline"
-                onClick={() => {
-                  setReplyTo(null);
-                  setEditingId(null);
-                  setInput("");
-                }}
-              >
-                Отмена
-              </button>
+              })}
             </div>
           )}
-          {typingPeers.length > 0 && (
-            <div className="flex-shrink-0 border-t border-neon-purple/25 bg-neon-purple/5 px-3 py-1.5 font-mono text-[11px] text-neon-purple">
-              {typingPeers.length === 1
-                ? `${typingPeers[0]} печатает…`
-                : `${typingPeers.slice(0, 4).join(", ")} печатают…`}
-            </div>
-          )}
+        </div>
 
-          {videoNoteRecording && recordingPreviewStream ? (
-            <div className="flex flex-shrink-0 items-center gap-3 border-t border-neon-hot/35 bg-neon-hot/10 px-3 py-2">
-              <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-neon-cyan/40 bg-black">
-                <video
-                  ref={videoNoteLiveRef}
-                  className="h-full w-full scale-x-[-1] object-cover"
-                  muted
-                  playsInline
-                  autoPlay
-                />
-              </div>
-              <p className="font-mono text-[11px] text-neon-hot">
-                Запись… отпустите в любом месте экрана или до 60 с
+        {/* Reply / Edit bar */}
+        {(replyTo || editingId != null) && (
+          <div className="flex items-center gap-3 border-t border-tg-border bg-tg-header px-4 py-2">
+            <div className="h-8 w-0.5 rounded-full bg-tg-accent" />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium text-tg-accent">
+                {editingId != null ? "Редактирование" : `Ответ для ${replyTo?.user_nick}`}
+              </p>
+              <p className="truncate text-xs text-tg-text-sec">
+                {editingId != null ? input.slice(0, 80) : replyTo?.preview || ""}
               </p>
             </div>
-          ) : null}
-          {videoNoteUploading && !videoNoteRecording ? (
-            <div className="flex-shrink-0 border-t border-neon-cyan/25 bg-black/50 px-3 py-2 font-mono text-[11px] text-cyan-600">
-              Отправка видеосообщения…
-            </div>
-          ) : null}
+            <button
+              type="button"
+              className="shrink-0 rounded-full p-1 text-tg-text-muted transition hover:bg-tg-hover hover:text-tg-text"
+              onClick={() => { setReplyTo(null); setEditingId(null); setInput(""); }}
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
-          <form
-            onSubmit={sendMessage}
-            className="flex flex-shrink-0 flex-wrap items-center gap-2 border-t-2 border-neon-cyan/20 bg-black/50 p-3"
+        {/* Typing indicator */}
+        {typingPeers.length > 0 && (
+          <div className="border-t border-tg-border px-4 py-1.5 text-xs text-tg-accent">
+            {typingPeers.length === 1
+              ? `${typingPeers[0]} печатает…`
+              : `${typingPeers.slice(0, 4).join(", ")} печатают…`}
+          </div>
+        )}
+
+        {/* Video note recording / uploading */}
+        {videoNoteRecording && recordingPreviewStream ? (
+          <div className="flex items-center gap-3 border-t border-tg-border bg-tg-header px-4 py-2">
+            <div className="h-12 w-12 shrink-0 overflow-hidden rounded-full border-2 border-red-500 bg-black">
+              <video ref={videoNoteLiveRef} className="h-full w-full scale-x-[-1] object-cover" muted playsInline autoPlay />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-red-400">Запись видео…</p>
+              <p className="text-xs text-tg-text-muted">Отпустите для отправки</p>
+            </div>
+          </div>
+        ) : null}
+        {videoNoteUploading && !videoNoteRecording ? (
+          <div className="border-t border-tg-border px-4 py-2 text-xs text-tg-accent">
+            Отправка видеосообщения…
+          </div>
+        ) : null}
+
+        {/* Input area */}
+        <form onSubmit={sendMessage} className="flex items-end gap-2 border-t border-tg-border bg-tg-header px-3 py-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,.pdf,.txt"
+            onChange={(e) => { setPendingFile(e.target.files?.[0] || null); }}
+          />
+          <button
+            type="button"
+            disabled={editingId != null}
+            title="Прикрепить файл"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-tg-text-sec transition hover:bg-tg-hover hover:text-tg-accent disabled:opacity-40"
+            onClick={() => fileInputRef.current?.click()}
           >
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="hidden"
-              accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,.pdf,.txt"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                setPendingFile(f || null);
-              }}
-            />
-            <button
-              type="button"
-              disabled={editingId != null}
-              title="Прикрепить файл"
-              className="shrink-0 border border-neon-purple/45 bg-black/50 px-2.5 py-2 font-mono text-sm text-neon-purple transition hover:border-neon-cyan/50 hover:text-neon-cyan disabled:cursor-not-allowed disabled:opacity-40"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              📎
-            </button>
-            <button
-              type="button"
-              disabled={
-                editingId != null ||
-                !!pendingFile ||
-                videoNoteUploading ||
-                (status === "online" && !roomJoined)
-              }
-              title="Зажмите для видеосообщения (квадрат). Отпустите — отправка."
-              className={`shrink-0 touch-none select-none border px-2 py-2 font-mono text-base leading-none transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                videoNoteRecording
-                  ? "animate-pulse border-neon-hot bg-neon-hot/30 text-neon-hot shadow-neon-magenta"
-                  : "border-neon-cyan/50 bg-black/50 text-neon-cyan hover:border-neon-cyan hover:bg-neon-cyan/10"
-              }`}
-              onPointerDown={(e) => {
-                e.preventDefault();
-                if (e.button !== 0) return;
-                void startVideoNoteRecord();
-              }}
-            >
-              ⬤
-            </button>
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 015 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 005 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/></svg>
+          </button>
+
+          <div className="min-w-0 flex-1">
             {pendingFile && editingId == null ? (
-              <span className="flex max-w-[140px] items-center gap-1 truncate font-mono text-[10px] text-cyan-600">
-                <span className="truncate" title={pendingFile.name}>
-                  {pendingFile.name}
-                </span>
+              <div className="mb-1 flex items-center gap-2 rounded-lg bg-tg-input px-3 py-1.5 text-xs text-tg-text-sec">
+                <span className="truncate">📎 {pendingFile.name}</span>
                 <button
                   type="button"
-                  className="shrink-0 text-neon-hot hover:underline"
-                  onClick={() => {
-                    setPendingFile(null);
-                    if (fileInputRef.current) fileInputRef.current.value = "";
-                  }}
+                  className="shrink-0 text-tg-danger hover:underline"
+                  onClick={() => { setPendingFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
                 >
                   ✕
                 </button>
-              </span>
+              </div>
             ) : null}
             <input
-              className="cyber-input min-w-0 flex-1 basis-[min(100%,12rem)]"
+              className="w-full rounded-xl bg-tg-input px-4 py-2.5 text-sm text-tg-text outline-none placeholder:text-tg-text-muted"
               value={input}
               onChange={onInputChange}
-              placeholder={editingId != null ? "Редактирование…" : "Сообщение…"}
+              placeholder={editingId != null ? "Редактирование…" : "Сообщение"}
               maxLength={2000}
               autoComplete="off"
             />
-            <button
-              type="submit"
-              disabled={
-                status === "online" && !roomJoined
-                  ? true
-                  : editingId != null
-                    ? !input.trim()
-                    : !input.trim() && !pendingFile
-              }
-              className="font-display shrink-0 border border-neon-cyan/50 bg-gradient-to-br from-neon-cyan to-neon-purple px-4 py-2 text-sm font-bold tracking-wider text-black shadow-neon-cyan transition hover:brightness-110 disabled:cursor-not-allowed disabled:border-cyan-900 disabled:bg-cyan-950 disabled:text-cyan-800 disabled:shadow-none"
-            >
-              {editingId != null
-                ? "OK"
-                : status === "online" && !roomJoined
-                  ? "SYNC…"
-                  : "TX"}
-            </button>
-          </form>
-        </section>
-      </div>
+          </div>
 
+          <button
+            type="button"
+            disabled={editingId != null || !!pendingFile || videoNoteUploading || (status === "online" && !roomJoined)}
+            title="Видеосообщение (зажмите)"
+            className={`flex h-10 w-10 shrink-0 touch-none select-none items-center justify-center rounded-full transition disabled:opacity-40 ${
+              videoNoteRecording
+                ? "animate-pulse bg-red-500 text-white"
+                : "text-tg-text-sec hover:bg-tg-hover hover:text-tg-accent"
+            }`}
+            onPointerDown={(e) => { e.preventDefault(); if (e.button !== 0) return; void startVideoNoteRecord(); }}
+          >
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+          </button>
+
+          <button
+            type="submit"
+            disabled={
+              status === "online" && !roomJoined
+                ? true
+                : editingId != null
+                  ? !input.trim()
+                  : !input.trim() && !pendingFile
+            }
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-tg-accent text-white transition hover:bg-tg-accent/85 disabled:opacity-40"
+          >
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+          </button>
+        </form>
+      </main>
+
+      {/* DM modal */}
       {dmModalOpen ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="dm-modal-title"
+          onClick={(e) => { if (e.target === e.currentTarget) setDmModalOpen(false); }}
         >
-          <div className="cyber-panel relative max-h-[75vh] w-full max-w-md overflow-hidden p-4 shadow-neon-cyan">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <h3 id="dm-modal-title" className="font-mono text-sm text-neon-cyan">
-                Кому написать
-              </h3>
+          <div className="w-full max-w-sm rounded-xl bg-tg-panel p-5 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 id="dm-modal-title" className="text-base font-semibold text-tg-text">Написать</h3>
               <button
                 type="button"
-                className="font-mono text-neon-hot hover:underline"
+                className="rounded-full p-1 text-tg-text-muted transition hover:bg-tg-hover hover:text-tg-text"
                 onClick={() => setDmModalOpen(false)}
               >
-                Закрыть
+                ✕
               </button>
             </div>
             {dmUsersLoading ? (
-              <p className="py-6 text-center font-mono text-sm text-cyan-700">Загрузка…</p>
+              <p className="py-8 text-center text-sm text-tg-text-muted">Загрузка…</p>
             ) : dmUsers.length === 0 ? (
-              <p className="py-6 text-center font-mono text-sm text-cyan-800">Нет других пользователей</p>
+              <p className="py-8 text-center text-sm text-tg-text-muted">Нет других пользователей</p>
             ) : (
-              <ul className="max-h-64 space-y-1 overflow-y-auto md:max-h-80">
+              <ul className="max-h-72 space-y-0.5 overflow-y-auto">
                 {dmUsers.map((u) => (
                   <li key={u.id}>
                     <button
                       type="button"
-                      className="w-full truncate border border-transparent px-2 py-2 text-left font-mono text-sm text-cyan-400 transition hover:border-neon-cyan/40 hover:text-neon-cyan"
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-tg-hover"
                       onClick={() => startDmWithPeer(u.id)}
                     >
-                      {u.nickname}
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-orange-600 text-sm font-semibold text-white">
+                        {u.nickname?.[0]?.toUpperCase() || "?"}
+                      </div>
+                      <span className="truncate text-sm text-tg-text">{u.nickname}</span>
                     </button>
                   </li>
                 ))}
@@ -1829,7 +1831,6 @@ export default function App() {
           </div>
         </div>
       ) : null}
-      </div>
     </div>
   );
 }
