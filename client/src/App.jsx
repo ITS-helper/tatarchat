@@ -8,10 +8,7 @@ const LS_LAST_ROOM = "tatarchat_last_room";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "👎"];
 /** sessionStorage: выбранный раздел и пароли комнат (не путать с паролем аккаунта) */
-const SS_SITE_ROOM = "tatarchat_site_room";
 const SS_DTD_ROOM_PW = "tatarchat_room_pw_dreamteamdauns";
-
-const GATE_PASSWORD_DTD = "1488";
 
 /** Видеосообщения: удерживать кнопку записи, как в Telegram (превью — квадрат) */
 const VIDEO_NOTE_MAX_MS = 60_000;
@@ -116,15 +113,11 @@ function getInitialRoom() {
   return canonicalizeStoredRoom(localStorage.getItem(LS_LAST_ROOM));
 }
 
-function readSiteRoomFromSession() {
-  const slug = sessionStorage.getItem(SS_SITE_ROOM);
-  if (slug !== "dreamteamdauns") return null;
-  const pw = sessionStorage.getItem(SS_DTD_ROOM_PW);
-  return pw ? "dreamteamdauns" : null;
+function hasStoredDtdChannelPw() {
+  return !!sessionStorage.getItem(SS_DTD_ROOM_PW);
 }
 
 function clearGateSession() {
-  sessionStorage.removeItem(SS_SITE_ROOM);
   sessionStorage.removeItem(SS_DTD_ROOM_PW);
 }
 
@@ -266,19 +259,17 @@ export default function App() {
   const [authMode, setAuthMode] = useState("login");
   const [nameInput, setNameInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
-  const [siteRoom, setSiteRoom] = useState(() => readSiteRoomFromSession());
-  const [gatePasswordDraft, setGatePasswordDraft] = useState("");
+  const [dtdChannelUnlocked, setDtdChannelUnlocked] = useState(() => hasStoredDtdChannelPw());
+  const [dtdPwModalDraft, setDtdPwModalDraft] = useState("");
   const [publicChannels, setPublicChannels] = useState([]);
   const [directChannels, setDirectChannels] = useState([]);
   const [dmModalOpen, setDmModalOpen] = useState(false);
   const [dmUsers, setDmUsers] = useState([]);
   const [dmUsersLoading, setDmUsersLoading] = useState(false);
   const publicChannelsRef = useRef([]);
-  const [activeRoom, setActiveRoom] = useState(
-    () => readSiteRoomFromSession() || getInitialRoom()
-  );
+  const [activeRoom, setActiveRoom] = useState(() => getInitialRoom());
   const [roomTitle, setRoomTitle] = useState(() => {
-    const slug = readSiteRoomFromSession() || getInitialRoom();
+    const slug = getInitialRoom();
     return slug.startsWith("dm-") ? "ЛС" : slug === "lobby" ? "Лобби" : "DTD";
   });
   const [messages, setMessages] = useState([]);
@@ -367,6 +358,15 @@ export default function App() {
 
   useEffect(() => {
     activeRoomRef.current = activeRoom;
+  }, [activeRoom]);
+
+  useEffect(() => {
+    if (activeRoom === "dreamteamdauns") {
+      setDtdChannelUnlocked(hasStoredDtdChannelPw());
+      if (!hasStoredDtdChannelPw()) setBanner(null);
+    } else {
+      setDtdChannelUnlocked(true);
+    }
   }, [activeRoom]);
 
   useEffect(() => {
@@ -701,6 +701,10 @@ export default function App() {
           data = {};
         }
         if (!res.ok) {
+          if (room === "dreamteamdauns" && (res.status === 403 || res.status === 401)) {
+            sessionStorage.removeItem(SS_DTD_ROOM_PW);
+            setDtdChannelUnlocked(false);
+          }
           setBanner(data.error || `Не удалось загрузить чат (${res.status})`);
           setMessages([]);
           return;
@@ -719,12 +723,22 @@ export default function App() {
   useEffect(() => {
     if (!token) return;
     localStorage.setItem(LS_LAST_ROOM, activeRoom);
+    if (activeRoom === "dreamteamdauns" && !sessionStorage.getItem(SS_DTD_ROOM_PW)) {
+      setMessages([]);
+      setBanner(null);
+      return;
+    }
     loadHistoryForRoom(activeRoom);
   }, [token, activeRoom, loadHistoryForRoom]);
 
   const emitJoinRoom = useCallback((socket) => {
-    const gen = ++joinGenRef.current;
     const r = activeRoomRef.current;
+    if (r === "dreamteamdauns" && !sessionStorage.getItem(SS_DTD_ROOM_PW)) {
+      setRoomJoined(false);
+      roomJoinedRef.current = false;
+      return;
+    }
+    const gen = ++joinGenRef.current;
     const row = publicChannelsRef.current.find((c) => c.slug === r);
     const need =
       row?.requiresPassword === true || (row == null && r === "dreamteamdauns");
@@ -742,6 +756,10 @@ export default function App() {
         setBanner(ack.error || "Не удалось войти в комнату");
         setRoomJoined(false);
         roomJoinedRef.current = false;
+        if (r === "dreamteamdauns" && need) {
+          sessionStorage.removeItem(SS_DTD_ROOM_PW);
+          setDtdChannelUnlocked(false);
+        }
       }
     });
   }, []);
@@ -859,27 +877,21 @@ export default function App() {
     emitJoinRoom(s);
   }, [activeRoom, token, emitJoinRoom]);
 
-  const submitGate = (e) => {
+  const submitDtdChannelPassword = (e) => {
     e.preventDefault();
     setBanner(null);
-    const slug = "dreamteamdauns";
-    const p = gatePasswordDraft.trim();
+    const p = dtdPwModalDraft.trim();
     if (!p) {
-      setBanner("Введите пароль чата");
+      setBanner("Введите пароль канала");
       return;
     }
-    if (p !== GATE_PASSWORD_DTD) {
-      setBanner("Неверный пароль");
-      return;
-    }
-    sessionStorage.setItem(SS_SITE_ROOM, slug);
     sessionStorage.setItem(SS_DTD_ROOM_PW, p);
-    setSiteRoom(slug);
-    setActiveRoom(slug);
-    setRoomTitle("DTD");
-    localStorage.setItem(LS_LAST_ROOM, slug);
-    setGatePasswordDraft("");
-    setBanner(null);
+    setDtdPwModalDraft("");
+    setDtdChannelUnlocked(true);
+    const room = activeRoomRef.current;
+    void loadHistoryForRoom(room);
+    const sock = socketRef.current;
+    if (sock?.connected) emitJoinRoom(sock);
   };
 
   const submitAuth = async (e) => {
@@ -947,7 +959,7 @@ export default function App() {
     localStorage.removeItem(LS_USER_ID);
     localStorage.removeItem(LS_LAST_ROOM);
     clearGateSession();
-    setSiteRoom(null);
+    setDtdChannelUnlocked(false);
     setToken("");
     setNickname("");
     setNameInput("");
@@ -963,7 +975,8 @@ export default function App() {
     setSearchResults([]);
     setPublicChannels([]);
     setDirectChannels([]);
-    setActiveRoom("dreamteamdauns");
+    setActiveRoom("lobby");
+    setRoomTitle("Лобби");
     setStatus("offline");
     setRoomJoined(false);
     roomJoinedRef.current = false;
@@ -1193,59 +1206,6 @@ export default function App() {
     }
   };
 
-  if (!siteRoom) {
-    return (
-      <div className="relative min-h-full">
-        <div className="cyber-vignette" aria-hidden />
-        <div className="cyber-scanlines" aria-hidden />
-        <div className="relative z-10 flex min-h-full flex-col items-center justify-center p-4">
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-neon-purple/10 via-transparent to-neon-hot/5" />
-          <div className="cyber-panel relative w-full max-w-md p-6 shadow-neon-cyan">
-            <p className="mb-2 text-center font-mono text-[10px] uppercase tracking-[0.35em] text-neon-cyan/60">
-              // uplink
-            </p>
-            <h1 className="font-display mb-1 text-center text-2xl font-bold tracking-wide text-neon-bright text-glow-cyan">
-              TatarChat
-            </h1>
-            <p className="mb-4 text-center text-sm text-cyan-600/90">
-              Введите пароль чата <span className="font-semibold text-neon-cyan">DTD</span>. Дальше — вход в аккаунт.
-              {getStoredToken().trim() ? (
-                <span className="mt-2 block text-cyan-500/90">Аккаунт уже сохранён — после пароля откроется чат.</span>
-              ) : null}
-            </p>
-
-            <form onSubmit={submitGate} className="space-y-4">
-              <label className="block text-sm text-cyan-400/90">
-                Пароль чата
-                <input
-                  type="password"
-                  className="cyber-input mt-1 w-full"
-                  value={gatePasswordDraft}
-                  onChange={(e) => setGatePasswordDraft(e.target.value)}
-                  placeholder="DTD"
-                  maxLength={64}
-                  autoComplete="off"
-                  autoFocus
-                />
-              </label>
-              {banner && (
-                <p className="border border-neon-amber/40 bg-neon-amber/10 px-3 py-2 font-mono text-sm text-neon-amber">
-                  {banner}
-                </p>
-              )}
-              <button
-                type="submit"
-                className="font-display w-full bg-gradient-to-r from-cyan-600 via-neon-purple to-neon-hot py-2.5 font-semibold tracking-[0.2em] text-black shadow-neon-cyan transition hover:brightness-110"
-              >
-                Продолжить
-              </button>
-            </form>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   if (!token) {
     return (
       <div className="relative min-h-full">
@@ -1267,13 +1227,12 @@ export default function App() {
             type="button"
             onClick={() => {
               clearGateSession();
-              setSiteRoom(null);
-              setGatePasswordDraft("");
+              setDtdPwModalDraft("");
               setBanner(null);
             }}
             className="mb-4 w-full border border-cyan-800/60 py-2 text-xs font-mono uppercase tracking-widest text-cyan-700 transition hover:border-neon-cyan/50 hover:text-neon-cyan"
           >
-            Сменить пароль чата
+            Сбросить пароль канала DTD
           </button>
 
           <div className="mb-4 flex border border-neon-cyan/35 bg-black/60 p-px">
@@ -1356,6 +1315,52 @@ export default function App() {
       <div className="cyber-vignette" aria-hidden />
       <div className="cyber-scanlines" aria-hidden />
       <div className="relative z-10 flex min-h-full flex-col">
+      {activeRoom === "dreamteamdauns" && !dtdChannelUnlocked ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="dtd-pw-title"
+        >
+          <div className="cyber-panel w-full max-w-md p-6 shadow-neon-cyan">
+            <h2
+              id="dtd-pw-title"
+              className="font-display mb-2 text-lg font-bold tracking-wide text-neon-bright text-glow-cyan"
+            >
+              Пароль канала DTD
+            </h2>
+            <p className="mb-4 text-sm text-cyan-600/90">
+              Этот канал защищён паролем. Введите его, чтобы загрузить историю и подключиться к сокету.
+            </p>
+            <form onSubmit={submitDtdChannelPassword} className="space-y-4">
+              <label className="block text-sm text-cyan-400/90">
+                Пароль канала
+                <input
+                  type="password"
+                  className="cyber-input mt-1 w-full"
+                  value={dtdPwModalDraft}
+                  onChange={(e) => setDtdPwModalDraft(e.target.value)}
+                  placeholder="••••••"
+                  maxLength={128}
+                  autoComplete="off"
+                  autoFocus
+                />
+              </label>
+              {banner && (
+                <p className="border border-neon-amber/40 bg-neon-amber/10 px-3 py-2 font-mono text-sm text-neon-amber">
+                  {banner}
+                </p>
+              )}
+              <button
+                type="submit"
+                className="font-display w-full bg-gradient-to-r from-cyan-600 via-neon-purple to-neon-hot py-2.5 font-semibold tracking-[0.2em] text-black shadow-neon-cyan transition hover:brightness-110"
+              >
+                Войти в канал
+              </button>
+            </form>
+          </div>
+        </div>
+      ) : null}
       <header className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b-2 border-neon-cyan/35 bg-black/85 px-4 py-3 shadow-neon-cyan backdrop-blur-md">
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-3">
