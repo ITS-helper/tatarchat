@@ -10,3 +10,5 @@ dist/
 .vscode/
 *.swp
 *.swo
+render-dump.sql
+render-dump.custom
