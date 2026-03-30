@@ -42,6 +42,13 @@ const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp
 /** Короткие видеосообщения («кружки»), на клиенте в квадрате */
 const VIDEO_NOTE_MIMES = new Set(["video/webm", "video/mp4"]);
 
+/** Браузеры шлют multipart с codecs: "video/webm;codecs=vp8,opus" — без нормализации multer отклоняет. */
+function normalizeContentTypeMime(m) {
+  const s = String(m || "").trim().toLowerCase();
+  const i = s.indexOf(";");
+  return (i === -1 ? s : s.slice(0, i)).trim();
+}
+
 /** slug → отображаемое имя и пароль комнаты (null = без пароля) */
 const GROUP_ROOMS = {
   dreamteamdauns: {
@@ -151,7 +158,8 @@ function pickSafeExt(file) {
     "application/pdf": ".pdf",
     "text/plain": ".txt",
   };
-  return map[file.mimetype] || ".bin";
+  const mime = normalizeContentTypeMime(file.mimetype || "");
+  return map[mime] || ".bin";
 }
 
 function isVideoNoteFlag(body) {
@@ -413,7 +421,7 @@ const upload = multer({
   }),
   limits: { fileSize: MAX_UPLOAD_BYTES },
   fileFilter(req, file, cb) {
-    const mime = file.mimetype || "";
+    const mime = normalizeContentTypeMime(file.mimetype || "");
     if (ALLOWED_UPLOAD_MIMES.has(mime)) return cb(null, true);
     const name = String(file.originalname || "").toLowerCase();
     if (
@@ -820,7 +828,7 @@ async function saveNewMessageWithOptionalFile({ room, userId, text, replyToId, m
   let attSize = null;
   let effectiveUploadMime = null;
   if (multerFile) {
-    let fileMime = multerFile.mimetype || "";
+    let fileMime = normalizeContentTypeMime(multerFile.mimetype || "");
     const lowName = String(multerFile.originalname || "").toLowerCase();
     if (
       videoNote &&

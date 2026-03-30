@@ -529,7 +529,8 @@ export default function App() {
         mime = pickRecorderMimeType() || "video/webm";
       }
       const ext = mime.includes("mp4") ? "mp4" : "webm";
-      const file = new File([blob], `videonote.${ext}`, { type: mime });
+      const baseMime = ext === "mp4" ? "video/mp4" : "video/webm";
+      const file = new File([blob], `videonote.${ext}`, { type: baseMime });
       setVideoNoteUploading(true);
       stopTyping();
       try {
