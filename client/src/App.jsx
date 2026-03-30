@@ -10,17 +10,12 @@ const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "👎"];
 /** sessionStorage: выбранный раздел и пароли комнат (не путать с паролем аккаунта) */
 const SS_SITE_ROOM = "tatarchat_site_room";
 const SS_DTD_ROOM_PW = "tatarchat_room_pw_dreamteamdauns";
-const SS_FAMILY_ROOM_PW = "tatarchat_room_pw_family";
 
 const GATE_PASSWORD_DTD = "1488";
-const GATE_PASSWORD_FAMILY = "777";
 
 const PRODUCTION_API_ORIGIN = "https://tatarchat-server.onrender.com";
 
-const DEFAULT_ROOMS = [
-  { slug: "dreamteamdauns", title: "DTD", requiresPassword: true },
-  { slug: "family", title: "Family", requiresPassword: true },
-];
+const DEFAULT_ROOMS = [{ slug: "dreamteamdauns", title: "DTD", requiresPassword: true }];
 
 function getApiBase() {
   const fromEnv = import.meta.env.VITE_API_URL;
@@ -42,24 +37,20 @@ function getStoredToken() {
 
 function getInitialRoom() {
   const s = localStorage.getItem(LS_LAST_ROOM);
-  if (s === "dreamteamdauns" || s === "family") return s;
+  if (s === "dreamteamdauns") return s;
   return "dreamteamdauns";
 }
 
 function readSiteRoomFromSession() {
   const slug = sessionStorage.getItem(SS_SITE_ROOM);
-  if (slug !== "dreamteamdauns" && slug !== "family") return null;
-  const pw =
-    slug === "family"
-      ? sessionStorage.getItem(SS_FAMILY_ROOM_PW)
-      : sessionStorage.getItem(SS_DTD_ROOM_PW);
-  return pw ? slug : null;
+  if (slug !== "dreamteamdauns") return null;
+  const pw = sessionStorage.getItem(SS_DTD_ROOM_PW);
+  return pw ? "dreamteamdauns" : null;
 }
 
 function clearGateSession() {
   sessionStorage.removeItem(SS_SITE_ROOM);
   sessionStorage.removeItem(SS_DTD_ROOM_PW);
-  sessionStorage.removeItem(SS_FAMILY_ROOM_PW);
 }
 
 function readUserId() {
@@ -181,13 +172,6 @@ export default function App() {
   const [nameInput, setNameInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
   const [siteRoom, setSiteRoom] = useState(() => readSiteRoomFromSession());
-  const [gateSectionDraft, setGateSectionDraft] = useState(() => {
-    const unlocked = readSiteRoomFromSession();
-    if (unlocked) return unlocked;
-    const last = localStorage.getItem(LS_LAST_ROOM);
-    if (last === "dreamteamdauns" || last === "family") return last;
-    return "dreamteamdauns";
-  });
   const [gatePasswordDraft, setGatePasswordDraft] = useState("");
   const rooms = useMemo(
     () => (siteRoom ? DEFAULT_ROOMS.filter((r) => r.slug === siteRoom) : []),
@@ -260,12 +244,8 @@ export default function App() {
 
   const buildRoomHeaders = useCallback(() => {
     const headers = {};
-    const room = activeRoomRef.current;
-    if (room === "family" || room === "dreamteamdauns") {
-      const pw =
-        room === "family"
-          ? sessionStorage.getItem(SS_FAMILY_ROOM_PW)
-          : sessionStorage.getItem(SS_DTD_ROOM_PW);
+    if (activeRoomRef.current === "dreamteamdauns") {
+      const pw = sessionStorage.getItem(SS_DTD_ROOM_PW);
       if (pw) headers["X-Room-Password"] = pw;
     }
     return headers;
@@ -338,11 +318,8 @@ export default function App() {
       try {
         const base = getApiBase();
         const headers = { Authorization: `Bearer ${token}` };
-        if (room === "family" || room === "dreamteamdauns") {
-          const pw =
-            room === "family"
-              ? sessionStorage.getItem(SS_FAMILY_ROOM_PW)
-              : sessionStorage.getItem(SS_DTD_ROOM_PW);
+        if (room === "dreamteamdauns") {
+          const pw = sessionStorage.getItem(SS_DTD_ROOM_PW);
           if (pw) headers["X-Room-Password"] = pw;
         }
         const res = await fetch(`${base}/api/messages/${room}`, { headers });
@@ -378,12 +355,7 @@ export default function App() {
   const emitJoinRoom = useCallback((socket) => {
     const gen = ++joinGenRef.current;
     const r = activeRoomRef.current;
-    const pw =
-      r === "family"
-        ? sessionStorage.getItem(SS_FAMILY_ROOM_PW) || ""
-        : r === "dreamteamdauns"
-          ? sessionStorage.getItem(SS_DTD_ROOM_PW) || ""
-          : undefined;
+    const pw = r === "dreamteamdauns" ? sessionStorage.getItem(SS_DTD_ROOM_PW) || "" : "";
     setRoomJoined(false);
     roomJoinedRef.current = false;
     socket.emit("join-room", { room: r, roomPassword: pw || undefined }, (ack) => {
@@ -522,25 +494,18 @@ export default function App() {
   const submitGate = (e) => {
     e.preventDefault();
     setBanner(null);
-    const slug = gateSectionDraft;
+    const slug = "dreamteamdauns";
     const p = gatePasswordDraft.trim();
-    const expected = slug === "family" ? GATE_PASSWORD_FAMILY : GATE_PASSWORD_DTD;
     if (!p) {
-      setBanner("Введите пароль раздела");
+      setBanner("Введите пароль чата");
       return;
     }
-    if (p !== expected) {
-      setBanner("Неверный пароль раздела");
+    if (p !== GATE_PASSWORD_DTD) {
+      setBanner("Неверный пароль");
       return;
     }
     sessionStorage.setItem(SS_SITE_ROOM, slug);
-    if (slug === "family") {
-      sessionStorage.setItem(SS_FAMILY_ROOM_PW, p);
-      sessionStorage.removeItem(SS_DTD_ROOM_PW);
-    } else {
-      sessionStorage.setItem(SS_DTD_ROOM_PW, p);
-      sessionStorage.removeItem(SS_FAMILY_ROOM_PW);
-    }
+    sessionStorage.setItem(SS_DTD_ROOM_PW, p);
     setSiteRoom(slug);
     setActiveRoom(slug);
     const meta = DEFAULT_ROOMS.find((r) => r.slug === slug);
@@ -616,7 +581,6 @@ export default function App() {
     localStorage.removeItem(LS_LAST_ROOM);
     clearGateSession();
     setSiteRoom(null);
-    setGateSectionDraft("dreamteamdauns");
     setToken("");
     setNickname("");
     setNameInput("");
@@ -869,58 +833,27 @@ export default function App() {
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-neon-purple/10 via-transparent to-neon-hot/5" />
           <div className="cyber-panel relative w-full max-w-md p-6 shadow-neon-cyan">
             <p className="mb-2 text-center font-mono text-[10px] uppercase tracking-[0.35em] text-neon-cyan/60">
-              // choose uplink
+              // uplink
             </p>
             <h1 className="font-display mb-1 text-center text-2xl font-bold tracking-wide text-neon-bright text-glow-cyan">
               TatarChat
             </h1>
             <p className="mb-4 text-center text-sm text-cyan-600/90">
-              Выберите раздел и введите его пароль. Дальше — вход в аккаунт.
+              Введите пароль чата <span className="font-semibold text-neon-cyan">DTD</span>. Дальше — вход в аккаунт.
               {getStoredToken().trim() ? (
-                <span className="mt-2 block text-cyan-500/90">Аккаунт уже сохранён — после пароля раздела откроется чат.</span>
+                <span className="mt-2 block text-cyan-500/90">Аккаунт уже сохранён — после пароля откроется чат.</span>
               ) : null}
             </p>
 
-            <div className="mb-4 flex border border-neon-cyan/35 bg-black/60 p-px">
-              <button
-                type="button"
-                onClick={() => {
-                  setGateSectionDraft("dreamteamdauns");
-                  setBanner(null);
-                }}
-                className={`flex-1 py-2.5 text-sm font-medium transition ${
-                  gateSectionDraft === "dreamteamdauns"
-                    ? "bg-neon-cyan/25 text-neon-bright shadow-neon-cyan"
-                    : "text-cyan-800 hover:text-neon-cyan"
-                }`}
-              >
-                DTD
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setGateSectionDraft("family");
-                  setBanner(null);
-                }}
-                className={`flex-1 py-2.5 text-sm font-medium transition ${
-                  gateSectionDraft === "family"
-                    ? "bg-neon-hot/20 text-neon-magenta text-glow-magenta shadow-neon-magenta"
-                    : "text-cyan-800 hover:text-neon-magenta"
-                }`}
-              >
-                Family
-              </button>
-            </div>
-
             <form onSubmit={submitGate} className="space-y-4">
               <label className="block text-sm text-cyan-400/90">
-                Пароль раздела
+                Пароль чата
                 <input
                   type="password"
                   className="cyber-input mt-1 w-full"
                   value={gatePasswordDraft}
                   onChange={(e) => setGatePasswordDraft(e.target.value)}
-                  placeholder={gateSectionDraft === "family" ? "Family" : "DTD"}
+                  placeholder="DTD"
                   maxLength={64}
                   autoComplete="off"
                   autoFocus
@@ -959,24 +892,19 @@ export default function App() {
             TatarChat
           </h1>
           <p className="mb-4 text-center text-sm text-cyan-600/90">
-            Раздел:{" "}
-            <span className="font-semibold text-neon-cyan">
-              {siteRoom === "family" ? "Family" : "DTD"}
-            </span>
-            . Вход по имени и паролю. Новый пользователь — регистрация.
+            Чат <span className="font-semibold text-neon-cyan">DTD</span>. Вход по имени и паролю. Новый пользователь — регистрация.
           </p>
           <button
             type="button"
             onClick={() => {
               clearGateSession();
               setSiteRoom(null);
-              setGateSectionDraft(siteRoom || "dreamteamdauns");
               setGatePasswordDraft("");
               setBanner(null);
             }}
             className="mb-4 w-full border border-cyan-800/60 py-2 text-xs font-mono uppercase tracking-widest text-cyan-700 transition hover:border-neon-cyan/50 hover:text-neon-cyan"
           >
-            Сменить раздел
+            Сменить пароль чата
           </button>
 
           <div className="mb-4 flex border border-neon-cyan/35 bg-black/60 p-px">

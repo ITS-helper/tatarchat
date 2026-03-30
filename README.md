@@ -2,7 +2,7 @@
 
 Репозиторий — **корень проекта** (папка `tatarchat/` с каталогами `server/`, `client/` и файлом `init.sql` в корне).
 
-Одна комната общего чата (в коде — `family`), текстовые сообщения в реальном времени, история в **PostgreSQL**, список онлайн-пользователей.
+Групповой чат **DTD** (`dreamteamdauns`), текстовые сообщения в реальном времени, история в **PostgreSQL**, список онлайн-пользователей.
 
 **Стек:** Node.js 20 + Express + Socket.io + `pg` · React 18 + Vite + Tailwind CSS · PostgreSQL 15 (Docker).
 
@@ -89,7 +89,7 @@ npm run dev
 - Фронтенд: [http://localhost:5173](http://localhost:5173) (Vite, `npm run dev` в `client/`)
 - API и Socket.io: [http://localhost:3001](http://localhost:3001)
 
-Сначала **зарегистрируйте** пользователя (имя + пароль), затем войдите. Два групповых чата: **DreamTeamDauns** (без пароля) и **Family** (пароль комнаты по умолчанию `777`, см. `FAMILY_ROOM_PASSWORD` на сервере). История сообщений — только с JWT и, для Family, заголовком пароля комнаты.
+Сначала **зарегистрируйте** пользователя (имя + пароль), затем войдите. Чат **DTD** защищён паролем комнаты (по умолчанию `1488` на клиенте и сервере, см. `DTD_ROOM_PASSWORD` на сервере). История и отправка — с JWT и заголовком `X-Room-Password` после ввода пароля на экране гейта.
 
 В **production** на Render задайте **`JWT_SECRET`** (длинная случайная строка), иначе сервер не запустится.
 
@@ -129,12 +129,12 @@ Get-Content migrations\003_messages_user_id.sql -Raw | docker exec -i tatarchat-
 | `POST` | `/api/auth/register` | `{ "name", "password" }` — пароль от 6 символов; ответ `{ token, user }` |
 | `POST` | `/api/auth/login` | `{ "name", "password" }` — ответ `{ token, user }` |
 | `GET` | `/api/rooms` | Список комнат: `slug`, `title`, `requiresPassword` |
-| `GET` | `/api/messages/:slug` | История (например `dreamteamdauns`, `family`). Заголовки: `Authorization: Bearer`, для закрытых комнат — `X-Room-Password` |
-| `POST` | `/api/messages` | `Authorization: Bearer`, при необходимости `X-Room-Password`; тело `{ "room": "dreamteamdauns" \| "family", "text": "..." }` |
+| `GET` | `/api/messages/:slug` | История (`dreamteamdauns`). Заголовки: `Authorization: Bearer`, `X-Room-Password` для DTD |
+| `POST` | `/api/messages` | `Authorization: Bearer`, `X-Room-Password`; тело `{ "room": "dreamteamdauns", "text": "..." }` |
 
 ## Socket.io
 
-- Подключение с **`auth: { token }`**. Комнату выбирает клиент событием **`join-room`**: `{ room: "dreamteamdauns" }` или `{ room: "family", roomPassword: "777" }`.
+- Подключение с **`auth: { token }`**. Клиент шлёт **`join-room`**: `{ room: "dreamteamdauns", roomPassword: "…" }` (пароль комнаты).
 - **`message`** — `{ text }` в текущей комнате (после успешного `join-room`).
 - **`leave`** — выход и снятие с онлайн (несколько вкладок учитываются).
 
