@@ -6,7 +6,8 @@
     "dev": "concurrently -n server,client -c blue,green \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
     "build": "npm run build --prefix client",
     "start": "npm run start --prefix server",
-    "db:init": "docker-compose up -d && npm run db:init --prefix server"
+    "db:init": "docker-compose up -d && npm run db:init --prefix server",
+    "db:migrate": "npm run db:migrate --prefix server"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
