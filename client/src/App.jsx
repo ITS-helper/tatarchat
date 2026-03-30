@@ -1775,7 +1775,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden bg-tc-bg">
+    <div className="flex h-full w-full min-w-0 overflow-hidden bg-tc-bg">
       <input
         ref={avatarFileRef}
         type="file"
@@ -1798,12 +1798,13 @@ export default function App() {
           void uploadChannelIcon(f);
         }}
       />
-      {/* Sidebar */}
-      <aside
-        className={`${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        } fixed inset-y-0 left-0 z-40 flex w-72 flex-col bg-tc-sidebar transition-transform duration-200 md:static md:translate-x-0`}
-      >
+      {/* Sidebar: на iOS fixed внутри flex резервирует ~w-72 — обёртка max-md:w-0 + absolute панель */}
+      <div className="relative z-40 max-md:w-0 max-md:min-w-0 max-md:flex-none max-md:overflow-visible md:w-72 md:shrink-0">
+        <aside
+          className={`absolute inset-y-0 left-0 z-40 flex h-full w-72 flex-col bg-tc-sidebar transition-transform duration-200 md:relative md:z-auto md:translate-x-0 ${
+            sidebarOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
+        >
         <div className="flex items-center justify-between px-4 py-3">
           <h2 className="text-base font-semibold text-tc-text">Чаты</h2>
           <div className="flex items-center gap-1">
@@ -2028,6 +2029,7 @@ export default function App() {
           </button>
         </div>
       </aside>
+      </div>
 
       {sidebarOpen && (
         <div
@@ -2037,7 +2039,7 @@ export default function App() {
       )}
 
       {/* Main area */}
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* DTD password modal */}
         {activeRoom === "dreamteamdauns" && !dtdChannelUnlocked ? (
           <div
@@ -2133,11 +2135,11 @@ export default function App() {
         ) : (
           <>
         {/* Messages + parallax pattern (фон медленнее ленты) */}
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden">
           <div ref={chatParallaxRef} className="chat-bg-parallax pointer-events-none z-0" aria-hidden />
           <div
             ref={listRef}
-            className="messages-scroll relative z-10 flex-1 overflow-y-auto bg-transparent px-4 py-3"
+            className="messages-scroll relative z-10 w-full min-w-0 flex-1 overflow-y-auto bg-transparent px-4 py-3"
             onScroll={handleChatScroll}
             onClick={(e) => { if (e.target === e.currentTarget) setSelectedMsgId(null); }}
           >
