@@ -35,12 +35,18 @@ const ALLOWED_UPLOAD_MIMES = new Set([
   "image/webp",
   "video/webm",
   "video/mp4",
+  "audio/webm",
+  "audio/ogg",
+  "audio/mpeg",
+  "audio/mp4",
   "application/pdf",
   "text/plain",
 ]);
 const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 /** Короткие видеосообщения («кружки»), на клиенте в квадрате */
 const VIDEO_NOTE_MIMES = new Set(["video/webm", "video/mp4"]);
+const VOICE_MIMES = new Set(["audio/webm", "audio/ogg", "audio/mpeg", "audio/mp4"]);
+const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 
 /** Браузеры шлют multipart с codecs: "video/webm;codecs=vp8,opus" — без нормализации multer отклоняет. */
 function normalizeContentTypeMime(m) {
@@ -121,7 +127,7 @@ app.use(
   cors({
     origin: corsOrigin,
     credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization", "X-Room-Password", "X-Video-Note"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Room-Password", "X-Video-Note", "X-Voice-Message"],
   })
 );
 app.use(express.json({ limit: "64kb" }));
@@ -161,6 +167,10 @@ function pickSafeExt(file) {
     "image/webp": ".webp",
     "video/webm": ".webm",
     "video/mp4": ".mp4",
+    "audio/webm": ".webm",
+    "audio/ogg": ".ogg",
+    "audio/mpeg": ".mp3",
+    "audio/mp4": ".m4a",
     "application/pdf": ".pdf",
     "text/plain": ".txt",
   };
@@ -183,6 +193,22 @@ function isVideoNoteHeader(req) {
 
 function isVideoNoteRequest(req) {
   return isVideoNoteFlag(req.body) || isVideoNoteHeader(req);
+}
+
+function isVoiceFlag(body) {
+  const v = body?.voiceMessage ?? body?.voice_message;
+  if (v == null || v === "") return false;
+  const s = String(v).trim().toLowerCase();
+  return s === "1" || s === "true" || s === "yes";
+}
+
+function isVoiceHeader(req) {
+  const h = req.headers["x-voice-message"];
+  return h === "1" || String(h || "").trim().toLowerCase() === "true";
+}
+
+function isVoiceMessageRequest(req) {
+  return isVoiceFlag(req.body) || isVoiceHeader(req);
 }
 
 function escapeLikePattern(s) {
@@ -214,6 +240,12 @@ function canonicalizeChannelSlug(input) {
     if (a > b) [a, b] = [b, a];
     return `dm-${a}-${b}`;
   }
+  const saved = raw.match(/^saved-(\d+)$/i);
+  if (saved) {
+    const id = parseInt(saved[1], 10);
+    if (!Number.isInteger(id) || id < 1) return null;
+    return `saved-${id}`;
+  }
   const s = raw.toLowerCase().replace(/[^a-z0-9_]/g, "");
   if (!s || s.length > 64) return null;
   return s;
@@ -228,8 +260,24 @@ async function ensureDmChannelRow(slug, low, high) {
   );
 }
 
+async function ensureSavedChannelRow(userId) {
+  const slug = `saved-${userId}`;
+  await pool.query(
+    `INSERT INTO channels (slug, title, kind) VALUES ($1, $2, 'public')
+     ON CONFLICT (slug) DO NOTHING`,
+    [slug, "Избранное"]
+  );
+}
+
 async function userCanAccessChannel(slug, userId, roomPassword) {
   if (!slug || userId == null) return false;
+  const savedM = /^saved-(\d+)$/i.exec(slug);
+  if (savedM) {
+    const ownerId = parseInt(savedM[1], 10);
+    if (!Number.isInteger(ownerId) || ownerId !== userId) return false;
+    await ensureSavedChannelRow(userId);
+    return true;
+  }
   if (slug.startsWith("dm-")) {
     const m = /^dm-(\d+)-(\d+)$/.exec(slug);
     if (!m) return false;
@@ -249,6 +297,7 @@ async function userCanAccessChannel(slug, userId, roomPassword) {
 }
 
 async function getChannelTitleForUser(slug, viewerUserId) {
+  if (/^saved-\d+$/i.test(slug)) return "Избранное";
   const conf = GROUP_ROOMS[slug];
   if (conf) return conf.title;
   if (slug.startsWith("dm-")) {
@@ -410,9 +459,20 @@ async function ensurePhase3Schema() {
   }
 }
 
+async function ensureAvatarSchema() {
+  try {
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_storage_key VARCHAR(512)`);
+    await pool.query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS avatar_storage_key VARCHAR(512)`);
+  } catch (err) {
+    console.error("[schema] avatars:", err?.message || err);
+    throw err;
+  }
+}
+
 function ensureUploadDirs() {
   fs.mkdirSync(STAGING_DIR, { recursive: true });
   fs.mkdirSync(path.join(UPLOAD_ROOT, "rooms"), { recursive: true });
+  fs.mkdirSync(path.join(UPLOAD_ROOT, "avatars"), { recursive: true });
 }
 
 const upload = multer({
@@ -437,6 +497,47 @@ const upload = multer({
     ) {
       return cb(null, true);
     }
+    if (
+      isVoiceHeader(req) &&
+      /^voicemessage\.(webm|ogg|mp3|m4a)$/.test(name) &&
+      (mime === "application/octet-stream" || mime === "")
+    ) {
+      return cb(null, true);
+    }
+    cb(new Error("UNSUPPORTED_MIME"));
+  },
+});
+
+const uploadAvatar = multer({
+  storage: multer.diskStorage({
+    destination(_req, _file, cb) {
+      cb(null, STAGING_DIR);
+    },
+    filename(req, file, cb) {
+      cb(null, `avatar_${req.user.userId}_${Date.now()}${path.extname(file.originalname || "") || ".jpg"}`);
+    },
+  }),
+  limits: { fileSize: MAX_AVATAR_BYTES },
+  fileFilter(req, file, cb) {
+    const mime = normalizeContentTypeMime(file.mimetype || "");
+    if (IMAGE_MIMES.has(mime)) return cb(null, true);
+    cb(new Error("UNSUPPORTED_MIME"));
+  },
+});
+
+const uploadChannelAvatar = multer({
+  storage: multer.diskStorage({
+    destination(_req, _file, cb) {
+      cb(null, STAGING_DIR);
+    },
+    filename(req, file, cb) {
+      cb(null, `ch_av_${Date.now()}_${crypto.randomBytes(6).toString("hex")}${path.extname(file.originalname || "") || ".jpg"}`);
+    },
+  }),
+  limits: { fileSize: MAX_AVATAR_BYTES },
+  fileFilter(req, file, cb) {
+    const mime = normalizeContentTypeMime(file.mimetype || "");
+    if (IMAGE_MIMES.has(mime)) return cb(null, true);
     cb(new Error("UNSUPPORTED_MIME"));
   },
 });
@@ -643,6 +744,7 @@ function formatApiMessage(row, reactionList) {
     room: row.room,
     user_id: row.user_id,
     user_nick: row.user_nick,
+    user_has_avatar: !!row.user_has_avatar,
     text: deleted ? null : row.text,
     deleted,
     time: row.time,
@@ -674,6 +776,7 @@ async function getLastMessages(room, limit = 50) {
           m.attachment_storage_key,
           ${timeSelect} AS time,
           u.nickname AS user_nick,
+          (u.avatar_storage_key IS NOT NULL AND TRIM(u.avatar_storage_key) <> '') AS user_has_avatar,
           ru.nickname AS reply_user_nick,
           rm.text AS reply_text,
           rm.deleted_at AS reply_deleted_at
@@ -722,6 +825,7 @@ async function searchMessagesInRoom(room, query, limit = 40) {
       m.attachment_storage_key,
       ${timeSelect} AS time,
       u.nickname AS user_nick,
+      (u.avatar_storage_key IS NOT NULL AND TRIM(u.avatar_storage_key) <> '') AS user_has_avatar,
       ru.nickname AS reply_user_nick,
       rm.text AS reply_text,
       rm.deleted_at AS reply_deleted_at
@@ -758,6 +862,7 @@ async function getMessageRowById(id) {
       m.attachment_storage_key,
       ${timeSelect} AS time,
       u.nickname AS user_nick,
+      (u.avatar_storage_key IS NOT NULL AND TRIM(u.avatar_storage_key) <> '') AS user_has_avatar,
       ru.nickname AS reply_user_nick,
       rm.text AS reply_text,
       rm.deleted_at AS reply_deleted_at
@@ -821,7 +926,7 @@ async function unlinkAttachmentForMessage(id) {
   } catch (_) {}
 }
 
-async function saveNewMessageWithOptionalFile({ room, userId, text, replyToId, multerFile, videoNote = false }) {
+async function saveNewMessageWithOptionalFile({ room, userId, text, replyToId, multerFile, videoNote = false, voiceMessage = false }) {
   const normalizedText = normalizeMessageText(text);
   if (!normalizedText && !multerFile) {
     const e = new Error("Пустое сообщение");
@@ -843,6 +948,17 @@ async function saveNewMessageWithOptionalFile({ room, userId, text, replyToId, m
     ) {
       fileMime = lowName.endsWith(".mp4") ? "video/mp4" : "video/webm";
     }
+    if (
+      voiceMessage &&
+      !videoNote &&
+      /^voicemessage\.(webm|ogg|mp3|m4a)$/.test(lowName) &&
+      (fileMime === "application/octet-stream" || fileMime === "")
+    ) {
+      if (lowName.endsWith(".mp3")) fileMime = "audio/mpeg";
+      else if (lowName.endsWith(".m4a")) fileMime = "audio/mp4";
+      else if (lowName.endsWith(".ogg")) fileMime = "audio/ogg";
+      else fileMime = "audio/webm";
+    }
     if (!ALLOWED_UPLOAD_MIMES.has(fileMime)) {
       await fsp.unlink(multerFile.path).catch(() => {});
       const e = new Error("Тип файла не разрешён");
@@ -853,6 +969,8 @@ async function saveNewMessageWithOptionalFile({ room, userId, text, replyToId, m
       attKind = "image";
     } else if (videoNote && VIDEO_NOTE_MIMES.has(fileMime)) {
       attKind = "video_note";
+    } else if (voiceMessage && !videoNote && VOICE_MIMES.has(fileMime)) {
+      attKind = "voice";
     } else {
       attKind = "file";
     }
@@ -1002,9 +1120,13 @@ app.post("/api/rooms", requireAuth, async (req, res) => {
     const slug = sanitizeNickname(req.body?.slug);
     const title = String(req.body?.title || "").trim().slice(0, 64);
     if (!slug || !title) return res.status(400).json({ error: "slug и title обязательны" });
+    const slugLc = String(slug).toLowerCase();
+    if (slugLc.startsWith("saved-") || /^saved-\d+$/.test(slugLc)) {
+      return res.status(400).json({ error: "Зарезервированный идентификатор" });
+    }
     await pool.query(
       `INSERT INTO channels (slug, title, kind) VALUES ($1, $2, 'public') ON CONFLICT (slug) DO NOTHING`,
-      [slug.toLowerCase(), title]
+      [slugLc, title]
     );
     res.json({ ok: true });
   } catch (err) {
@@ -1032,6 +1154,7 @@ app.delete("/api/rooms/:slug", requireAuth, async (req, res) => {
     if (!req.user.isAdmin) return res.status(403).json({ error: "Только для админов" });
     const slug = req.params.slug;
     if (slug === "lobby") return res.status(400).json({ error: "Нельзя удалить лобби" });
+    if (/^saved-\d+$/i.test(slug)) return res.status(400).json({ error: "Нельзя удалить избранное" });
     await pool.query(`DELETE FROM channels WHERE slug = $1 AND kind = 'public'`, [slug]);
     res.json({ ok: true });
   } catch (err) {
@@ -1043,15 +1166,36 @@ app.delete("/api/rooms/:slug", requireAuth, async (req, res) => {
 app.get("/api/channels", requireAuth, async (req, res) => {
   try {
     const me = req.user.userId;
+    await ensureSavedChannelRow(me);
     const { rows: pubRows } = await pool.query(
-      `SELECT slug, title FROM channels WHERE kind = 'public' ORDER BY slug`
+      `SELECT slug, title, avatar_storage_key FROM channels WHERE kind = 'public' ORDER BY slug`
     );
-    const publicChannels = pubRows.map((r) => ({
+    const filtered = pubRows.filter((r) => {
+      const m = /^saved-(\d+)$/i.exec(r.slug);
+      if (!m) return true;
+      return parseInt(m[1], 10) === me;
+    });
+    const mapChannel = (r) => ({
       slug: r.slug,
       title: r.title || GROUP_ROOMS[r.slug]?.title || r.slug,
       kind: "public",
       requiresPassword: GROUP_ROOMS[r.slug]?.roomPassword != null,
-    }));
+      hasChannelAvatar: !!(r.avatar_storage_key && String(r.avatar_storage_key).trim() !== ""),
+    });
+    const savedSlug = `saved-${me}`;
+    const rest = filtered.filter((r) => r.slug !== savedSlug).map(mapChannel);
+    const savedRow = filtered.find((r) => r.slug === savedSlug);
+    const savedCh = savedRow
+      ? { ...mapChannel(savedRow), isSaved: true }
+      : {
+          slug: savedSlug,
+          title: "Избранное",
+          kind: "public",
+          requiresPassword: false,
+          hasChannelAvatar: false,
+          isSaved: true,
+        };
+    const publicChannels = [savedCh, ...rest];
     const { rows: dmRows } = await pool.query(
       `SELECT slug, user_low_id, user_high_id FROM channels WHERE kind = 'direct' AND (user_low_id = $1 OR user_high_id = $1) ORDER BY slug`,
       [me]
@@ -1074,6 +1218,126 @@ app.get("/api/channels", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Не удалось загрузить каналы" });
   }
 });
+
+app.get("/api/me", requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, nickname,
+        (avatar_storage_key IS NOT NULL AND TRIM(avatar_storage_key) <> '') AS has_avatar
+       FROM users WHERE id = $1`,
+      [req.user.userId]
+    );
+    const u = rows[0];
+    if (!u) return res.status(404).json({ error: "Нет пользователя" });
+    res.json({
+      id: u.id,
+      nickname: u.nickname,
+      isAdmin: req.user.isAdmin,
+      hasAvatar: !!u.has_avatar,
+    });
+  } catch (err) {
+    console.error("GET /api/me", err);
+    res.status(500).json({ error: "Ошибка" });
+  }
+});
+
+app.post("/api/me/avatar", requireAuth, (req, res, next) => {
+  uploadAvatar.single("file")(req, res, (err) => {
+    if (err) return res.status(400).json({ error: "Нужен файл изображения до 2 МБ" });
+    next();
+  });
+}, async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "Нет файла" });
+    const userId = req.user.userId;
+    const { rows } = await pool.query(`SELECT avatar_storage_key FROM users WHERE id = $1`, [userId]);
+    const old = rows[0]?.avatar_storage_key;
+    const ext = pickSafeExt({ ...req.file, mimetype: normalizeContentTypeMime(req.file.mimetype) });
+    const storageKey = `avatars/user_${userId}${ext}`;
+    const dest = path.join(UPLOAD_ROOT, storageKey);
+    await fsp.mkdir(path.dirname(dest), { recursive: true });
+    if (old) {
+      const prev = path.join(UPLOAD_ROOT, old);
+      await fsp.unlink(prev).catch(() => {});
+    }
+    await fsp.rename(req.file.path, dest);
+    await pool.query(`UPDATE users SET avatar_storage_key = $1 WHERE id = $2`, [storageKey, userId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("POST /api/me/avatar", err);
+    res.status(500).json({ error: "Не удалось сохранить аватар" });
+  }
+});
+
+app.get("/api/avatar/user/:userId", requireAuth, async (req, res) => {
+  try {
+    const uid = parseInt(req.params.userId, 10);
+    if (!Number.isInteger(uid) || uid < 1) return res.status(400).json({ error: "Некорректный id" });
+    const { rows } = await pool.query(`SELECT avatar_storage_key FROM users WHERE id = $1`, [uid]);
+    const key = rows[0]?.avatar_storage_key;
+    if (!key || !String(key).trim()) return res.status(404).json({ error: "Нет аватара" });
+    const full = path.join(UPLOAD_ROOT, key);
+    if (!fs.existsSync(full)) return res.status(404).json({ error: "Файл не найден" });
+    res.sendFile(full);
+  } catch (err) {
+    console.error("GET /api/avatar/user/:userId", err);
+    res.status(500).json({ error: "Ошибка" });
+  }
+});
+
+app.get("/api/avatar/channel/:slug", requireAuth, async (req, res) => {
+  try {
+    const slug = req.params.slug;
+    const rp = getRoomPasswordFromRequest(req);
+    if (!(await userCanAccessChannel(slug, req.user.userId, rp))) {
+      return res.status(403).json({ error: "Нет доступа" });
+    }
+    const { rows } = await pool.query(`SELECT avatar_storage_key FROM channels WHERE slug = $1 AND kind = 'public'`, [slug]);
+    const key = rows[0]?.avatar_storage_key;
+    if (!key || !String(key).trim()) return res.status(404).json({ error: "Нет иконки" });
+    const full = path.join(UPLOAD_ROOT, key);
+    if (!fs.existsSync(full)) return res.status(404).json({ error: "Файл не найден" });
+    res.sendFile(full);
+  } catch (err) {
+    console.error("GET /api/avatar/channel/:slug", err);
+    res.status(500).json({ error: "Ошибка" });
+  }
+});
+
+app.post(
+  "/api/rooms/:slug/avatar",
+  requireAuth,
+  (req, res, next) => {
+    if (!req.user.isAdmin) return res.status(403).json({ error: "Только для админов" });
+    uploadChannelAvatar.single("file")(req, res, (err) => {
+      if (err) return res.status(400).json({ error: "Нужен файл изображения до 2 МБ" });
+      next();
+    });
+  },
+  async (req, res) => {
+    try {
+      const slug = req.params.slug;
+      if (/^saved-\d+$/i.test(slug) || slug.startsWith("dm-")) {
+        return res.status(400).json({ error: "Некорректный канал" });
+      }
+      if (!req.file) return res.status(400).json({ error: "Нет файла" });
+      const { rows } = await pool.query(`SELECT avatar_storage_key FROM channels WHERE slug = $1 AND kind = 'public'`, [slug]);
+      if (!rows[0]) return res.status(404).json({ error: "Канал не найден" });
+      const old = rows[0].avatar_storage_key;
+      const ext = pickSafeExt({ ...req.file, mimetype: normalizeContentTypeMime(req.file.mimetype) });
+      const storageKey = `avatars/ch_${crypto.createHash("sha256").update(slug).digest("hex").slice(0, 24)}${ext}`;
+      const dest = path.join(UPLOAD_ROOT, storageKey);
+      await fsp.mkdir(path.dirname(dest), { recursive: true });
+      if (old) await fsp.unlink(path.join(UPLOAD_ROOT, old)).catch(() => {});
+      await fsp.rename(req.file.path, dest);
+      await pool.query(`UPDATE channels SET avatar_storage_key = $1 WHERE slug = $2 AND kind = 'public'`, [storageKey, slug]);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("POST /api/rooms/:slug/avatar", err);
+      res.status(500).json({ error: "Не удалось сохранить иконку канала" });
+    }
+  }
+);
 
 app.get("/api/users/for-dm", requireAuth, async (req, res) => {
   try {
@@ -1142,7 +1406,10 @@ app.post("/api/auth/register", async (req, res) => {
     );
     const user = rows[0];
     const token = signToken(user.id);
-    res.status(201).json({ token, user: { id: user.id, nickname: user.nickname, isAdmin: isAdmin(user.nickname) } });
+    res.status(201).json({
+      token,
+      user: { id: user.id, nickname: user.nickname, isAdmin: isAdmin(user.nickname), hasAvatar: false },
+    });
   } catch (err) {
     if (err.code === "23505") {
       return res.status(409).json({ error: "Такое имя уже занято" });
@@ -1177,8 +1444,20 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(401).json({ error: "Неверное имя или пароль" });
     }
 
+    const { rows: avRows } = await pool.query(
+      `SELECT (avatar_storage_key IS NOT NULL AND TRIM(avatar_storage_key) <> '') AS ha FROM users WHERE id = $1`,
+      [user.id]
+    );
     const token = signToken(user.id);
-    res.json({ token, user: { id: user.id, nickname: user.nickname, isAdmin: isAdmin(user.nickname) } });
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        nickname: user.nickname,
+        isAdmin: isAdmin(user.nickname),
+        hasAvatar: !!avRows[0]?.ha,
+      },
+    });
   } catch (err) {
     console.error("POST /api/auth/login", err);
     res.status(500).json({ error: "Ошибка входа" });
@@ -1266,7 +1545,9 @@ app.get("/api/files/:messageId", requireAuth, async (req, res) => {
     }
     res.setHeader("Content-Type", row.attachment_mime || "application/octet-stream");
     const disp =
-      IMAGE_MIMES.has(row.attachment_mime) || VIDEO_NOTE_MIMES.has(row.attachment_mime)
+      IMAGE_MIMES.has(row.attachment_mime) ||
+      VIDEO_NOTE_MIMES.has(row.attachment_mime) ||
+      VOICE_MIMES.has(row.attachment_mime)
         ? "inline"
         : "attachment";
     res.setHeader(
@@ -1312,13 +1593,15 @@ app.post("/api/messages/send-with-file", requireAuth, handleUpload, async (req, 
       return res.status(429).json({ error: "Слишком много сообщений в минуту" });
     }
 
+    const videoNote = isVideoNoteRequest(req);
     const formatted = await saveNewMessageWithOptionalFile({
       room: slug,
       userId,
       text: req.body?.text,
       replyToId,
       multerFile: req.file || null,
-      videoNote: isVideoNoteRequest(req),
+      videoNote,
+      voiceMessage: !videoNote && isVoiceMessageRequest(req),
     });
     io.to(slug).emit("message", formatted);
     res.status(201).json({ ok: true, message: formatted });
@@ -1798,6 +2081,7 @@ async function start() {
   await ensurePhase1Schema();
   await ensurePhase2Schema();
   await ensurePhase3Schema();
+  await ensureAvatarSchema();
   ensureUploadDirs();
   server.listen(PORT, () => {
     console.log(`Сервер: http://localhost:${PORT}`);

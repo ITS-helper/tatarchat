@@ -5,6 +5,7 @@ const LS_TOKEN = "tatarchat_token";
 const LS_NICKNAME = "tatarchat_nickname";
 const LS_USER_ID = "tatarchat_user_id";
 const LS_LAST_ROOM = "tatarchat_last_room";
+const LS_HAS_AVATAR = "tatarchat_has_avatar";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "👎"];
 const REACTION_SVG = {
@@ -22,6 +23,17 @@ const VIDEO_NOTE_MAX_MS = 60_000;
 const VIDEO_NOTE_MIN_MS = 450;
 const VIDEO_NOTE_MIN_BYTES = 1800;
 
+const VOICE_MAX_MS = 120_000;
+const VOICE_MIN_MS = 400;
+const VOICE_MIN_BYTES = 800;
+const VOICE_MIMES_CLIENT = new Set(["audio/webm", "audio/ogg", "audio/mpeg", "audio/mp4"]);
+
+function stripMimeParams(m) {
+  const s = String(m || "").trim().toLowerCase();
+  const i = s.indexOf(";");
+  return (i === -1 ? s : s.slice(0, i)).trim();
+}
+
 function pickRecorderMimeType() {
   const candidates = [
     "video/webm;codecs=vp8,opus",
@@ -29,6 +41,20 @@ function pickRecorderMimeType() {
     "video/webm;codecs=vp8",
     "video/webm",
     "video/mp4",
+  ];
+  for (const c of candidates) {
+    if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(c)) return c;
+  }
+  return "";
+}
+
+function pickAudioMimeType() {
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/ogg",
+    "audio/mp4",
   ];
   for (const c of candidates) {
     if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(c)) return c;
@@ -111,6 +137,14 @@ function canonicalizeStoredRoom(s) {
     if (a > b) [a, b] = [b, a];
     return `dm-${a}-${b}`;
   }
+  const sv = s.trim().match(/^saved-(\d+)$/i);
+  if (sv) {
+    const id = parseInt(sv[1], 10);
+    if (!Number.isInteger(id) || id < 1) return "lobby";
+    const me = readUserId();
+    if (me != null && id !== me) return "lobby";
+    return `saved-${id}`;
+  }
   const alnum = s.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
   if (alnum && alnum.length <= 64) return alnum;
   return "lobby";
@@ -185,6 +219,7 @@ function messagePreviewForReply(m) {
   const t = (m.text || "").trim();
   if (t) return t.slice(0, 120);
   if (m.attachment?.kind === "video_note") return "Видеосообщение";
+  if (m.attachment?.kind === "voice") return "Голосовое сообщение";
   if (m.attachment?.name) return `📎 ${m.attachment.name}`;
   return "📎 файл";
 }
@@ -245,6 +280,16 @@ function MessageAttachment({ messageId, attachment, getAuthHeaders }) {
   if (attachment.kind === "image" && !url) {
     return <p className="mt-1 text-xs text-tc-text-muted">Загрузка изображения…</p>;
   }
+  if (attachment.kind === "voice" && url) {
+    return (
+      <div className="mt-1.5 min-w-[200px]">
+        <audio src={url} controls className="h-9 w-full max-w-xs" preload="metadata" aria-label="Голосовое сообщение" />
+      </div>
+    );
+  }
+  if (attachment.kind === "voice" && !url) {
+    return <p className="mt-1 text-xs text-tc-text-muted">Загрузка аудио…</p>;
+  }
   if (!url) {
     return <p className="mt-1 text-xs text-tc-text-muted">Загрузка файла…</p>;
   }
@@ -258,6 +303,72 @@ function MessageAttachment({ messageId, attachment, getAuthHeaders }) {
       {attachment.size != null ? <span className="text-tc-text-muted">({formatFileSize(attachment.size)})</span> : null}
     </a>
   );
+}
+
+function UserAvatarBubble({ userId, hasAvatar, getAuthHeaders, className }) {
+  const [url, setUrl] = useState(null);
+  useEffect(() => {
+    if (!hasAvatar || userId == null) {
+      setUrl(null);
+      return undefined;
+    }
+    let revoke = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const base = getApiBase();
+        const res = await fetch(`${base}/api/avatar/user/${userId}`, { headers: getAuthHeaders() });
+        if (!res.ok || cancelled) return;
+        const blob = await res.blob();
+        if (cancelled) return;
+        const u = URL.createObjectURL(blob);
+        revoke = u;
+        setUrl(u);
+      } catch {
+        setUrl(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (revoke) URL.revokeObjectURL(revoke);
+    };
+  }, [userId, hasAvatar, getAuthHeaders]);
+  if (url) {
+    return <img src={url} alt="" className={className} />;
+  }
+  return <div className={`bg-tc-asphalt ${className}`} aria-hidden />;
+}
+
+function ChannelIconThumb({ slug, enabled, getAuthHeaders, className }) {
+  const [url, setUrl] = useState(null);
+  useEffect(() => {
+    if (!enabled || !slug) {
+      setUrl(null);
+      return undefined;
+    }
+    let revoke = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const base = getApiBase();
+        const res = await fetch(`${base}/api/avatar/channel/${encodeURIComponent(slug)}`, { headers: getAuthHeaders() });
+        if (!res.ok || cancelled) return;
+        const blob = await res.blob();
+        if (cancelled) return;
+        const u = URL.createObjectURL(blob);
+        revoke = u;
+        setUrl(u);
+      } catch {
+        setUrl(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (revoke) URL.revokeObjectURL(revoke);
+    };
+  }, [slug, enabled, getAuthHeaders]);
+  if (!enabled || !url) return null;
+  return <img src={url} alt="" className={className} />;
 }
 
 export default function App() {
@@ -295,6 +406,9 @@ export default function App() {
   const [videoNoteRecording, setVideoNoteRecording] = useState(false);
   const [videoNoteUploading, setVideoNoteUploading] = useState(false);
   const [recordingPreviewStream, setRecordingPreviewStream] = useState(null);
+  const [voiceRecording, setVoiceRecording] = useState(false);
+  const [voiceUploading, setVoiceUploading] = useState(false);
+  const [hasAvatar, setHasAvatar] = useState(() => localStorage.getItem(LS_HAS_AVATAR) === "1");
   const [searchInput, setSearchInput] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -317,6 +431,16 @@ export default function App() {
   const videoNoteStartedAtRef = useRef(0);
   const stopVideoNoteRecordRef = useRef(() => {});
   const videoNoteWindowCleanRef = useRef(null);
+  const voiceChunksRef = useRef([]);
+  const voiceStreamRef = useRef(null);
+  const voiceRecorderRef = useRef(null);
+  const voiceMaxTimerRef = useRef(null);
+  const voiceStoppingRef = useRef(false);
+  const voiceWindowCleanRef = useRef(null);
+  const voiceStartedAtRef = useRef(0);
+  const stopVoiceRecordRef = useRef(() => {});
+  const avatarFileRef = useRef(null);
+  const channelAvatarFileRef = useRef(null);
   const replyToRef = useRef(null);
   const nicknameRef = useRef(nickname);
 
@@ -429,6 +553,61 @@ export default function App() {
   useEffect(() => {
     if (token.trim()) refreshChannels();
   }, [token, refreshChannels]);
+
+  const uploadMyAvatar = useCallback(
+    async (file) => {
+      if (!file) return;
+      try {
+        const base = getApiBase();
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch(`${base}/api/me/avatar`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: fd,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setBanner(data.error || "Не удалось загрузить аватар");
+          return;
+        }
+        setHasAvatar(true);
+        localStorage.setItem(LS_HAS_AVATAR, "1");
+        setBanner(null);
+      } catch {
+        setBanner("Сеть: аватар");
+      }
+    },
+    [token]
+  );
+
+  const uploadChannelIcon = useCallback(
+    async (file) => {
+      if (!file) return;
+      const slug = activeRoomRef.current;
+      if (!slug || slug.startsWith("dm-") || /^saved-\d+$/i.test(slug)) return;
+      try {
+        const base = getApiBase();
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch(`${base}/api/rooms/${encodeURIComponent(slug)}/avatar`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, ...buildRoomHeaders() },
+          body: fd,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setBanner(data.error || "Не удалось загрузить иконку канала");
+          return;
+        }
+        refreshChannels();
+        setBanner(null);
+      } catch {
+        setBanner("Сеть: иконка канала");
+      }
+    },
+    [token, buildRoomHeaders, refreshChannels]
+  );
 
   const createRoom = useCallback(async (slug, title) => {
     try {
@@ -596,6 +775,164 @@ export default function App() {
     [getAuthHeaders, stopTyping]
   );
 
+  const uploadVoiceBlob = useCallback(
+    async (blob) => {
+      let mime = stripMimeParams(blob.type || "") || "audio/webm";
+      if (!VOICE_MIMES_CLIENT.has(mime)) mime = "audio/webm";
+      const ext =
+        mime === "audio/mpeg"
+          ? "mp3"
+          : mime === "audio/mp4"
+            ? "m4a"
+            : mime === "audio/ogg"
+              ? "ogg"
+              : "webm";
+      const file = new File([blob], `voicemessage.${ext}`, { type: mime });
+      setVoiceUploading(true);
+      stopTyping();
+      try {
+        const base = getApiBase();
+        const fd = new FormData();
+        fd.append("room", activeRoomRef.current);
+        fd.append("text", "");
+        fd.append("voiceMessage", "1");
+        fd.append("voice_message", "1");
+        const rt = replyToRef.current;
+        if (rt?.id != null) fd.append("replyToId", String(rt.id));
+        fd.append("file", file);
+        const res = await fetch(`${base}/api/messages/send-with-file`, {
+          method: "POST",
+          headers: { ...getAuthHeaders(), "X-Voice-Message": "1" },
+          body: fd,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setBanner(data.error || "Не удалось отправить голос");
+          return;
+        }
+        if (data.message) setMessages((prev) => upsertMessageList(prev, data.message));
+        setReplyTo(null);
+        setBanner(null);
+      } catch (e) {
+        console.error(e);
+        setBanner("Сеть: голосовое сообщение");
+      } finally {
+        setVoiceUploading(false);
+      }
+    },
+    [getAuthHeaders, stopTyping]
+  );
+
+  const stopVoiceRecord = useCallback(async () => {
+    if (voiceStoppingRef.current) return;
+    voiceStoppingRef.current = true;
+    voiceWindowCleanRef.current?.();
+    voiceWindowCleanRef.current = null;
+    clearTimeout(voiceMaxTimerRef.current);
+    voiceMaxTimerRef.current = null;
+    setVoiceRecording(false);
+
+    const rec = voiceRecorderRef.current;
+    const stream = voiceStreamRef.current;
+    voiceRecorderRef.current = null;
+    voiceStreamRef.current = null;
+
+    const started = voiceStartedAtRef.current;
+    if (!rec) {
+      stream?.getTracks().forEach((t) => t.stop());
+      voiceStoppingRef.current = false;
+      return;
+    }
+
+    if (rec.state === "recording") {
+      try {
+        rec.requestData();
+      } catch (_) {
+        /* ignore */
+      }
+    }
+
+    if (rec.state !== "inactive") {
+      await new Promise((resolve) => {
+        rec.addEventListener("stop", resolve, { once: true });
+        try {
+          rec.stop();
+        } catch (_) {
+          resolve();
+        }
+      });
+    }
+
+    stream?.getTracks().forEach((t) => t.stop());
+    await new Promise((r) => setTimeout(r, 60));
+
+    const chunks = voiceChunksRef.current;
+    voiceChunksRef.current = [];
+    let blobType = rec.mimeType || "";
+    if (!blobType || !blobType.startsWith("audio/")) {
+      blobType = pickAudioMimeType() || "audio/webm";
+    }
+    const blob = new Blob(chunks, { type: blobType });
+    const elapsed = Date.now() - started;
+    voiceStoppingRef.current = false;
+
+    if (elapsed < VOICE_MIN_MS || blob.size < VOICE_MIN_BYTES) {
+      setBanner("Голосовое слишком короткое");
+      return;
+    }
+    await uploadVoiceBlob(blob);
+  }, [uploadVoiceBlob]);
+
+  useEffect(() => {
+    stopVoiceRecordRef.current = () => {
+      void stopVoiceRecord();
+    };
+  }, [stopVoiceRecord]);
+
+  const startVoiceRecord = useCallback(async () => {
+    if (editingId != null || pendingFile != null || videoNoteUploading || voiceUploading || videoNoteRecording) return;
+    if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setBanner("Запись голоса не поддерживается");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+      });
+      voiceStreamRef.current = stream;
+      voiceChunksRef.current = [];
+      const mime = pickAudioMimeType();
+      let rec;
+      try {
+        rec = mime !== "" ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      } catch {
+        rec = new MediaRecorder(stream);
+      }
+      voiceRecorderRef.current = rec;
+      rec.ondataavailable = (e) => {
+        if (e.data?.size) voiceChunksRef.current.push(e.data);
+      };
+      rec.start(250);
+      voiceStartedAtRef.current = Date.now();
+      setVoiceRecording(true);
+      const onGlobalUp = () => stopVoiceRecordRef.current();
+      window.addEventListener("pointerup", onGlobalUp, true);
+      window.addEventListener("pointercancel", onGlobalUp, true);
+      voiceWindowCleanRef.current = () => {
+        window.removeEventListener("pointerup", onGlobalUp, true);
+        window.removeEventListener("pointercancel", onGlobalUp, true);
+      };
+      voiceMaxTimerRef.current = setTimeout(() => {
+        stopVoiceRecordRef.current();
+      }, VOICE_MAX_MS);
+    } catch (e) {
+      console.error(e);
+      setBanner("Нет доступа к микрофону");
+      voiceStreamRef.current?.getTracks().forEach((t) => t.stop());
+      voiceStreamRef.current = null;
+    }
+  }, [editingId, pendingFile, videoNoteUploading, voiceUploading, videoNoteRecording]);
+
   const stopVideoNoteRecord = useCallback(async () => {
     if (videoNoteStoppingRef.current) return;
     videoNoteStoppingRef.current = true;
@@ -665,7 +1002,7 @@ export default function App() {
   }, [stopVideoNoteRecord]);
 
   const startVideoNoteRecord = useCallback(async () => {
-    if (editingId != null || pendingFile != null || videoNoteUploading) return;
+    if (editingId != null || pendingFile != null || videoNoteUploading || voiceRecording || voiceUploading) return;
     if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       setBanner("Запись видео не поддерживается в этом браузере");
       return;
@@ -712,7 +1049,7 @@ export default function App() {
       videoNoteStreamRef.current?.getTracks().forEach((t) => t.stop());
       videoNoteStreamRef.current = null;
     }
-  }, [editingId, pendingFile, videoNoteUploading]);
+  }, [editingId, pendingFile, videoNoteUploading, voiceRecording, voiceUploading]);
 
   const scrollToBottom = useCallback(() => {
     const el = listRef.current;
@@ -981,6 +1318,9 @@ export default function App() {
       const adm = !!data.user?.isAdmin;
       localStorage.setItem("tatarchat_admin", adm ? "1" : "0");
       setImAdmin(adm);
+      const ha = !!data.user?.hasAvatar;
+      localStorage.setItem(LS_HAS_AVATAR, ha ? "1" : "0");
+      setHasAvatar(ha);
       setNickname(data.user?.nickname || name);
       setToken(data.token);
       setPasswordInput("");
@@ -1011,6 +1351,8 @@ export default function App() {
     setMyUserId(null);
     setImAdmin(false);
     localStorage.removeItem("tatarchat_admin");
+    setHasAvatar(false);
+    localStorage.removeItem(LS_HAS_AVATAR);
     setReplyTo(null);
     setEditingId(null);
     setTypingPeers([]);
@@ -1333,6 +1675,28 @@ export default function App() {
 
   return (
     <div className="flex h-full overflow-hidden bg-tc-bg">
+      <input
+        ref={avatarFileRef}
+        type="file"
+        accept="image/jpeg,image/png,image/gif,image/webp"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          void uploadMyAvatar(f);
+        }}
+      />
+      <input
+        ref={channelAvatarFileRef}
+        type="file"
+        accept="image/jpeg,image/png,image/gif,image/webp"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          void uploadChannelIcon(f);
+        }}
+      />
       {/* Sidebar */}
       <aside
         className={`${
@@ -1399,9 +1763,11 @@ export default function App() {
                       : (r.text || "").trim().slice(0, 60) ||
                         (r.attachment?.kind === "video_note"
                           ? "Видео"
-                          : r.attachment
-                            ? `📎 ${r.attachment.name}`
-                            : "—")}
+                          : r.attachment?.kind === "voice"
+                            ? "Голос"
+                            : r.attachment
+                              ? `📎 ${r.attachment.name}`
+                              : "—")}
                   </span>
                 </button>
               ))}
@@ -1419,6 +1785,16 @@ export default function App() {
                 activeRoom === r.slug ? "bg-tc-accent/20" : "hover:bg-tc-hover"
               }`}
             >
+              {r.hasChannelAvatar ? (
+                <ChannelIconThumb
+                  slug={r.slug}
+                  enabled
+                  getAuthHeaders={getAuthHeaders}
+                  className="h-9 w-9 shrink-0 rounded-lg object-cover"
+                />
+              ) : (
+                <div className="h-9 w-9 shrink-0 rounded-lg bg-tc-asphalt/50" aria-hidden />
+              )}
               <div className="min-w-0 flex-1 text-left">
                 <div className="flex items-center justify-between">
                   <span className={`truncate text-sm font-medium ${activeRoom === r.slug ? "text-tc-accent" : "text-tc-text"}`}>
@@ -1428,7 +1804,7 @@ export default function App() {
                     <span className="ml-1 text-[10px] text-tc-text-muted">🔒</span>
                   ) : null}
                 </div>
-                <p className="truncate text-xs text-tc-text-muted">Канал</p>
+                <p className="truncate text-xs text-tc-text-muted">{r.isSaved ? "Избранное" : "Канал"}</p>
               </div>
             </button>
           ))}
@@ -1456,7 +1832,20 @@ export default function App() {
           ))}
         </nav>
 
-        <div className="border-t border-tc-border p-3">
+        <div className="border-t border-tc-border p-3 space-y-2">
+          <button
+            type="button"
+            onClick={() => avatarFileRef.current?.click()}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+          >
+            <UserAvatarBubble
+              userId={myUserId}
+              hasAvatar={hasAvatar}
+              getAuthHeaders={getAuthHeaders}
+              className="h-8 w-8 rounded-lg object-cover"
+            />
+            <span>{hasAvatar ? "Сменить аватар" : "Загрузить аватар"}</span>
+          </button>
           <button
             type="button"
             onClick={handleLogout}
@@ -1535,6 +1924,28 @@ export default function App() {
               <span className="truncate">{nickname}</span>
             </div>
           </div>
+          {(() => {
+            const pub = publicChannels.find((c) => c.slug === activeRoom);
+            return pub?.hasChannelAvatar ? (
+              <ChannelIconThumb
+                slug={activeRoom}
+                enabled
+                getAuthHeaders={getAuthHeaders}
+                className="h-9 w-9 shrink-0 rounded-lg object-cover"
+              />
+            ) : null;
+          })()}
+          {imAdmin &&
+          publicChannels.some((c) => c.slug === activeRoom && !c.isSaved) ? (
+            <button
+              type="button"
+              title="Загрузить иконку канала"
+              className="shrink-0 rounded-lg p-2 text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+              onClick={() => channelAvatarFileRef.current?.click()}
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+            </button>
+          ) : null}
         </header>
 
         {/* Banner */}
@@ -1566,13 +1977,22 @@ export default function App() {
                     className={`flex ${mine ? "justify-end" : "justify-start"}`}
                   >
                     <div
-                      className={`relative max-w-[85%] cursor-pointer rounded-xl px-3 py-2 transition-colors sm:max-w-[70%] ${
-                        mine
-                          ? "rounded-br-sm bg-tc-msg-own"
-                          : "rounded-bl-sm bg-tc-msg"
-                      } ${selected ? "ring-2 ring-tc-accent/60" : ""}`}
-                      onClick={() => setSelectedMsgId(selected ? null : m.id)}
+                      className={`flex max-w-[92%] items-end gap-2 sm:max-w-[80%] ${mine ? "flex-row-reverse" : "flex-row"}`}
                     >
+                      <UserAvatarBubble
+                        userId={m.user_id}
+                        hasAvatar={!!m.user_has_avatar}
+                        getAuthHeaders={getAuthHeaders}
+                        className="h-8 w-8 shrink-0 rounded-lg object-cover"
+                      />
+                      <div
+                        className={`relative min-w-0 max-w-full flex-1 cursor-pointer rounded-xl px-3 py-2 transition-colors ${
+                          mine
+                            ? "rounded-br-sm bg-tc-msg-own"
+                            : "rounded-bl-sm bg-tc-msg"
+                        } ${selected ? "ring-2 ring-tc-accent/60" : ""}`}
+                        onClick={() => setSelectedMsgId(selected ? null : m.id)}
+                      >
                       {!mine && (
                         <p className="mb-0.5 text-[13px] font-semibold text-tc-accent">{m.user_nick}</p>
                       )}
@@ -1698,6 +2118,7 @@ export default function App() {
                           )}
                         </div>
                       )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -1754,6 +2175,22 @@ export default function App() {
             Отправка видеосообщения…
           </div>
         ) : null}
+        {voiceRecording ? (
+          <div className="flex items-center gap-3 border-t border-tc-border bg-tc-header px-4 py-2">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-500/25 text-red-400">
+              <svg viewBox="0 0 24 24" className="h-6 w-6" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.3 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.77 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-red-400">Запись голоса…</p>
+              <p className="text-xs text-tc-text-muted">Отпустите для отправки</p>
+            </div>
+          </div>
+        ) : null}
+        {voiceUploading && !voiceRecording ? (
+          <div className="border-t border-tc-border px-4 py-2 text-xs text-tc-accent">
+            Отправка голосового…
+          </div>
+        ) : null}
 
         {/* Input area */}
         <form onSubmit={sendMessage} className="flex items-end gap-2 border-t border-tc-border bg-tc-header px-3 py-2">
@@ -1799,7 +2236,9 @@ export default function App() {
 
           <button
             type="button"
-            disabled={editingId != null || !!pendingFile || videoNoteUploading || (status === "online" && !roomJoined)}
+            disabled={
+              editingId != null || !!pendingFile || videoNoteUploading || voiceUploading || voiceRecording || (status === "online" && !roomJoined)
+            }
             title="Видеосообщение (зажмите)"
             className={`flex h-10 w-10 shrink-0 touch-none select-none items-center justify-center rounded-full transition disabled:opacity-40 ${
               videoNoteRecording
@@ -1812,6 +2251,22 @@ export default function App() {
           </button>
 
           <button
+            type="button"
+            disabled={
+              editingId != null || !!pendingFile || videoNoteUploading || videoNoteRecording || voiceUploading || (status === "online" && !roomJoined)
+            }
+            title="Голосовое (зажмите)"
+            className={`flex h-10 w-10 shrink-0 touch-none select-none items-center justify-center rounded-full transition disabled:opacity-40 ${
+              voiceRecording
+                ? "animate-pulse bg-red-500 text-white"
+                : "text-tc-text-sec hover:bg-tc-hover hover:text-tc-accent"
+            }`}
+            onPointerDown={(e) => { e.preventDefault(); if (e.button !== 0) return; void startVoiceRecord(); }}
+          >
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-7 1h2v-1H5v1zm14 0h2v-1h-2v1zm-3 4.26V18c0 1.1-.9 2-2 2H8c-1.1 0-2-.9-2-2v-2.26C4.48 15.5 3 13.41 3 11h2c0 2.76 2.24 5 5 5s5-2.24 5-5h2c0 2.41-1.48 4.5-3.74 5.26z"/></svg>
+          </button>
+
+          <button
             type="submit"
             disabled={
               status === "online" && !roomJoined
@@ -1820,7 +2275,7 @@ export default function App() {
                   ? !input.trim()
                   : !input.trim() && !pendingFile
             }
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-tc-accent text-white transition hover:bg-tc-accent/85 disabled:opacity-40"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-tc-accent text-white transition hover:bg-tc-accent/85 disabled:opacity-40"
           >
             <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
           </button>
