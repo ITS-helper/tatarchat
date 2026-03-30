@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
+import GalleryView from "./GalleryView.jsx";
 
 const LS_TOKEN = "tatarchat_token";
 const LS_NICKNAME = "tatarchat_nickname";
@@ -17,6 +18,9 @@ const REACTION_SVG = {
 };
 /** sessionStorage: выбранный раздел и пароли комнат (не путать с паролем аккаунта) */
 const SS_DTD_ROOM_PW = "tatarchat_room_pw_dreamteamdauns";
+
+/** Виртуальный раздел: не чат, только галерея (доступ на сервере по нику) */
+const GALLERY_ROOM = "__gallery";
 
 /** Видеосообщения: удерживать кнопку записи, как в Telegram (превью — квадрат) */
 const VIDEO_NOTE_MAX_MS = 60_000;
@@ -145,6 +149,7 @@ function canonicalizeStoredRoom(s) {
     if (me != null && id !== me) return "lobby";
     return `saved-${id}`;
   }
+  if (s.trim().toLowerCase() === GALLERY_ROOM) return GALLERY_ROOM;
   const alnum = s.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
   if (alnum && alnum.length <= 64) return alnum;
   return "lobby";
@@ -380,6 +385,7 @@ export default function App() {
   const [dtdPwModalDraft, setDtdPwModalDraft] = useState("");
   const [publicChannels, setPublicChannels] = useState([]);
   const [directChannels, setDirectChannels] = useState([]);
+  const [canUseGallery, setCanUseGallery] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dmModalOpen, setDmModalOpen] = useState(false);
   const [roomModalOpen, setRoomModalOpen] = useState(false);
@@ -391,6 +397,7 @@ export default function App() {
   const [activeRoom, setActiveRoom] = useState(() => getInitialRoom());
   const [roomTitle, setRoomTitle] = useState(() => {
     const slug = getInitialRoom();
+    if (slug === GALLERY_ROOM) return "Галерея";
     return slug.startsWith("dm-") ? "ЛС" : slug === "lobby" ? "Семья" : "DTD";
   });
   const [messages, setMessages] = useState([]);
@@ -497,6 +504,13 @@ export default function App() {
   }, [activeRoom]);
 
   useEffect(() => {
+    if (!canUseGallery && activeRoom === GALLERY_ROOM) {
+      setActiveRoom("lobby");
+      setRoomTitle("Семья");
+    }
+  }, [canUseGallery, activeRoom]);
+
+  useEffect(() => {
     if (activeRoom === "dreamteamdauns") {
       setDtdChannelUnlocked(hasStoredDtdChannelPw());
       if (!hasStoredDtdChannelPw()) setBanner(null);
@@ -536,14 +550,18 @@ export default function App() {
     if (!token.trim()) return;
     try {
       const base = getApiBase();
-      const res = await fetch(`${base}/api/channels`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
+      const headers = { Authorization: `Bearer ${token}` };
+      const [chRes, meRes] = await Promise.all([
+        fetch(`${base}/api/channels`, { headers }),
+        fetch(`${base}/api/me`, { headers }),
+      ]);
+      const data = await chRes.json().catch(() => ({}));
+      const me = await meRes.json().catch(() => ({}));
+      if (chRes.ok) {
         setPublicChannels(data.publicChannels || []);
         setDirectChannels(data.directChannels || []);
       }
+      if (meRes.ok) setCanUseGallery(!!me.canUseGallery);
     } catch (e) {
       console.error(e);
     }
@@ -698,6 +716,11 @@ export default function App() {
     setSearchLoading(true);
     const t = setTimeout(async () => {
       try {
+        if (activeRoomRef.current === GALLERY_ROOM) {
+          setSearchResults([]);
+          setSearchLoading(false);
+          return;
+        }
         const base = getApiBase();
         const params = new URLSearchParams({ q });
         const room = activeRoomRef.current;
@@ -1096,6 +1119,12 @@ export default function App() {
   useEffect(() => {
     if (!token) return;
     localStorage.setItem(LS_LAST_ROOM, activeRoom);
+    if (activeRoom === GALLERY_ROOM) {
+      setRoomTitle("Галерея");
+      setMessages([]);
+      setBanner(null);
+      return;
+    }
     if (activeRoom === "dreamteamdauns" && !sessionStorage.getItem(SS_DTD_ROOM_PW)) {
       setMessages([]);
       setBanner(null);
@@ -1320,6 +1349,7 @@ export default function App() {
       const ha = !!data.user?.hasAvatar;
       localStorage.setItem(LS_HAS_AVATAR, ha ? "1" : "0");
       setHasAvatar(ha);
+      setCanUseGallery(!!data.user?.canUseGallery);
       setNickname(data.user?.nickname || name);
       setToken(data.token);
       setPasswordInput("");
@@ -1361,6 +1391,7 @@ export default function App() {
     setSearchResults([]);
     setPublicChannels([]);
     setDirectChannels([]);
+    setCanUseGallery(false);
     setActiveRoom("lobby");
     setRoomTitle("Семья");
     setStatus("offline");
@@ -1371,6 +1402,7 @@ export default function App() {
   const selectChannel = (slug) => {
     setBanner(null);
     setActiveRoom(slug);
+    if (slug === GALLERY_ROOM) setRoomTitle("Галерея");
   };
 
   const flushReaction = useCallback(
@@ -1750,38 +1782,109 @@ export default function App() {
         </div>
 
         <nav className="sidebar-scroll flex-1 overflow-y-auto">
-          {publicChannels.map((r) => (
-            <button
-              key={r.slug}
-              type="button"
-              onClick={() => { selectChannel(r.slug); setSidebarOpen(false); }}
-              className={`flex w-full items-center gap-3 px-4 py-3 transition ${
-                activeRoom === r.slug ? "bg-tc-accent/20" : "hover:bg-tc-hover"
-              }`}
-            >
-              {r.hasChannelAvatar ? (
-                <ChannelIconThumb
-                  slug={r.slug}
-                  enabled
-                  getAuthHeaders={getAuthHeaders}
-                  className="h-9 w-9 shrink-0 rounded-lg object-cover"
-                />
-              ) : (
-                <div className="h-9 w-9 shrink-0 rounded-lg bg-tc-asphalt/50" aria-hidden />
-              )}
-              <div className="min-w-0 flex-1 text-left">
-                <div className="flex items-center justify-between">
-                  <span className={`truncate text-sm font-medium ${activeRoom === r.slug ? "text-tc-accent" : "text-tc-text"}`}>
-                    {r.title}
-                  </span>
-                  {r.requiresPassword ? (
-                    <span className="ml-1 text-[10px] text-tc-text-muted">🔒</span>
-                  ) : null}
-                </div>
-                <p className="truncate text-xs text-tc-text-muted">{r.isSaved ? "Избранное" : "Канал"}</p>
-              </div>
-            </button>
-          ))}
+          {(() => {
+            const savedCh = publicChannels.find((c) => c.isSaved);
+            const restCh = publicChannels.filter((c) => !c.isSaved);
+            return (
+              <>
+                {savedCh ? (
+                  <button
+                    key={savedCh.slug}
+                    type="button"
+                    onClick={() => { selectChannel(savedCh.slug); setSidebarOpen(false); }}
+                    className={`flex w-full items-center gap-3 px-4 py-3 transition ${
+                      activeRoom === savedCh.slug ? "bg-tc-accent/20" : "hover:bg-tc-hover"
+                    }`}
+                  >
+                    <div
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/20 text-amber-500"
+                      aria-hidden
+                    >
+                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
+                        <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
+                      </svg>
+                    </div>
+                    <div className="min-w-0 flex-1 text-left">
+                      <div className="flex items-center justify-between">
+                        <span
+                          className={`truncate text-sm font-medium ${
+                            activeRoom === savedCh.slug ? "text-tc-accent" : "text-tc-text"
+                          }`}
+                        >
+                          {savedCh.title}
+                        </span>
+                      </div>
+                      <p className="truncate text-xs text-tc-text-muted">Избранное</p>
+                    </div>
+                  </button>
+                ) : null}
+                {canUseGallery ? (
+                  <button
+                    type="button"
+                    onClick={() => { selectChannel(GALLERY_ROOM); setSidebarOpen(false); }}
+                    className={`flex w-full items-center gap-3 px-4 py-3 transition ${
+                      activeRoom === GALLERY_ROOM ? "bg-tc-accent/20" : "hover:bg-tc-hover"
+                    }`}
+                  >
+                    <div
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/20 text-violet-400"
+                      aria-hidden
+                    >
+                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
+                        <path d="M22 16V4c0-1.1-.9-2-2-2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2zm-11-4l2.03 2.71L16 11l4 5H8l3-4zM2 6v14c0 1.1.9 2 2 2h14v-2H4V6H2z" />
+                      </svg>
+                    </div>
+                    <div className="min-w-0 flex-1 text-left">
+                      <span
+                        className={`block truncate text-sm font-medium ${
+                          activeRoom === GALLERY_ROOM ? "text-tc-accent" : "text-tc-text"
+                        }`}
+                      >
+                        Галерея
+                      </span>
+                      <p className="truncate text-xs text-tc-text-muted">Общие фото</p>
+                    </div>
+                  </button>
+                ) : null}
+                {restCh.map((r) => (
+                  <button
+                    key={r.slug}
+                    type="button"
+                    onClick={() => { selectChannel(r.slug); setSidebarOpen(false); }}
+                    className={`flex w-full items-center gap-3 px-4 py-3 transition ${
+                      activeRoom === r.slug ? "bg-tc-accent/20" : "hover:bg-tc-hover"
+                    }`}
+                  >
+                    {r.hasChannelAvatar ? (
+                      <ChannelIconThumb
+                        slug={r.slug}
+                        enabled
+                        getAuthHeaders={getAuthHeaders}
+                        className="h-9 w-9 shrink-0 rounded-lg object-cover"
+                      />
+                    ) : (
+                      <div className="h-9 w-9 shrink-0 rounded-lg bg-tc-asphalt/50" aria-hidden />
+                    )}
+                    <div className="min-w-0 flex-1 text-left">
+                      <div className="flex items-center justify-between">
+                        <span
+                          className={`truncate text-sm font-medium ${
+                            activeRoom === r.slug ? "text-tc-accent" : "text-tc-text"
+                          }`}
+                        >
+                          {r.title}
+                        </span>
+                        {r.requiresPassword ? (
+                          <span className="ml-1 text-[10px] text-tc-text-muted">🔒</span>
+                        ) : null}
+                      </div>
+                      <p className="truncate text-xs text-tc-text-muted">Канал</p>
+                    </div>
+                  </button>
+                ))}
+              </>
+            );
+          })()}
           {directChannels.length > 0 && (
             <div className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-tc-text-muted">
               Личные
@@ -1898,18 +2001,21 @@ export default function App() {
               <span className="truncate">{nickname}</span>
             </div>
           </div>
-          {(() => {
-            const pub = publicChannels.find((c) => c.slug === activeRoom);
-            return pub?.hasChannelAvatar ? (
-              <ChannelIconThumb
-                slug={activeRoom}
-                enabled
-                getAuthHeaders={getAuthHeaders}
-                className="h-9 w-9 shrink-0 rounded-lg object-cover"
-              />
-            ) : null;
-          })()}
+          {activeRoom !== GALLERY_ROOM
+            ? (() => {
+                const pub = publicChannels.find((c) => c.slug === activeRoom);
+                return pub?.hasChannelAvatar ? (
+                  <ChannelIconThumb
+                    slug={activeRoom}
+                    enabled
+                    getAuthHeaders={getAuthHeaders}
+                    className="h-9 w-9 shrink-0 rounded-lg object-cover"
+                  />
+                ) : null;
+              })()
+            : null}
           {imAdmin &&
+          activeRoom !== GALLERY_ROOM &&
           publicChannels.some((c) => c.slug === activeRoom && !c.isSaved) ? (
             <button
               type="button"
@@ -1927,6 +2033,10 @@ export default function App() {
           <div className="bg-tc-danger/15 px-4 py-2 text-sm text-tc-danger">{banner}</div>
         )}
 
+        {activeRoom === GALLERY_ROOM ? (
+          <GalleryView getApiBase={getApiBase} getAuthHeaders={getAuthHeaders} onError={setBanner} />
+        ) : (
+          <>
         {/* Messages */}
         <div
           ref={listRef}
@@ -2254,6 +2364,8 @@ export default function App() {
             <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
           </button>
         </form>
+          </>
+        )}
       </main>
 
       {/* DM modal */}
