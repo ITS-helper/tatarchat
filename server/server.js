@@ -189,6 +189,42 @@ function invalidateMessagesSchemaCache() {
   messagesSchemaCache = null;
 }
 
+async function ensurePhase1Schema() {
+  try {
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id INTEGER`);
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`);
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.table_constraints
+          WHERE table_schema = 'public' AND table_name = 'messages' AND constraint_name = 'messages_reply_to_id_fkey'
+        ) THEN
+          ALTER TABLE messages
+            ADD CONSTRAINT messages_reply_to_id_fkey
+            FOREIGN KEY (reply_to_id) REFERENCES messages (id) ON DELETE SET NULL;
+        END IF;
+      END $$;
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS message_reactions (
+        message_id INTEGER NOT NULL REFERENCES messages (id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+        emoji VARCHAR(32) NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (message_id, user_id)
+      )
+    `);
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_message_reactions_message_id ON message_reactions (message_id)`
+    );
+  } catch (err) {
+    console.error("[schema] phase1:", err?.message || err);
+    throw err;
+  }
+}
+
 /**
  * Старая БД (колонка "user" text вместо user_id): приводим к init.sql без ручного psql.
  * Идемпотентно; при успехе сбрасывает кэш схемы сообщений.
@@ -335,6 +371,63 @@ async function getMessagesSchema() {
   return messagesSchemaCache;
 }
 
+function sanitizeEmoji(input) {
+  const s = String(input ?? "").trim().slice(0, 32);
+  if (!s || /[\u0000-\u001F<>'"&]/.test(s)) return "";
+  return s;
+}
+
+async function fetchReactionAggregates(messageIds) {
+  if (!messageIds.length) return new Map();
+  const { rows } = await pool.query(
+    `SELECT message_id, emoji,
+            array_agg(user_id ORDER BY user_id)::int[] AS user_ids,
+            COUNT(*)::int AS cnt
+     FROM message_reactions
+     WHERE message_id = ANY($1::int[])
+     GROUP BY message_id, emoji`,
+    [messageIds]
+  );
+  const map = new Map();
+  for (const r of rows) {
+    if (!map.has(r.message_id)) map.set(r.message_id, []);
+    map.get(r.message_id).push({
+      emoji: r.emoji,
+      count: r.cnt,
+      user_ids: r.user_ids || [],
+    });
+  }
+  return map;
+}
+
+function formatApiMessage(row, reactionList) {
+  const deleted = !!row.deleted_at;
+  const reply =
+    row.reply_to_id != null
+      ? {
+          id: row.reply_to_id,
+          user_nick: row.reply_user_nick || "?",
+          deleted: !!row.reply_deleted_at,
+          preview: row.reply_deleted_at
+            ? ""
+            : String(row.reply_text ?? "").slice(0, 160),
+        }
+      : null;
+  return {
+    id: row.id,
+    room: row.room,
+    user_id: row.user_id,
+    user_nick: row.user_nick,
+    text: deleted ? null : row.text,
+    deleted,
+    time: row.time,
+    edited_at: row.edited_at || null,
+    reply_to_id: row.reply_to_id || null,
+    reply_to: reply,
+    reactions: reactionList || [],
+  };
+}
+
 async function getLastMessages(room, limit = 50) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -343,17 +436,29 @@ async function getLastMessages(room, limit = 50) {
         SELECT
           m.id,
           m.room,
+          m.user_id,
           m.text,
+          m.reply_to_id,
+          m.edited_at,
+          m.deleted_at,
           ${timeSelect} AS time,
-          u.nickname AS user_nick
+          u.nickname AS user_nick,
+          ru.nickname AS reply_user_nick,
+          rm.text AS reply_text,
+          rm.deleted_at AS reply_deleted_at
         FROM messages m
         JOIN users u ON u.id = m.user_id
+        LEFT JOIN messages rm ON rm.id = m.reply_to_id
+        LEFT JOIN users ru ON ru.id = rm.user_id
         WHERE m.room = $1
         ORDER BY ${timeSelect} DESC
         LIMIT $2
       `;
       const { rows } = await pool.query(q, [room, limit]);
-      return rows.reverse();
+      const ordered = rows.reverse();
+      const ids = ordered.map((r) => r.id);
+      const reactMap = await fetchReactionAggregates(ids);
+      return ordered.map((r) => formatApiMessage(r, reactMap.get(r.id) || []));
     } catch (err) {
       if (attempt === 0 && (err.code === "42703" || err.code === "42P01")) {
         invalidateMessagesSchemaCache();
@@ -365,16 +470,57 @@ async function getLastMessages(room, limit = 50) {
   throw new Error("getLastMessages: запрос не выполнен");
 }
 
-async function insertMessage(room, userId, text) {
+async function getMessageRowById(id) {
+  const { timeSelect } = await getMessagesSchema();
+  const q = `
+    SELECT
+      m.id,
+      m.room,
+      m.user_id,
+      m.text,
+      m.reply_to_id,
+      m.edited_at,
+      m.deleted_at,
+      ${timeSelect} AS time,
+      u.nickname AS user_nick,
+      ru.nickname AS reply_user_nick,
+      rm.text AS reply_text,
+      rm.deleted_at AS reply_deleted_at
+    FROM messages m
+    JOIN users u ON u.id = m.user_id
+    LEFT JOIN messages rm ON rm.id = m.reply_to_id
+    LEFT JOIN users ru ON ru.id = rm.user_id
+    WHERE m.id = $1
+  `;
+  const { rows } = await pool.query(q, [id]);
+  return rows[0] || null;
+}
+
+async function formatMessageById(id) {
+  const row = await getMessageRowById(id);
+  if (!row) return null;
+  const reactMap = await fetchReactionAggregates([id]);
+  return formatApiMessage(row, reactMap.get(id) || []);
+}
+
+async function validateReplyInRoom(replyToId, room) {
+  if (replyToId == null) return true;
+  const n = Number(replyToId);
+  if (!Number.isInteger(n) || n < 1) return false;
+  const { rows } = await pool.query(`SELECT id FROM messages WHERE id = $1 AND room = $2`, [n, room]);
+  return rows.length > 0;
+}
+
+async function insertMessage(room, userId, text, replyToId = null) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const { timeReturning } = await getMessagesSchema();
       const q = `
-        INSERT INTO messages (room, user_id, text)
-        VALUES ($1, $2, $3)
+        INSERT INTO messages (room, user_id, text, reply_to_id)
+        VALUES ($1, $2, $3, $4)
         RETURNING id, ${timeReturning}
       `;
-      const { rows } = await pool.query(q, [room, userId, text]);
+      const { rows } = await pool.query(q, [room, userId, text, replyToId]);
       return rows[0];
     } catch (err) {
       if (attempt === 0 && err.code === "42703") {
@@ -385,6 +531,31 @@ async function insertMessage(room, userId, text) {
     }
   }
   throw new Error("insertMessage: не удалось записать сообщение");
+}
+
+async function toggleReactionDb(messageId, userId, emoji) {
+  const { rows: cur } = await pool.query(
+    `SELECT emoji FROM message_reactions WHERE message_id = $1 AND user_id = $2`,
+    [messageId, userId]
+  );
+  if (cur.length && cur[0].emoji === emoji) {
+    await pool.query(`DELETE FROM message_reactions WHERE message_id = $1 AND user_id = $2`, [
+      messageId,
+      userId,
+    ]);
+  } else if (cur.length) {
+    await pool.query(
+      `UPDATE message_reactions SET emoji = $3 WHERE message_id = $1 AND user_id = $2`,
+      [messageId, userId, emoji]
+    );
+  } else {
+    await pool.query(
+      `INSERT INTO message_reactions (message_id, user_id, emoji) VALUES ($1, $2, $3)`,
+      [messageId, userId, emoji]
+    );
+  }
+  const reactMap = await fetchReactionAggregates([messageId]);
+  return reactMap.get(messageId) || [];
 }
 
 async function findUserByNickname(nickname) {
@@ -584,23 +755,120 @@ app.post("/api/messages", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Пустое сообщение" });
     }
 
+    const rawReply = req.body?.replyToId ?? req.body?.reply_to_id;
+    let replyToId = null;
+    if (rawReply != null && rawReply !== "") {
+      replyToId = parseInt(rawReply, 10);
+      if (!Number.isInteger(replyToId)) {
+        return res.status(400).json({ error: "Некорректный ответ" });
+      }
+      if (!(await validateReplyInRoom(replyToId, slug))) {
+        return res.status(400).json({ error: "Сообщение для ответа не найдено в этой комнате" });
+      }
+    }
+
     const userId = req.user.userId;
     if (!checkRateLimit(userId)) {
       return res.status(429).json({ error: "Слишком много сообщений в минуту" });
     }
 
-    const row = await insertMessage(slug, userId, body);
-    const payload = {
-      room: slug,
-      user_nick: req.user.nickname,
-      text: body,
-      time: row.created_at,
-    };
-    io.to(slug).emit("message", payload);
-    res.status(201).json({ ok: true, message: payload });
+    const row = await insertMessage(slug, userId, body, replyToId);
+    const formatted = await formatMessageById(row.id);
+    if (formatted) {
+      io.to(slug).emit("message", formatted);
+    }
+    res.status(201).json({ ok: true, message: formatted });
   } catch (err) {
     console.error("POST /api/messages", err);
     res.status(500).json({ error: "Не удалось сохранить сообщение" });
+  }
+});
+
+app.patch("/api/messages/:id", requireAuth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ error: "Некорректный id" });
+    }
+    const body = sanitizeText(req.body?.text);
+    if (!body) {
+      return res.status(400).json({ error: "Пустой текст" });
+    }
+    const rp = getRoomPasswordFromRequest(req);
+    const { rows } = await pool.query(
+      `SELECT id, room FROM messages WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
+      [id, req.user.userId]
+    );
+    if (!rows[0]) {
+      return res.status(404).json({ error: "Сообщение не найдено" });
+    }
+    const slug = rows[0].room;
+    if (!roomAllowsAccess(slug, rp)) {
+      return res.status(403).json({ error: "Нужен пароль комнаты" });
+    }
+    await pool.query(`UPDATE messages SET text = $1, edited_at = NOW() WHERE id = $2`, [body, id]);
+    const formatted = await formatMessageById(id);
+    io.to(slug).emit("message-edited", formatted);
+    res.json({ ok: true, message: formatted });
+  } catch (err) {
+    console.error("PATCH /api/messages/:id", err);
+    res.status(500).json({ error: "Не удалось изменить сообщение" });
+  }
+});
+
+app.delete("/api/messages/:id", requireAuth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ error: "Некорректный id" });
+    }
+    const rp = getRoomPasswordFromRequest(req);
+    const { rows } = await pool.query(
+      `SELECT id, room FROM messages WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
+      [id, req.user.userId]
+    );
+    if (!rows[0]) {
+      return res.status(404).json({ error: "Сообщение не найдено" });
+    }
+    const slug = rows[0].room;
+    if (!roomAllowsAccess(slug, rp)) {
+      return res.status(403).json({ error: "Нужен пароль комнаты" });
+    }
+    await pool.query(`UPDATE messages SET deleted_at = NOW(), text = '' WHERE id = $1`, [id]);
+    const formatted = await formatMessageById(id);
+    io.to(slug).emit("message-deleted", { id, room: slug, message: formatted });
+    res.json({ ok: true, message: formatted });
+  } catch (err) {
+    console.error("DELETE /api/messages/:id", err);
+    res.status(500).json({ error: "Не удалось удалить сообщение" });
+  }
+});
+
+app.post("/api/messages/:id/reaction", requireAuth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ error: "Некорректный id" });
+    }
+    const emoji = sanitizeEmoji(req.body?.emoji);
+    if (!emoji) {
+      return res.status(400).json({ error: "Некорректная реакция" });
+    }
+    const rp = getRoomPasswordFromRequest(req);
+    const { rows } = await pool.query(`SELECT id, room FROM messages WHERE id = $1`, [id]);
+    if (!rows[0]) {
+      return res.status(404).json({ error: "Сообщение не найдено" });
+    }
+    const slug = rows[0].room;
+    if (!roomAllowsAccess(slug, rp)) {
+      return res.status(403).json({ error: "Нужен пароль комнаты" });
+    }
+    const reactions = await toggleReactionDb(id, req.user.userId, emoji);
+    io.to(slug).emit("message-reactions", { id, room: slug, reactions });
+    res.json({ ok: true, reactions });
+  } catch (err) {
+    console.error("POST /api/messages/:id/reaction", err);
+    res.status(500).json({ error: "Не удалось сохранить реакцию" });
   }
 });
 
@@ -693,26 +961,161 @@ io.on("connection", (socket) => {
         return;
       }
 
+      let replyToId = null;
+      if (payload && typeof payload === "object" && payload.replyToId != null && payload.replyToId !== "") {
+        replyToId = parseInt(payload.replyToId, 10);
+        if (!Number.isInteger(replyToId)) {
+          const e = { ok: false, error: "Некорректный ответ" };
+          if (typeof ack === "function") ack(e);
+          return;
+        }
+        if (!(await validateReplyInRoom(replyToId, slug))) {
+          const e = { ok: false, error: "Сообщение для ответа не найдено" };
+          if (typeof ack === "function") ack(e);
+          return;
+        }
+      }
+
       if (!checkRateLimit(uid)) {
         const e = { ok: false, error: "Слишком много сообщений в минуту" };
         if (typeof ack === "function") ack(e);
         return socket.emit("error-toast", e);
       }
 
-      const row = await insertMessage(slug, uid, body);
-      const out = {
-        room: slug,
-        user_nick: socket.data.nickname,
-        text: body,
-        time: row.created_at,
-      };
-      io.to(slug).emit("message", out);
+      const row = await insertMessage(slug, uid, body, replyToId);
+      const formatted = await formatMessageById(row.id);
+      if (formatted) {
+        io.to(slug).emit("message", formatted);
+      }
       if (typeof ack === "function") ack({ ok: true });
     } catch (err) {
       console.error("message", err);
       const e = { ok: false, error: "Не удалось отправить сообщение" };
       if (typeof ack === "function") ack(e);
     }
+  });
+
+  socket.on("edit-message", async (payload, ack) => {
+    try {
+      const uid = socket.data.userId;
+      const slug = socket.data.currentRoom;
+      if (!uid || !slug) {
+        const e = { ok: false, error: "Нет контекста" };
+        if (typeof ack === "function") ack(e);
+        return;
+      }
+      const id = parseInt(payload?.id, 10);
+      if (!Number.isInteger(id)) {
+        const e = { ok: false, error: "Некорректный id" };
+        if (typeof ack === "function") ack(e);
+        return;
+      }
+      const body = sanitizeText(payload?.text);
+      if (!body) {
+        const e = { ok: false, error: "Пустой текст" };
+        if (typeof ack === "function") ack(e);
+        return;
+      }
+      const { rows } = await pool.query(
+        `SELECT id, room FROM messages WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
+        [id, uid]
+      );
+      if (!rows[0] || rows[0].room !== slug) {
+        const e = { ok: false, error: "Сообщение не найдено" };
+        if (typeof ack === "function") ack(e);
+        return;
+      }
+      await pool.query(`UPDATE messages SET text = $1, edited_at = NOW() WHERE id = $2`, [body, id]);
+      const formatted = await formatMessageById(id);
+      io.to(slug).emit("message-edited", formatted);
+      if (typeof ack === "function") ack({ ok: true });
+    } catch (err) {
+      console.error("edit-message", err);
+      const e = { ok: false, error: "Не удалось изменить" };
+      if (typeof ack === "function") ack(e);
+    }
+  });
+
+  socket.on("delete-message", async (payload, ack) => {
+    try {
+      const uid = socket.data.userId;
+      const slug = socket.data.currentRoom;
+      if (!uid || !slug) {
+        const e = { ok: false, error: "Нет контекста" };
+        if (typeof ack === "function") ack(e);
+        return;
+      }
+      const id = parseInt(payload?.id, 10);
+      if (!Number.isInteger(id)) {
+        const e = { ok: false, error: "Некорректный id" };
+        if (typeof ack === "function") ack(e);
+        return;
+      }
+      const { rows } = await pool.query(
+        `SELECT id, room FROM messages WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
+        [id, uid]
+      );
+      if (!rows[0] || rows[0].room !== slug) {
+        const e = { ok: false, error: "Сообщение не найдено" };
+        if (typeof ack === "function") ack(e);
+        return;
+      }
+      await pool.query(`UPDATE messages SET deleted_at = NOW(), text = '' WHERE id = $1`, [id]);
+      const formatted = await formatMessageById(id);
+      io.to(slug).emit("message-deleted", { id, room: slug, message: formatted });
+      if (typeof ack === "function") ack({ ok: true });
+    } catch (err) {
+      console.error("delete-message", err);
+      const e = { ok: false, error: "Не удалось удалить" };
+      if (typeof ack === "function") ack(e);
+    }
+  });
+
+  socket.on("toggle-reaction", async (payload, ack) => {
+    try {
+      const uid = socket.data.userId;
+      const slug = socket.data.currentRoom;
+      if (!uid || !slug) {
+        const e = { ok: false, error: "Нет контекста" };
+        if (typeof ack === "function") ack(e);
+        return;
+      }
+      const id = parseInt(payload?.messageId ?? payload?.id, 10);
+      if (!Number.isInteger(id)) {
+        const e = { ok: false, error: "Некорректный id" };
+        if (typeof ack === "function") ack(e);
+        return;
+      }
+      const emoji = sanitizeEmoji(payload?.emoji);
+      if (!emoji) {
+        const e = { ok: false, error: "Некорректная реакция" };
+        if (typeof ack === "function") ack(e);
+        return;
+      }
+      const { rows } = await pool.query(`SELECT id, room FROM messages WHERE id = $1`, [id]);
+      if (!rows[0] || rows[0].room !== slug) {
+        const e = { ok: false, error: "Сообщение не найдено" };
+        if (typeof ack === "function") ack(e);
+        return;
+      }
+      const reactions = await toggleReactionDb(id, uid, emoji);
+      io.to(slug).emit("message-reactions", { id, room: slug, reactions });
+      if (typeof ack === "function") ack({ ok: true, reactions });
+    } catch (err) {
+      console.error("toggle-reaction", err);
+      const e = { ok: false, error: "Не удалось сохранить реакцию" };
+      if (typeof ack === "function") ack(e);
+    }
+  });
+
+  socket.on("typing", (payload) => {
+    const slug = socket.data.currentRoom;
+    if (!slug) return;
+    socket.to(slug).emit("typing", {
+      room: slug,
+      nickname: socket.data.nickname,
+      typing: !!payload?.typing,
+    });
   });
 
   socket.on("leave", async () => {
@@ -750,6 +1153,7 @@ io.on("connection", (socket) => {
 
 async function start() {
   await ensureMessagesUserIdSchema();
+  await ensurePhase1Schema();
   server.listen(PORT, () => {
     console.log(`Сервер: http://localhost:${PORT}`);
   });

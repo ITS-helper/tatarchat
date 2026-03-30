@@ -3,7 +3,10 @@ import { io } from "socket.io-client";
 
 const LS_TOKEN = "tatarchat_token";
 const LS_NICKNAME = "tatarchat_nickname";
+const LS_USER_ID = "tatarchat_user_id";
 const LS_LAST_ROOM = "tatarchat_last_room";
+
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "👎"];
 /** sessionStorage: выбранный раздел и пароли комнат (не путать с паролем аккаунта) */
 const SS_SITE_ROOM = "tatarchat_site_room";
 const SS_DTD_ROOM_PW = "tatarchat_room_pw_dreamteamdauns";
@@ -59,6 +62,36 @@ function clearGateSession() {
   sessionStorage.removeItem(SS_FAMILY_ROOM_PW);
 }
 
+function readUserId() {
+  const s = localStorage.getItem(LS_USER_ID);
+  if (!s) return null;
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+function userIdFromToken(jwt) {
+  try {
+    const parts = String(jwt).split(".");
+    if (parts.length < 2) return null;
+    const json = atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"));
+    const payload = JSON.parse(json);
+    const id = payload.userId;
+    const n = typeof id === "number" ? id : parseInt(id, 10);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+function upsertMessageList(prev, msg) {
+  if (msg == null || msg.id == null) return [...prev, msg];
+  const i = prev.findIndex((x) => x && x.id === msg.id);
+  if (i === -1) return [...prev, msg];
+  const next = [...prev];
+  next[i] = { ...next[i], ...msg };
+  return next;
+}
+
 function formatTime(iso) {
   if (!iso) return "";
   try {
@@ -103,6 +136,10 @@ export default function App() {
   });
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
+  const [myUserId, setMyUserId] = useState(() => readUserId());
+  const [replyTo, setReplyTo] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [typingPeers, setTypingPeers] = useState([]);
   const [status, setStatus] = useState("offline");
   const [roomJoined, setRoomJoined] = useState(false);
   const [banner, setBanner] = useState(null);
@@ -111,10 +148,61 @@ export default function App() {
   const roomJoinedRef = useRef(false);
   const joinGenRef = useRef(0);
   const activeRoomRef = useRef(activeRoom);
+  const typingIdleRef = useRef(null);
+  const nicknameRef = useRef(nickname);
+
+  useEffect(() => {
+    nicknameRef.current = nickname;
+  }, [nickname]);
+
+  useEffect(() => {
+    if (!token.trim()) {
+      setMyUserId(null);
+      return;
+    }
+    const stored = readUserId();
+    if (stored != null) {
+      setMyUserId(stored);
+      return;
+    }
+    const fromJwt = userIdFromToken(token);
+    if (fromJwt != null) {
+      localStorage.setItem(LS_USER_ID, String(fromJwt));
+      setMyUserId(fromJwt);
+    }
+  }, [token]);
 
   useEffect(() => {
     activeRoomRef.current = activeRoom;
   }, [activeRoom]);
+
+  useEffect(() => {
+    setReplyTo(null);
+    setEditingId(null);
+    setTypingPeers([]);
+  }, [activeRoom]);
+
+  const buildRoomHeaders = useCallback(() => {
+    const headers = {};
+    const room = activeRoomRef.current;
+    if (room === "family" || room === "dreamteamdauns") {
+      const pw =
+        room === "family"
+          ? sessionStorage.getItem(SS_FAMILY_ROOM_PW)
+          : sessionStorage.getItem(SS_DTD_ROOM_PW);
+      if (pw) headers["X-Room-Password"] = pw;
+    }
+    return headers;
+  }, []);
+
+  const stopTyping = useCallback(() => {
+    if (typingIdleRef.current) {
+      clearTimeout(typingIdleRef.current);
+      typingIdleRef.current = null;
+    }
+    const s = socketRef.current;
+    if (s?.connected) s.emit("typing", { typing: false });
+  }, []);
 
   const scrollToBottom = useCallback(() => {
     const el = listRef.current;
@@ -255,7 +343,38 @@ export default function App() {
 
     socket.on("message", (msg) => {
       if (msg.room && msg.room !== activeRoomRef.current) return;
-      setMessages((prev) => [...prev, msg]);
+      setMessages((prev) => upsertMessageList(prev, msg));
+    });
+
+    socket.on("message-edited", (msg) => {
+      if (msg.room && msg.room !== activeRoomRef.current) return;
+      setMessages((prev) => upsertMessageList(prev, msg));
+    });
+
+    socket.on("message-deleted", (payload) => {
+      const msg = payload?.message;
+      if (!msg || (msg.room && msg.room !== activeRoomRef.current)) return;
+      setMessages((prev) => upsertMessageList(prev, msg));
+    });
+
+    socket.on("message-reactions", (payload) => {
+      if (payload?.room && payload.room !== activeRoomRef.current) return;
+      const { id, reactions } = payload;
+      if (id == null) return;
+      setMessages((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, reactions: reactions || [] } : m))
+      );
+    });
+
+    socket.on("typing", (payload) => {
+      if (payload?.room && payload.room !== activeRoomRef.current) return;
+      if (payload?.nickname === nicknameRef.current) return;
+      setTypingPeers((prev) => {
+        const s = new Set(prev);
+        if (payload?.typing) s.add(payload.nickname);
+        else s.delete(payload.nickname);
+        return [...s];
+      });
     });
 
     socket.on("error-toast", (payload) => {
@@ -263,6 +382,8 @@ export default function App() {
     });
 
     return () => {
+      if (typingIdleRef.current) clearTimeout(typingIdleRef.current);
+      typingIdleRef.current = null;
       socket.emit("leave");
       socket.disconnect();
       socketRef.current = null;
@@ -350,6 +471,10 @@ export default function App() {
       }
       localStorage.setItem(LS_TOKEN, data.token);
       localStorage.setItem(LS_NICKNAME, data.user?.nickname || name);
+      if (data.user?.id != null) {
+        localStorage.setItem(LS_USER_ID, String(data.user.id));
+        setMyUserId(data.user.id);
+      }
       setNickname(data.user?.nickname || name);
       setToken(data.token);
       setPasswordInput("");
@@ -368,6 +493,7 @@ export default function App() {
     }
     localStorage.removeItem(LS_TOKEN);
     localStorage.removeItem(LS_NICKNAME);
+    localStorage.removeItem(LS_USER_ID);
     localStorage.removeItem(LS_LAST_ROOM);
     clearGateSession();
     setSiteRoom(null);
@@ -377,6 +503,10 @@ export default function App() {
     setNameInput("");
     setPasswordInput("");
     setMessages([]);
+    setMyUserId(null);
+    setReplyTo(null);
+    setEditingId(null);
+    setTypingPeers([]);
     setActiveRoom("dreamteamdauns");
     setStatus("offline");
     setRoomJoined(false);
@@ -388,10 +518,135 @@ export default function App() {
     if (slug === siteRoom) setActiveRoom(slug);
   };
 
+  const flushReaction = useCallback(
+    async (messageId, emoji) => {
+      const base = getApiBase();
+      const headers = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        ...buildRoomHeaders(),
+      };
+      try {
+        const res = await fetch(`${base}/api/messages/${messageId}/reaction`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ emoji }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setBanner(data.error || "Реакция не сохранена");
+          return;
+        }
+        if (data.reactions) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === messageId ? { ...m, reactions: data.reactions } : m))
+          );
+        }
+      } catch (err) {
+        console.error(err);
+        setBanner("Сеть: реакция");
+      }
+    },
+    [token, buildRoomHeaders]
+  );
+
+  const toggleReaction = useCallback(
+    (messageId, emoji) => {
+      const s = socketRef.current;
+      if (s?.connected && roomJoinedRef.current) {
+        s.emit("toggle-reaction", { messageId, emoji }, (ack) => {
+          if (ack && !ack.ok && ack.error) setBanner(ack.error);
+        });
+        return;
+      }
+      flushReaction(messageId, emoji);
+    },
+    [flushReaction]
+  );
+
+  const deleteMessage = useCallback(
+    async (id) => {
+      if (!window.confirm("Удалить сообщение?")) return;
+      const socket = socketRef.current;
+      if (socket?.connected && roomJoinedRef.current) {
+        socket.emit("delete-message", { id }, (ack) => {
+          if (ack && !ack.ok && ack.error) setBanner(ack.error);
+        });
+        if (editingId === id) {
+          setEditingId(null);
+          setInput("");
+        }
+        return;
+      }
+      try {
+        const base = getApiBase();
+        const res = await fetch(`${base}/api/messages/${id}`, {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...buildRoomHeaders(),
+          },
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setBanner(data.error || "Не удалось удалить");
+          return;
+        }
+        if (data.message) setMessages((prev) => upsertMessageList(prev, data.message));
+        if (editingId === id) {
+          setEditingId(null);
+          setInput("");
+        }
+      } catch (err) {
+        console.error(err);
+        setBanner("Сеть: удаление");
+      }
+    },
+    [token, buildRoomHeaders, editingId]
+  );
+
   const sendMessage = async (e) => {
     e.preventDefault();
     const text = input.trim();
     if (!text) return;
+
+    stopTyping();
+
+    if (editingId != null) {
+      const socket = socketRef.current;
+      if (socket?.connected && roomJoinedRef.current) {
+        socket.emit("edit-message", { id: editingId, text }, (ack) => {
+          if (ack && !ack.ok && ack.error) setBanner(ack.error);
+        });
+        setInput("");
+        setEditingId(null);
+        return;
+      }
+      try {
+        const base = getApiBase();
+        const res = await fetch(`${base}/api/messages/${editingId}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+            ...buildRoomHeaders(),
+          },
+          body: JSON.stringify({ text }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setBanner(data.error || "Не удалось изменить");
+          return;
+        }
+        if (data.message) setMessages((prev) => upsertMessageList(prev, data.message));
+        setInput("");
+        setEditingId(null);
+      } catch (err) {
+        console.error(err);
+        setBanner("Сеть: правка");
+      }
+      return;
+    }
 
     const socket = socketRef.current;
     if (socket && socket.connected) {
@@ -399,10 +654,13 @@ export default function App() {
         setBanner("Подождите — подключение к комнате…");
         return;
       }
-      socket.emit("message", { text }, (ack) => {
+      const payload = { text };
+      if (replyTo?.id != null) payload.replyToId = replyTo.id;
+      socket.emit("message", payload, (ack) => {
         if (ack && !ack.ok && ack.error) setBanner(ack.error);
       });
       setInput("");
+      setReplyTo(null);
       return;
     }
 
@@ -411,18 +669,14 @@ export default function App() {
       const headers = {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
+        ...buildRoomHeaders(),
       };
-      if (activeRoom === "family" || activeRoom === "dreamteamdauns") {
-        const pw =
-          activeRoom === "family"
-            ? sessionStorage.getItem(SS_FAMILY_ROOM_PW)
-            : sessionStorage.getItem(SS_DTD_ROOM_PW);
-        if (pw) headers["X-Room-Password"] = pw;
-      }
+      const body = { room: activeRoom, text };
+      if (replyTo?.id != null) body.replyToId = replyTo.id;
       const res = await fetch(`${base}/api/messages`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ room: activeRoom, text }),
+        body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -430,12 +684,24 @@ export default function App() {
         return;
       }
       setInput("");
-      if (data.message) {
-        setMessages((prev) => [...prev, data.message]);
-      }
+      setReplyTo(null);
+      if (data.message) setMessages((prev) => upsertMessageList(prev, data.message));
     } catch (err) {
       console.error(err);
       setBanner("Не удалось отправить сообщение");
+    }
+  };
+
+  const onInputChange = (e) => {
+    setInput(e.target.value);
+    const s = socketRef.current;
+    if (s?.connected && roomJoinedRef.current) {
+      s.emit("typing", { typing: true });
+      if (typingIdleRef.current) clearTimeout(typingIdleRef.current);
+      typingIdleRef.current = setTimeout(() => {
+        typingIdleRef.current = null;
+        s.emit("typing", { typing: false });
+      }, 2200);
     }
   };
 
@@ -717,20 +983,133 @@ export default function App() {
                 Нет данных в буфере — передача открыта
               </p>
             ) : (
-              messages.map((m, i) => (
-                <div
-                  key={`${m.time}-${i}-${m.user_nick}`}
-                  className="border border-neon-cyan/25 border-l-2 border-l-neon-hot bg-black/55 px-3 py-2 shadow-[inset_0_0_28px_rgba(0,229,255,0.04)]"
-                >
-                  <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="font-medium text-neon-cyan">{m.user_nick}</span>
-                    <span className="font-mono text-[9px] uppercase tracking-widest text-cyan-900">{formatTime(m.time)}</span>
+              messages.map((m, i) => {
+                const key = m.id != null ? m.id : `leg-${i}-${m.time}-${m.user_nick}`;
+                const mine = myUserId != null && m.user_id === myUserId;
+                const deleted = !!m.deleted;
+                return (
+                  <div
+                    key={key}
+                    className="border border-neon-cyan/25 border-l-2 border-l-neon-hot bg-black/55 px-3 py-2 shadow-[inset_0_0_28px_rgba(0,229,255,0.04)]"
+                  >
+                    {m.reply_to && (
+                      <div className="mb-2 border-l-2 border-neon-purple/60 pl-2 text-xs text-cyan-600">
+                        <span className="font-medium text-neon-purple">{m.reply_to.user_nick}</span>
+                        {m.reply_to.deleted ? (
+                          <span className="italic"> — удалено</span>
+                        ) : (
+                          <span className="mt-0.5 block truncate text-cyan-500/90">{m.reply_to.preview}</span>
+                        )}
+                      </div>
+                    )}
+                    <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="font-medium text-neon-cyan">{m.user_nick}</span>
+                      <span className="font-mono text-[9px] uppercase tracking-widest text-cyan-900">
+                        {formatTime(m.time)}
+                        {m.edited_at ? " · изм." : ""}
+                      </span>
+                    </div>
+                    {deleted ? (
+                      <p className="italic text-cyan-800">Сообщение удалено</p>
+                    ) : (
+                      <p className="whitespace-pre-wrap break-words text-cyan-50/95">{m.text}</p>
+                    )}
+                    <div className="mt-2 flex flex-wrap gap-1 border-t border-neon-cyan/10 pt-2">
+                      {QUICK_REACTIONS.map((em) => {
+                        const r = (m.reactions || []).find((x) => x.emoji === em);
+                        const cnt = r?.count ?? 0;
+                        const me = myUserId != null && r?.user_ids?.includes(myUserId);
+                        return (
+                          <button
+                            key={em}
+                            type="button"
+                            disabled={deleted || m.id == null}
+                            onClick={() => m.id != null && toggleReaction(m.id, em)}
+                            className={`rounded border px-1.5 py-0.5 text-xs transition ${
+                              me
+                                ? "border-neon-cyan bg-neon-cyan/20 text-neon-bright"
+                                : "border-cyan-900/60 bg-black/40 text-cyan-500 hover:border-neon-cyan/40"
+                            }`}
+                          >
+                            {em}
+                            {cnt > 0 ? <span className="ml-0.5 font-mono text-[10px]">{cnt}</span> : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap gap-3 font-mono text-[10px] uppercase tracking-wide">
+                      <button
+                        type="button"
+                        disabled={deleted}
+                        className="text-cyan-600 hover:text-neon-cyan disabled:opacity-40"
+                        onClick={() => {
+                          if (deleted || m.id == null) return;
+                          setReplyTo({
+                            id: m.id,
+                            user_nick: m.user_nick,
+                            preview: (m.text || "").slice(0, 120),
+                          });
+                          setEditingId(null);
+                        }}
+                      >
+                        Ответить
+                      </button>
+                      {mine && !deleted && m.id != null && (
+                        <>
+                          <button
+                            type="button"
+                            className="text-cyan-600 hover:text-neon-cyan"
+                            onClick={() => {
+                              setEditingId(m.id);
+                              setInput(m.text || "");
+                              setReplyTo(null);
+                            }}
+                          >
+                            Изменить
+                          </button>
+                          <button
+                            type="button"
+                            className="text-neon-amber hover:text-neon-hot"
+                            onClick={() => deleteMessage(m.id)}
+                          >
+                            Удалить
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <p className="whitespace-pre-wrap break-words text-cyan-50/95">{m.text}</p>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
+
+          {(replyTo || editingId != null) && (
+            <div className="flex flex-shrink-0 items-center justify-between gap-2 border-t border-neon-cyan/20 bg-black/50 px-3 py-2 text-xs text-cyan-500">
+              <span className="min-w-0 truncate">
+                {editingId != null
+                  ? `Правка сообщения #${editingId}`
+                  : `Ответ ${replyTo?.user_nick}: ${replyTo?.preview || ""}`}
+              </span>
+              <button
+                type="button"
+                className="shrink-0 font-mono text-neon-hot hover:underline"
+                onClick={() => {
+                  setReplyTo(null);
+                  setEditingId(null);
+                  setInput("");
+                }}
+              >
+                Отмена
+              </button>
+            </div>
+          )}
+          {typingPeers.length > 0 && (
+            <div className="flex-shrink-0 border-t border-neon-purple/25 bg-neon-purple/5 px-3 py-1.5 font-mono text-[11px] text-neon-purple">
+              {typingPeers.length === 1
+                ? `${typingPeers[0]} печатает…`
+                : `${typingPeers.slice(0, 4).join(", ")} печатают…`}
+            </div>
+          )}
 
           <form
             onSubmit={sendMessage}
@@ -739,8 +1118,8 @@ export default function App() {
             <input
               className="cyber-input min-w-0 flex-1"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Сообщение…"
+              onChange={onInputChange}
+              placeholder={editingId != null ? "Редактирование…" : "Сообщение…"}
               maxLength={2000}
               autoComplete="off"
             />
@@ -749,7 +1128,11 @@ export default function App() {
               disabled={status === "online" && !roomJoined}
               className="font-display border border-neon-cyan/50 bg-gradient-to-br from-neon-cyan to-neon-purple px-4 py-2 text-sm font-bold tracking-wider text-black shadow-neon-cyan transition hover:brightness-110 disabled:cursor-not-allowed disabled:border-cyan-900 disabled:bg-cyan-950 disabled:text-cyan-800 disabled:shadow-none"
             >
-              {status === "online" && !roomJoined ? "SYNC…" : "TX"}
+              {editingId != null
+                ? "OK"
+                : status === "online" && !roomJoined
+                  ? "SYNC…"
+                  : "TX"}
             </button>
           </form>
         </section>

@@ -14,7 +14,20 @@ CREATE TABLE IF NOT EXISTS messages (
   room VARCHAR(64) NOT NULL,
   user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
   text TEXT NOT NULL,
+  reply_to_id INTEGER REFERENCES messages (id) ON DELETE SET NULL,
+  edited_at TIMESTAMPTZ,
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_room_created_at ON messages (room, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS message_reactions (
+  message_id INTEGER NOT NULL REFERENCES messages (id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+  emoji VARCHAR(32) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (message_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_reactions_message_id ON message_reactions (message_id);
