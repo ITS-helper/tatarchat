@@ -1,6 +1,6 @@
 /**
  * TatarChat: Express + Socket.io + PostgreSQL.
- * Вход по аккаунту (JWT). Комната DTD с паролем.
+ * Вход по аккаунту (JWT).
  */
 require("dotenv").config();
 const fs = require("fs");
@@ -59,7 +59,7 @@ function normalizeContentTypeMime(m) {
 const GROUP_ROOMS = {
   dreamteamdauns: {
     title: "DTD",
-    roomPassword: process.env.DTD_ROOM_PASSWORD || "1488",
+    roomPassword: null,
   },
 };
 

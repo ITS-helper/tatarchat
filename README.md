@@ -89,7 +89,7 @@ npm run dev
 - Фронтенд: [http://localhost:5173](http://localhost:5173) (Vite, `npm run dev` в `client/`)
 - API и Socket.io: [http://localhost:3001](http://localhost:3001)
 
-Сначала **зарегистрируйте** пользователя (имя + пароль), затем войдите. Чат **DTD** защищён паролем комнаты (по умолчанию `1488` на клиенте и сервере, см. `DTD_ROOM_PASSWORD` на сервере). История и отправка — с JWT и заголовком `X-Room-Password` после ввода пароля на экране гейта.
+Сначала **зарегистрируйте** пользователя (имя + пароль), затем войдите. Доступ к **DTD** и **Семья** по нику (см. `DTD_HIDDEN_NICKNAMES`, `LOBBY_VISIBLE_NICKNAMES` на сервере). История и отправка — с JWT; отдельного пароля комнаты для DTD нет.
 
 В **production** на Render задайте **`JWT_SECRET`** (длинная случайная строка), иначе сервер не запустится.
 
@@ -129,12 +129,12 @@ Get-Content migrations\003_messages_user_id.sql -Raw | docker exec -i tatarchat-
 | `POST` | `/api/auth/register` | `{ "name", "password" }` — пароль от 6 символов; ответ `{ token, user }` |
 | `POST` | `/api/auth/login` | `{ "name", "password" }` — ответ `{ token, user }` |
 | `GET` | `/api/rooms` | Список комнат: `slug`, `title`, `requiresPassword` |
-| `GET` | `/api/messages/:slug` | История (`dreamteamdauns`). Заголовки: `Authorization: Bearer`, `X-Room-Password` для DTD |
-| `POST` | `/api/messages` | `Authorization: Bearer`, `X-Room-Password`; тело `{ "room": "dreamteamdauns", "text": "..." }` |
+| `GET` | `/api/messages/:slug` | История комнаты. Заголовок: `Authorization: Bearer` (для комнат с `requiresPassword` — опционально `X-Room-Password`) |
+| `POST` | `/api/messages` | `Authorization: Bearer`; тело `{ "room": "<slug>", "text": "..." }` |
 
 ## Socket.io
 
-- Подключение с **`auth: { token }`**. Клиент шлёт **`join-room`**: `{ room: "dreamteamdauns", roomPassword: "…" }` (пароль комнаты).
+- Подключение с **`auth: { token }`**. Клиент шлёт **`join-room`**: `{ room: "<slug>", roomPassword?: "…" }` — пароль только если у комнаты `requiresPassword`.
 - **`message`** — `{ text }` в текущей комнате (после успешного `join-room`).
 - **`leave`** — выход и снятие с онлайн (несколько вкладок учитываются).
 
