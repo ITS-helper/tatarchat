@@ -310,12 +310,18 @@ async function ensureSavedChannelRow(userId) {
   );
 }
 
+async function getUserPerms(userId) {
+  const { rows } = await pool.query(
+    `SELECT is_admin, can_see_lobby, can_see_dtd, can_use_gallery FROM users WHERE id = $1`,
+    [userId]
+  );
+  return rows[0] || { is_admin: false, can_see_lobby: false, can_see_dtd: true, can_use_gallery: false };
+}
+
 async function userCanAccessChannel(slug, userId, roomPassword) {
   if (!slug || userId == null) return false;
-  if (slug === GALLERY_ROOM_SLUG) {
-    const { rows } = await pool.query(`SELECT nickname FROM users WHERE id = $1`, [userId]);
-    return rows[0] ? isGalleryMember(rows[0].nickname) : false;
-  }
+  const perms = await getUserPerms(userId);
+  if (slug === GALLERY_ROOM_SLUG) return !!perms.can_use_gallery;
   const savedM = /^saved-(\d+)$/i.exec(slug);
   if (savedM) {
     const ownerId = parseInt(savedM[1], 10);
@@ -332,16 +338,10 @@ async function userCanAccessChannel(slug, userId, roomPassword) {
     await ensureDmChannelRow(slug, a, b);
     return true;
   }
-  if (slug === "lobby") {
-    const { rows } = await pool.query(`SELECT nickname FROM users WHERE id = $1`, [userId]);
-    return rows[0] ? canUserSeeLobby(rows[0].nickname) : false;
-  }
+  if (slug === "lobby") return !!perms.can_see_lobby;
   const conf = GROUP_ROOMS[slug];
   if (conf) {
-    const { rows } = await pool.query(`SELECT nickname FROM users WHERE id = $1`, [userId]);
-    const nick = rows[0]?.nickname;
-    if (!nick) return false;
-    if (slug === "dreamteamdauns" && !canUserSeeDtd(nick)) return false;
+    if (slug === "dreamteamdauns" && !perms.can_see_dtd) return false;
     if (conf.roomPassword == null) return true;
     return conf.roomPassword === String(roomPassword ?? "");
   }
@@ -542,6 +542,49 @@ async function ensureAvatarSchema() {
     await pool.query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS avatar_storage_key VARCHAR(512)`);
   } catch (err) {
     console.error("[schema] avatars:", err?.message || err);
+    throw err;
+  }
+}
+
+async function ensureUserPermissionsSchema() {
+  try {
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin        BOOLEAN NOT NULL DEFAULT FALSE`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_see_lobby   BOOLEAN NOT NULL DEFAULT FALSE`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_see_dtd     BOOLEAN NOT NULL DEFAULT TRUE`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_use_gallery BOOLEAN NOT NULL DEFAULT FALSE`);
+
+    // Инициализируем из env-переменных для уже существующих пользователей (только если is_admin ещё не проставлен)
+    const adminNicks = ADMIN_NICKNAMES;
+    const lobbyNicks = LOBBY_VISIBLE_NICKNAMES;
+    const galleryNicks = GALLERY_MEMBER_NICKNAMES;
+    const dtdHidden = DTD_HIDDEN_NICKNAMES;
+
+    if (adminNicks.length) {
+      await pool.query(
+        `UPDATE users SET is_admin = TRUE WHERE LOWER(nickname) = ANY($1::text[]) AND is_admin = FALSE`,
+        [adminNicks]
+      );
+    }
+    if (lobbyNicks.length) {
+      await pool.query(
+        `UPDATE users SET can_see_lobby = TRUE WHERE LOWER(nickname) = ANY($1::text[]) AND can_see_lobby = FALSE`,
+        [lobbyNicks]
+      );
+    }
+    if (galleryNicks.length) {
+      await pool.query(
+        `UPDATE users SET can_use_gallery = TRUE WHERE LOWER(nickname) = ANY($1::text[]) AND can_use_gallery = FALSE`,
+        [galleryNicks]
+      );
+    }
+    if (dtdHidden.length) {
+      await pool.query(
+        `UPDATE users SET can_see_dtd = FALSE WHERE LOWER(nickname) = ANY($1::text[])`,
+        [dtdHidden]
+      );
+    }
+  } catch (err) {
+    console.error("[schema] user_permissions:", err?.message || err);
     throw err;
   }
 }
@@ -1193,18 +1236,23 @@ async function requireAuth(req, res, next) {
     const token = h.slice(7);
     const payload = jwt.verify(token, JWT_SECRET);
     const { rows } = await pool.query(
-      `SELECT id, nickname, password_hash FROM users WHERE id = $1`,
+      `SELECT id, nickname, password_hash, is_admin FROM users WHERE id = $1`,
       [payload.userId]
     );
     const user = rows[0];
     if (!user?.password_hash) {
       return res.status(401).json({ error: "Требуется вход" });
     }
-    req.user = { userId: user.id, nickname: user.nickname, isAdmin: isAdmin(user.nickname) };
+    req.user = { userId: user.id, nickname: user.nickname, isAdmin: !!user.is_admin };
     next();
   } catch {
     return res.status(401).json({ error: "Сессия устарела, войдите снова" });
   }
+}
+
+function requireAdmin(req, res, next) {
+  if (!req.user?.isAdmin) return res.status(403).json({ error: "Нет прав администратора" });
+  next();
 }
 
 function requireGallery(req, res, next) {
@@ -1397,7 +1445,7 @@ app.get("/api/channels", requireAuth, async (req, res) => {
 app.get("/api/me", requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, nickname,
+      `SELECT id, nickname, is_admin, can_see_lobby, can_see_dtd, can_use_gallery,
         (avatar_storage_key IS NOT NULL AND TRIM(avatar_storage_key) <> '') AS has_avatar
        FROM users WHERE id = $1`,
       [req.user.userId]
@@ -1407,11 +1455,11 @@ app.get("/api/me", requireAuth, async (req, res) => {
     res.json({
       id: u.id,
       nickname: u.nickname,
-      isAdmin: req.user.isAdmin,
+      isAdmin: !!u.is_admin,
       hasAvatar: !!u.has_avatar,
-      canUseGallery: isGalleryMember(u.nickname),
-      canSeeLobby: canUserSeeLobby(u.nickname),
-      canSeeDtd: canUserSeeDtd(u.nickname),
+      canUseGallery: !!u.can_use_gallery,
+      canSeeLobby: !!u.can_see_lobby,
+      canSeeDtd: !!u.can_see_dtd,
     });
   } catch (err) {
     console.error("GET /api/me", err);
@@ -1951,6 +1999,52 @@ app.post("/api/auth/login", async (req, res) => {
     res.status(500).json({ error: "Ошибка входа" });
   }
 });
+
+// ─── Admin API ────────────────────────────────────────────────────────────────
+
+app.get("/api/admin/users", requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, nickname, is_admin, can_see_lobby, can_see_dtd, can_use_gallery, created_at
+       FROM users ORDER BY id`
+    );
+    res.json({ users: rows });
+  } catch (err) {
+    console.error("GET /api/admin/users", err);
+    res.status(500).json({ error: "Ошибка" });
+  }
+});
+
+app.patch("/api/admin/users/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const targetId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(targetId) || targetId < 1) {
+      return res.status(400).json({ error: "Некорректный id" });
+    }
+    const allowed = ["is_admin", "can_see_lobby", "can_see_dtd", "can_use_gallery"];
+    const updates = {};
+    for (const key of allowed) {
+      if (key in req.body) updates[key] = !!req.body[key];
+    }
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: "Нет полей для обновления" });
+    }
+    const setClauses = Object.keys(updates).map((k, i) => `${k} = $${i + 2}`).join(", ");
+    const values = [targetId, ...Object.values(updates)];
+    const { rows } = await pool.query(
+      `UPDATE users SET ${setClauses} WHERE id = $1
+       RETURNING id, nickname, is_admin, can_see_lobby, can_see_dtd, can_use_gallery`,
+      values
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Пользователь не найден" });
+    res.json({ user: rows[0] });
+  } catch (err) {
+    console.error("PATCH /api/admin/users/:id", err);
+    res.status(500).json({ error: "Ошибка обновления" });
+  }
+});
+
+// ─── Auth ──────────────────────────────────────────────────────────────────────
 
 app.post("/api/auth/change-password", requireAuth, async (req, res) => {
   try {
@@ -2623,6 +2717,7 @@ async function start() {
   await ensurePhase3Schema();
   await ensureAvatarSchema();
   await ensureGallerySchema();
+  await ensureUserPermissionsSchema();
   ensureUploadDirs();
   server.listen(PORT, () => {
     console.log(`Сервер: http://localhost:${PORT}`);

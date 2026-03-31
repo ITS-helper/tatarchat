@@ -1,0 +1,5 @@
+-- Колонки прав доступа пользователей (вместо env-переменных с никами)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin        BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS can_see_lobby   BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS can_see_dtd     BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS can_use_gallery BOOLEAN NOT NULL DEFAULT FALSE;

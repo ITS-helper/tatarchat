@@ -446,6 +446,10 @@ export default function App() {
   const [changePwNew2, setChangePwNew2] = useState("");
   const [changePwBusy, setChangePwBusy] = useState(false);
   const [changePwOk, setChangePwOk] = useState("");
+  const [adminPanelOpen, setAdminPanelOpen] = useState(false);
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminSaving, setAdminSaving] = useState(null);
   const listRef = useRef(null);
   const chatParallaxRef = useRef(null);
   const socketRef = useRef(null);
@@ -1449,6 +1453,46 @@ export default function App() {
     }
   };
 
+  const openAdminPanel = async () => {
+    setAdminPanelOpen(true);
+    setAdminLoading(true);
+    try {
+      const base = getApiBase();
+      const res = await fetch(`${base}/api/admin/users`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) setAdminUsers(data.users || []);
+      else setBanner(data.error || "Не удалось загрузить пользователей");
+    } catch {
+      setBanner("Сеть: ошибка загрузки пользователей");
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const toggleUserPerm = async (userId, field, value) => {
+    setAdminSaving(userId);
+    try {
+      const base = getApiBase();
+      const res = await fetch(`${base}/api/admin/users/${userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ [field]: value }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setAdminUsers((prev) => prev.map((u) => u.id === userId ? { ...u, ...data.user } : u));
+      } else {
+        setBanner(data.error || "Ошибка сохранения");
+      }
+    } catch {
+      setBanner("Сеть: ошибка сохранения");
+    } finally {
+      setAdminSaving(null);
+    }
+  };
+
   const submitChangePassword = async (e) => {
     e.preventDefault();
     setBanner(null);
@@ -2151,6 +2195,18 @@ export default function App() {
               </form>
             ) : null}
           </div>
+          {imAdmin && (
+            <button
+              type="button"
+              onClick={openAdminPanel}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" fill="currentColor">
+                <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 4l5 2.18V11c0 3.5-2.33 6.79-5 7.93-2.67-1.14-5-4.43-5-7.93V7.18L12 5zm-1 3v4h2V8h-2zm0 5v2h2v-2h-2z"/>
+              </svg>
+              Управление пользователями
+            </button>
+          )}
           <button
             type="button"
             onClick={handleLogout}
@@ -2172,6 +2228,83 @@ export default function App() {
 
       {/* Main area */}
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* Admin panel modal */}
+        {adminPanelOpen && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setAdminPanelOpen(false)}>
+            <div className="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-xl bg-tc-panel shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between border-b border-tc-border px-6 py-4">
+                <h2 className="text-base font-semibold text-tc-text">Управление пользователями</h2>
+                <button type="button" onClick={() => setAdminPanelOpen(false)} className="rounded-lg p-1.5 text-tc-text-sec hover:bg-tc-hover">
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+              </div>
+              <div className="overflow-y-auto flex-1">
+                {adminLoading ? (
+                  <p className="p-8 text-center text-sm text-tc-text-muted">Загрузка…</p>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-tc-border text-left text-xs text-tc-text-muted uppercase">
+                        <th className="px-6 py-3 font-medium">Пользователь</th>
+                        <th className="px-3 py-3 text-center font-medium">Семья</th>
+                        <th className="px-3 py-3 text-center font-medium">DTD</th>
+                        <th className="px-3 py-3 text-center font-medium">Галерея</th>
+                        <th className="px-3 py-3 text-center font-medium">Админ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adminUsers.map((u) => {
+                        const saving = adminSaving === u.id;
+                        const Toggle = ({ field, value }) => (
+                          <button
+                            type="button"
+                            disabled={saving}
+                            onClick={() => toggleUserPerm(u.id, field, !value)}
+                            className={`mx-auto flex h-6 w-11 items-center rounded-full transition-colors ${value ? "bg-tc-accent" : "bg-tc-border"} ${saving ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                          >
+                            <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${value ? "translate-x-6" : "translate-x-1"}`} />
+                          </button>
+                        );
+                        return (
+                          <tr key={u.id} className="border-b border-tc-border/50 hover:bg-tc-hover/30">
+                            <td className="px-6 py-3">
+                              <div className="font-medium text-tc-text">{u.nickname}</div>
+                              <div className="text-xs text-tc-text-muted">ID {u.id}</div>
+                            </td>
+                            <td className="px-3 py-3">
+                              <div className="flex justify-center">
+                                <Toggle field="can_see_lobby" value={!!u.can_see_lobby} />
+                              </div>
+                            </td>
+                            <td className="px-3 py-3">
+                              <div className="flex justify-center">
+                                <Toggle field="can_see_dtd" value={!!u.can_see_dtd} />
+                              </div>
+                            </td>
+                            <td className="px-3 py-3">
+                              <div className="flex justify-center">
+                                <Toggle field="can_use_gallery" value={!!u.can_use_gallery} />
+                              </div>
+                            </td>
+                            <td className="px-3 py-3">
+                              <div className="flex justify-center">
+                                <Toggle field="is_admin" value={!!u.is_admin} />
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+              <div className="border-t border-tc-border px-6 py-3 text-xs text-tc-text-muted">
+                Переключатели сохраняются мгновенно. Изменения вступят в силу при следующем действии пользователя.
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Chat header */}
         <header className="flex h-14 flex-shrink-0 items-center gap-3 border-b border-tc-border bg-tc-header px-4">
           <button
