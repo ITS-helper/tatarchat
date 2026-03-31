@@ -101,7 +101,7 @@ function canUserSeeDtd(nickname) {
   return !DTD_HIDDEN_NICKNAMES.includes(String(nickname || "").trim().toLowerCase());
 }
 
-const MAX_GALLERY_BYTES = Number(process.env.MAX_GALLERY_FILE_MB || 32) * 1024 * 1024;
+const MAX_GALLERY_BYTES = Number(process.env.MAX_GALLERY_FILE_MB || 20) * 1024 * 1024;
 
 const JWT_SECRET =
   process.env.JWT_SECRET ||
@@ -594,16 +594,20 @@ async function ensureGallerySchema() {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS gallery_folders (
         id SERIAL PRIMARY KEY,
+        room_slug VARCHAR(80) NOT NULL DEFAULT 'lobby',
         parent_id INTEGER REFERENCES gallery_folders (id) ON DELETE CASCADE,
         name VARCHAR(128) NOT NULL,
         sort_order INTEGER NOT NULL DEFAULT 0,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await pool.query(`ALTER TABLE gallery_folders ADD COLUMN IF NOT EXISTS room_slug VARCHAR(80) NOT NULL DEFAULT 'lobby'`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_gallery_folders_parent ON gallery_folders (parent_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_gallery_folders_room_parent ON gallery_folders (room_slug, parent_id)`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS gallery_items (
         id SERIAL PRIMARY KEY,
+        room_slug VARCHAR(80) NOT NULL DEFAULT 'lobby',
         folder_id INTEGER REFERENCES gallery_folders (id) ON DELETE CASCADE,
         storage_key VARCHAR(512) NOT NULL UNIQUE,
         original_name VARCHAR(200) NOT NULL DEFAULT '',
@@ -612,10 +616,57 @@ async function ensureGallerySchema() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await pool.query(`ALTER TABLE gallery_items ADD COLUMN IF NOT EXISTS room_slug VARCHAR(80) NOT NULL DEFAULT 'lobby'`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_gallery_items_folder ON gallery_items (folder_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_gallery_items_room_folder ON gallery_items (room_slug, folder_id)`);
+    // Backfill existing rows (old global gallery) into lobby by default
+    await pool.query(`UPDATE gallery_folders SET room_slug = 'lobby' WHERE room_slug IS NULL OR room_slug = ''`);
+    await pool.query(`UPDATE gallery_items SET room_slug = 'lobby' WHERE room_slug IS NULL OR room_slug = ''`);
   } catch (err) {
     console.error("[schema] gallery:", err?.message || err);
     throw err;
+  }
+}
+
+async function ensureCalendarSchema() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS channel_calendar_events (
+        id SERIAL PRIMARY KEY,
+        room_slug VARCHAR(80) NOT NULL,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title VARCHAR(240) NOT NULL,
+        notes TEXT,
+        starts_at TIMESTAMPTZ NOT NULL,
+        ends_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_calendar_room_starts ON channel_calendar_events (room_slug, starts_at)`
+    );
+  } catch (err) {
+    console.error("[schema] calendar:", err?.message || err);
+    throw err;
+  }
+}
+
+function parseGalleryRoom(req) {
+  const raw = req.query?.room;
+  const room = String(raw || "").trim().toLowerCase();
+  return room || "lobby";
+}
+
+async function requireGalleryRoom(req, res, next) {
+  try {
+    const room = parseGalleryRoom(req);
+    req.galleryRoom = room;
+    const ok = await userCanAccessChannel(room, req.user.userId);
+    if (!ok) return res.status(403).json({ error: "Нет доступа к каналу" });
+    next();
+  } catch (err) {
+    console.error("requireGalleryRoom", err);
+    return res.status(500).json({ error: "Ошибка" });
   }
 }
 
@@ -1467,16 +1518,16 @@ app.get("/api/me", requireAuth, async (req, res) => {
   }
 });
 
-app.get("/api/gallery/folders", requireAuth, requireGallery, async (req, res) => {
+app.get("/api/gallery/folders", requireAuth, requireGallery, requireGalleryRoom, async (req, res) => {
   try {
     const parsed = parseGalleryParentQuery(req.query.parentId);
     if (!parsed.ok) return res.status(400).json({ error: "Некорректный parentId" });
     const { rows } = await pool.query(
       `SELECT id, parent_id, name, sort_order, created_at
        FROM gallery_folders
-       WHERE parent_id IS NOT DISTINCT FROM $1::integer
+       WHERE room_slug = $2 AND parent_id IS NOT DISTINCT FROM $1::integer
        ORDER BY sort_order ASC, id ASC`,
-      [parsed.id]
+      [parsed.id, req.galleryRoom]
     );
     res.json({ folders: rows });
   } catch (err) {
@@ -1485,10 +1536,11 @@ app.get("/api/gallery/folders", requireAuth, requireGallery, async (req, res) =>
   }
 });
 
-app.get("/api/gallery/folders-all", requireAuth, requireGallery, async (_req, res) => {
+app.get("/api/gallery/folders-all", requireAuth, requireGallery, requireGalleryRoom, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, parent_id, name FROM gallery_folders ORDER BY name ASC`
+      `SELECT id, parent_id, name FROM gallery_folders WHERE room_slug = $1 ORDER BY name ASC`,
+      [req.galleryRoom]
     );
     res.json({ folders: rows });
   } catch (err) {
@@ -1497,7 +1549,7 @@ app.get("/api/gallery/folders-all", requireAuth, requireGallery, async (_req, re
   }
 });
 
-app.post("/api/gallery/folders", requireAuth, requireGallery, async (req, res) => {
+app.post("/api/gallery/folders", requireAuth, requireGallery, requireGalleryRoom, async (req, res) => {
   try {
     const name = sanitizeGalleryFolderName(req.body?.name);
     if (!name) return res.status(400).json({ error: "Укажите название папки" });
@@ -1507,18 +1559,18 @@ app.post("/api/gallery/folders", requireAuth, requireGallery, async (req, res) =
       if (!Number.isInteger(parentId) || parentId < 1) {
         return res.status(400).json({ error: "Некорректный parentId" });
       }
-      const { rows: pr } = await pool.query(`SELECT id FROM gallery_folders WHERE id = $1`, [parentId]);
+      const { rows: pr } = await pool.query(`SELECT id FROM gallery_folders WHERE id = $1 AND room_slug = $2`, [parentId, req.galleryRoom]);
       if (!pr[0]) return res.status(400).json({ error: "Родительская папка не найдена" });
     }
     const { rows: mx } = await pool.query(
-      `SELECT COALESCE(MAX(sort_order), 0) AS m FROM gallery_folders WHERE parent_id IS NOT DISTINCT FROM $1::integer`,
-      [parentId]
+      `SELECT COALESCE(MAX(sort_order), 0) AS m FROM gallery_folders WHERE room_slug = $2 AND parent_id IS NOT DISTINCT FROM $1::integer`,
+      [parentId, req.galleryRoom]
     );
     const sortOrder = (mx[0]?.m || 0) + 1;
     const { rows } = await pool.query(
-      `INSERT INTO gallery_folders (parent_id, name, sort_order) VALUES ($1, $2, $3)
+      `INSERT INTO gallery_folders (room_slug, parent_id, name, sort_order) VALUES ($1, $2, $3, $4)
        RETURNING id, parent_id, name, sort_order, created_at`,
-      [parentId, name, sortOrder]
+      [req.galleryRoom, parentId, name, sortOrder]
     );
     res.status(201).json({ folder: rows[0] });
   } catch (err) {
@@ -1527,11 +1579,11 @@ app.post("/api/gallery/folders", requireAuth, requireGallery, async (req, res) =
   }
 });
 
-app.patch("/api/gallery/folders/:id", requireAuth, requireGallery, async (req, res) => {
+app.patch("/api/gallery/folders/:id", requireAuth, requireGallery, requireGalleryRoom, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Некорректный id" });
-    const { rows: ex } = await pool.query(`SELECT id FROM gallery_folders WHERE id = $1`, [id]);
+    const { rows: ex } = await pool.query(`SELECT id FROM gallery_folders WHERE id = $1 AND room_slug = $2`, [id, req.galleryRoom]);
     if (!ex[0]) return res.status(404).json({ error: "Папка не найдена" });
     if (req.body?.name != null) {
       const name = sanitizeGalleryFolderName(req.body.name);
@@ -1544,8 +1596,8 @@ app.patch("/api/gallery/folders/:id", requireAuth, requireGallery, async (req, r
       await pool.query(`UPDATE gallery_folders SET sort_order = $1 WHERE id = $2`, [so, id]);
     }
     const { rows } = await pool.query(
-      `SELECT id, parent_id, name, sort_order, created_at FROM gallery_folders WHERE id = $1`,
-      [id]
+      `SELECT id, parent_id, name, sort_order, created_at FROM gallery_folders WHERE id = $1 AND room_slug = $2`,
+      [id, req.galleryRoom]
     );
     res.json({ folder: rows[0] });
   } catch (err) {
@@ -1554,20 +1606,20 @@ app.patch("/api/gallery/folders/:id", requireAuth, requireGallery, async (req, r
   }
 });
 
-app.delete("/api/gallery/folders/:id", requireAuth, requireGallery, async (req, res) => {
+app.delete("/api/gallery/folders/:id", requireAuth, requireGallery, requireGalleryRoom, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Некорректный id" });
     const { rows: keyRows } = await pool.query(
       `WITH RECURSIVE sub AS (
-         SELECT id FROM gallery_folders WHERE id = $1
+         SELECT id FROM gallery_folders WHERE id = $1 AND room_slug = $2
          UNION ALL
          SELECT f.id FROM gallery_folders f INNER JOIN sub ON f.parent_id = sub.id
        )
-       SELECT storage_key FROM gallery_items WHERE folder_id IN (SELECT id FROM sub)`,
-      [id]
+       SELECT storage_key FROM gallery_items WHERE room_slug = $2 AND folder_id IN (SELECT id FROM sub)`,
+      [id, req.galleryRoom]
     );
-    const { rowCount } = await pool.query(`DELETE FROM gallery_folders WHERE id = $1`, [id]);
+    const { rowCount } = await pool.query(`DELETE FROM gallery_folders WHERE id = $1 AND room_slug = $2`, [id, req.galleryRoom]);
     if (!rowCount) return res.status(404).json({ error: "Папка не найдена" });
     for (const r of keyRows) {
       if (r.storage_key) await fsp.unlink(path.join(UPLOAD_ROOT, r.storage_key)).catch(() => {});
@@ -1579,7 +1631,7 @@ app.delete("/api/gallery/folders/:id", requireAuth, requireGallery, async (req, 
   }
 });
 
-app.get("/api/gallery/items", requireAuth, requireGallery, async (req, res) => {
+app.get("/api/gallery/items", requireAuth, requireGallery, requireGalleryRoom, async (req, res) => {
   try {
     const parsed = parseGalleryParentQuery(req.query.folderId);
     if (!parsed.ok) return res.status(400).json({ error: "Некорректный folderId" });
@@ -1587,9 +1639,9 @@ app.get("/api/gallery/items", requireAuth, requireGallery, async (req, res) => {
     const { rows } = await pool.query(
       `SELECT id, folder_id, original_name, mime, sort_order, created_at
        FROM gallery_items i
-       WHERE i.folder_id IS NOT DISTINCT FROM $1::integer
+       WHERE i.room_slug = $2 AND i.folder_id IS NOT DISTINCT FROM $1::integer
        ORDER BY ${sort}`,
-      [parsed.id]
+      [parsed.id, req.galleryRoom]
     );
     res.json({ items: rows });
   } catch (err) {
@@ -1598,7 +1650,7 @@ app.get("/api/gallery/items", requireAuth, requireGallery, async (req, res) => {
   }
 });
 
-app.put("/api/gallery/items/reorder", requireAuth, requireGallery, async (req, res) => {
+app.put("/api/gallery/items/reorder", requireAuth, requireGallery, requireGalleryRoom, async (req, res) => {
   try {
     const ids = req.body?.itemIds;
     if (!Array.isArray(ids) || ids.length === 0) {
@@ -1614,8 +1666,8 @@ app.put("/api/gallery/items/reorder", requireAuth, requireGallery, async (req, r
     const intIds = ids.map((x) => parseInt(x, 10)).filter((n) => Number.isInteger(n) && n > 0);
     if (intIds.length !== ids.length) return res.status(400).json({ error: "Некорректные id" });
     const { rows: items } = await pool.query(
-      `SELECT id, folder_id FROM gallery_items WHERE id = ANY($1::int[])`,
-      [intIds]
+      `SELECT id, folder_id FROM gallery_items WHERE room_slug = $2 AND id = ANY($1::int[])`,
+      [intIds, req.galleryRoom]
     );
     if (items.length !== intIds.length) return res.status(400).json({ error: "Не все элементы найдены" });
     for (const it of items) {
@@ -1628,7 +1680,7 @@ app.put("/api/gallery/items/reorder", requireAuth, requireGallery, async (req, r
     let order = 0;
     for (const id of intIds) {
       order += 1;
-      await pool.query(`UPDATE gallery_items SET sort_order = $1 WHERE id = $2`, [order, id]);
+      await pool.query(`UPDATE gallery_items SET sort_order = $1 WHERE id = $2 AND room_slug = $3`, [order, id, req.galleryRoom]);
     }
     res.json({ ok: true });
   } catch (err) {
@@ -1641,9 +1693,10 @@ app.post(
   "/api/gallery/upload",
   requireAuth,
   requireGallery,
+  requireGalleryRoom,
   (req, res, next) => {
     uploadGalleryImage.single("file")(req, res, (err) => {
-      if (err) return res.status(400).json({ error: "Нужно изображение (JPEG, PNG, GIF, WebP) до 32 МБ" });
+      if (err) return res.status(400).json({ error: "Нужно изображение (JPEG, PNG, GIF, WebP) до 20 МБ" });
       next();
     });
   },
@@ -1658,7 +1711,7 @@ app.post(
           await fsp.unlink(req.file.path).catch(() => {});
           return res.status(400).json({ error: "Некорректный folderId" });
         }
-        const { rows: fr } = await pool.query(`SELECT id FROM gallery_folders WHERE id = $1`, [folderId]);
+        const { rows: fr } = await pool.query(`SELECT id FROM gallery_folders WHERE id = $1 AND room_slug = $2`, [folderId, req.galleryRoom]);
         if (!fr[0]) {
           await fsp.unlink(req.file.path).catch(() => {});
           return res.status(400).json({ error: "Папка не найдена" });
@@ -1667,21 +1720,21 @@ app.post(
       const mime = normalizeContentTypeMime(req.file.mimetype || "");
       const ext = pickSafeExt({ ...req.file, mimetype: mime });
       const token = crypto.randomBytes(18).toString("hex");
-      const storageKey = `gallery/${token}${ext}`;
+      const storageKey = `gallery/${req.galleryRoom}/${token}${ext}`;
       const dest = path.join(UPLOAD_ROOT, storageKey);
       await fsp.mkdir(path.dirname(dest), { recursive: true });
       await fsp.rename(req.file.path, dest);
       const origName = sanitizeOriginalName(req.file.originalname);
       const { rows: mx } = await pool.query(
-        `SELECT COALESCE(MAX(sort_order), 0) AS m FROM gallery_items WHERE folder_id IS NOT DISTINCT FROM $1::integer`,
-        [folderId]
+        `SELECT COALESCE(MAX(sort_order), 0) AS m FROM gallery_items WHERE room_slug = $2 AND folder_id IS NOT DISTINCT FROM $1::integer`,
+        [folderId, req.galleryRoom]
       );
       const sortOrder = (mx[0]?.m || 0) + 1;
       const { rows } = await pool.query(
-        `INSERT INTO gallery_items (folder_id, storage_key, original_name, mime, sort_order)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO gallery_items (room_slug, folder_id, storage_key, original_name, mime, sort_order)
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING id, folder_id, original_name, mime, sort_order, created_at`,
-        [folderId, storageKey, origName, mime, sortOrder]
+        [req.galleryRoom, folderId, storageKey, origName, mime, sortOrder]
       );
       res.status(201).json({ item: rows[0] });
     } catch (err) {
@@ -1691,11 +1744,11 @@ app.post(
   }
 );
 
-app.patch("/api/gallery/items/:id", requireAuth, requireGallery, async (req, res) => {
+app.patch("/api/gallery/items/:id", requireAuth, requireGallery, requireGalleryRoom, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Некорректный id" });
-    const { rows: ex } = await pool.query(`SELECT id, folder_id FROM gallery_items WHERE id = $1`, [id]);
+    const { rows: ex } = await pool.query(`SELECT id, folder_id FROM gallery_items WHERE id = $1 AND room_slug = $2`, [id, req.galleryRoom]);
     if (!ex[0]) return res.status(404).json({ error: "Не найдено" });
     if (req.body?.folderId !== undefined) {
       let newFolderId = null;
@@ -1704,19 +1757,19 @@ app.patch("/api/gallery/items/:id", requireAuth, requireGallery, async (req, res
         if (!Number.isInteger(newFolderId) || newFolderId < 1) {
           return res.status(400).json({ error: "Некорректный folderId" });
         }
-        const { rows: fr } = await pool.query(`SELECT id FROM gallery_folders WHERE id = $1`, [newFolderId]);
+        const { rows: fr } = await pool.query(`SELECT id FROM gallery_folders WHERE id = $1 AND room_slug = $2`, [newFolderId, req.galleryRoom]);
         if (!fr[0]) return res.status(400).json({ error: "Папка не найдена" });
       }
-      await pool.query(`UPDATE gallery_items SET folder_id = $1 WHERE id = $2`, [newFolderId, id]);
+      await pool.query(`UPDATE gallery_items SET folder_id = $1 WHERE id = $2 AND room_slug = $3`, [newFolderId, id, req.galleryRoom]);
     }
     if (req.body?.sortOrder != null) {
       const so = parseInt(req.body.sortOrder, 10);
       if (!Number.isInteger(so)) return res.status(400).json({ error: "Некорректный sortOrder" });
-      await pool.query(`UPDATE gallery_items SET sort_order = $1 WHERE id = $2`, [so, id]);
+      await pool.query(`UPDATE gallery_items SET sort_order = $1 WHERE id = $2 AND room_slug = $3`, [so, id, req.galleryRoom]);
     }
     const { rows } = await pool.query(
-      `SELECT id, folder_id, original_name, mime, sort_order, created_at FROM gallery_items WHERE id = $1`,
-      [id]
+      `SELECT id, folder_id, original_name, mime, sort_order, created_at FROM gallery_items WHERE id = $1 AND room_slug = $2`,
+      [id, req.galleryRoom]
     );
     res.json({ item: rows[0] });
   } catch (err) {
@@ -1725,14 +1778,14 @@ app.patch("/api/gallery/items/:id", requireAuth, requireGallery, async (req, res
   }
 });
 
-app.delete("/api/gallery/items/:id", requireAuth, requireGallery, async (req, res) => {
+app.delete("/api/gallery/items/:id", requireAuth, requireGallery, requireGalleryRoom, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Некорректный id" });
-    const { rows } = await pool.query(`SELECT storage_key FROM gallery_items WHERE id = $1`, [id]);
+    const { rows } = await pool.query(`SELECT storage_key FROM gallery_items WHERE id = $1 AND room_slug = $2`, [id, req.galleryRoom]);
     if (!rows[0]) return res.status(404).json({ error: "Не найдено" });
     const key = rows[0].storage_key;
-    await pool.query(`DELETE FROM gallery_items WHERE id = $1`, [id]);
+    await pool.query(`DELETE FROM gallery_items WHERE id = $1 AND room_slug = $2`, [id, req.galleryRoom]);
     if (key) await fsp.unlink(path.join(UPLOAD_ROOT, key)).catch(() => {});
     res.json({ ok: true });
   } catch (err) {
@@ -1760,6 +1813,152 @@ app.get("/api/gallery/file/:id", requireAuth, requireGallery, async (req, res) =
   } catch (err) {
     console.error("GET /api/gallery/file/:id", err);
     res.status(500).json({ error: "Ошибка" });
+  }
+});
+
+/** Календарь канала: события по room_slug (как галерея) */
+app.get("/api/calendar/events", requireAuth, async (req, res) => {
+  try {
+    const room = parseGalleryRoom(req);
+    const ok = await userCanAccessChannel(room, req.user.userId);
+    if (!ok) return res.status(403).json({ error: "Нет доступа к каналу" });
+    const fromRaw = req.query.from;
+    const toRaw = req.query.to;
+    if (!fromRaw || !toRaw) return res.status(400).json({ error: "Нужны from и to (ISO)" });
+    const from = new Date(String(fromRaw));
+    const to = new Date(String(toRaw));
+    if (Number.isNaN(+from) || Number.isNaN(+to)) return res.status(400).json({ error: "Некорректный диапазон дат" });
+    const { rows } = await pool.query(
+      `SELECT e.id, e.user_id AS "userId", e.title, e.notes, e.starts_at AS "startsAt", e.ends_at AS "endsAt",
+              e.created_at AS "createdAt", u.nickname AS "creatorNickname"
+         FROM channel_calendar_events e
+         LEFT JOIN users u ON u.id = e.user_id
+        WHERE e.room_slug = $1
+          AND e.starts_at <= $3
+          AND COALESCE(e.ends_at, e.starts_at) >= $2
+        ORDER BY e.starts_at ASC`,
+      [room, from, to]
+    );
+    res.json({ events: rows });
+  } catch (err) {
+    console.error("GET /api/calendar/events", err);
+    res.status(500).json({ error: "Ошибка" });
+  }
+});
+
+app.get("/api/calendar/upcoming", requireAuth, async (req, res) => {
+  try {
+    const room = parseGalleryRoom(req);
+    const ok = await userCanAccessChannel(room, req.user.userId);
+    if (!ok) return res.status(403).json({ error: "Нет доступа к каналу" });
+    const lim = Math.min(30, Math.max(1, parseInt(String(req.query.limit || "12"), 10) || 12));
+    const { rows } = await pool.query(
+      `SELECT e.id, e.user_id AS "userId", e.title, e.notes, e.starts_at AS "startsAt", e.ends_at AS "endsAt",
+              u.nickname AS "creatorNickname"
+         FROM channel_calendar_events e
+         LEFT JOIN users u ON u.id = e.user_id
+        WHERE e.room_slug = $1 AND e.starts_at >= NOW()
+        ORDER BY e.starts_at ASC
+        LIMIT $2`,
+      [room, lim]
+    );
+    res.json({ events: rows });
+  } catch (err) {
+    console.error("GET /api/calendar/upcoming", err);
+    res.status(500).json({ error: "Ошибка" });
+  }
+});
+
+app.post("/api/calendar/events", requireAuth, async (req, res) => {
+  try {
+    const room = String(req.body?.room ?? "").trim().toLowerCase() || "lobby";
+    const ok = await userCanAccessChannel(room, req.user.userId);
+    if (!ok) return res.status(403).json({ error: "Нет доступа к каналу" });
+    const title = String(req.body?.title ?? "").trim().slice(0, 240);
+    if (!title) return res.status(400).json({ error: "Нужен заголовок" });
+    const notes = req.body?.notes != null ? String(req.body.notes).slice(0, 4000) : null;
+    const startsAt = new Date(String(req.body?.startsAt ?? ""));
+    if (Number.isNaN(+startsAt)) return res.status(400).json({ error: "Некорректное время начала" });
+    let endsAt = null;
+    if (req.body?.endsAt != null && req.body.endsAt !== "") {
+      const e = new Date(String(req.body.endsAt));
+      if (!Number.isNaN(+e)) endsAt = e;
+    }
+    const { rows } = await pool.query(
+      `INSERT INTO channel_calendar_events (room_slug, user_id, title, notes, starts_at, ends_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, user_id AS "userId", title, notes, starts_at AS "startsAt", ends_at AS "endsAt", created_at AS "createdAt"`,
+      [room, req.user.userId, title, notes || null, startsAt, endsAt]
+    );
+    res.status(201).json({ event: rows[0] });
+  } catch (err) {
+    console.error("POST /api/calendar/events", err);
+    res.status(500).json({ error: "Не удалось создать событие" });
+  }
+});
+
+app.patch("/api/calendar/events/:id", requireAuth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Некорректный id" });
+    const { rows: evRows } = await pool.query(`SELECT * FROM channel_calendar_events WHERE id = $1`, [id]);
+    const ev = evRows[0];
+    if (!ev) return res.status(404).json({ error: "Событие не найдено" });
+    const okRoom = await userCanAccessChannel(ev.room_slug, req.user.userId);
+    if (!okRoom) return res.status(403).json({ error: "Нет доступа" });
+    if (ev.user_id !== req.user.userId && !req.user.isAdmin) return res.status(403).json({ error: "Нельзя редактировать чужое событие" });
+    const title =
+      req.body?.title !== undefined ? String(req.body.title).trim().slice(0, 240) : ev.title;
+    if (!title) return res.status(400).json({ error: "Пустой заголовок" });
+    const notes =
+      req.body?.notes !== undefined
+        ? req.body.notes === null || req.body.notes === ""
+          ? null
+          : String(req.body.notes).slice(0, 4000)
+        : ev.notes;
+    let startsAt = ev.starts_at;
+    if (req.body?.startsAt !== undefined) {
+      const s = new Date(String(req.body.startsAt));
+      if (Number.isNaN(+s)) return res.status(400).json({ error: "Некорректное время начала" });
+      startsAt = s;
+    }
+    let endsAt = ev.ends_at;
+    if (req.body?.endsAt !== undefined) {
+      if (req.body.endsAt === null || req.body.endsAt === "") endsAt = null;
+      else {
+        const e = new Date(String(req.body.endsAt));
+        if (!Number.isNaN(+e)) endsAt = e;
+      }
+    }
+    const { rows } = await pool.query(
+      `UPDATE channel_calendar_events
+          SET title = $2, notes = $3, starts_at = $4, ends_at = $5
+        WHERE id = $1
+        RETURNING id, user_id AS "userId", title, notes, starts_at AS "startsAt", ends_at AS "endsAt", created_at AS "createdAt"`,
+      [id, title, notes, startsAt, endsAt]
+    );
+    res.json({ event: rows[0] });
+  } catch (err) {
+    console.error("PATCH /api/calendar/events/:id", err);
+    res.status(500).json({ error: "Не удалось обновить" });
+  }
+});
+
+app.delete("/api/calendar/events/:id", requireAuth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Некорректный id" });
+    const { rows: evRows } = await pool.query(`SELECT * FROM channel_calendar_events WHERE id = $1`, [id]);
+    const ev = evRows[0];
+    if (!ev) return res.status(404).json({ error: "Событие не найдено" });
+    const okRoom = await userCanAccessChannel(ev.room_slug, req.user.userId);
+    if (!okRoom) return res.status(403).json({ error: "Нет доступа" });
+    if (ev.user_id !== req.user.userId && !req.user.isAdmin) return res.status(403).json({ error: "Нельзя удалить чужое событие" });
+    await pool.query(`DELETE FROM channel_calendar_events WHERE id = $1`, [id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("DELETE /api/calendar/events/:id", err);
+    res.status(500).json({ error: "Не удалось удалить" });
   }
 });
 
@@ -2717,6 +2916,7 @@ async function start() {
   await ensurePhase3Schema();
   await ensureAvatarSchema();
   await ensureGallerySchema();
+  await ensureCalendarSchema();
   await ensureUserPermissionsSchema();
   ensureUploadDirs();
   server.listen(PORT, () => {

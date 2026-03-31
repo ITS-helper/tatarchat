@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import GalleryView from "./GalleryView.jsx";
+import CalendarView from "./CalendarView.jsx";
 
 const LS_TOKEN = "tatarchat_token";
 const LS_NICKNAME = "tatarchat_nickname";
@@ -17,8 +18,8 @@ const REACTION_SVG = {
   "👎": "/reactions/thumbsdown.svg",
 };
 /** sessionStorage: выбранный раздел и пароли комнат (не путать с паролем аккаунта) */
-/** Виртуальный раздел: не чат, только галерея (доступ на сервере по нику) */
-const GALLERY_ROOM = "__gallery";
+/** Вкладка канала: чат/галерея/календарь */
+const CHANNEL_VIEWS = { chat: "chat", gallery: "gallery", calendar: "calendar" };
 
 /** Фон паттерна движется при скролле медленнее, чем сообщения (0…1) */
 const CHAT_BG_PARALLAX = 0.22;
@@ -72,9 +73,10 @@ async function acquireVideoNoteStream() {
     () =>
       navigator.mediaDevices.getUserMedia({
         video: {
-          width: { ideal: 720, max: 1280 },
-          height: { ideal: 720, max: 1280 },
-          frameRate: { ideal: 24, max: 30 },
+          // Reasonable "best" quality: keep square preview sharp without exploding bitrate on phones
+          width: { ideal: 960, max: 1280 },
+          height: { ideal: 960, max: 1280 },
+          frameRate: { ideal: 30, max: 30 },
         },
         audio: {
           echoCancellation: true,
@@ -112,20 +114,19 @@ async function acquireVideoNoteStream() {
   throw lastErr || new Error("Камера недоступна");
 }
 
-const PRODUCTION_API_ORIGIN = "https://tatarchat-server.onrender.com";
-
 function getApiBase() {
   const fromEnv = import.meta.env.VITE_API_URL;
   if (fromEnv) return String(fromEnv).replace(/\/$/, "");
-  if (import.meta.env.DEV) return "";
-  return PRODUCTION_API_ORIGIN;
+  // В dev Vite проксирует /api → localhost:3001; в prod сервер отдаёт статику сам → относительный URL
+  return "";
 }
 
 function getSocketUrl() {
   const fromEnv = import.meta.env.VITE_SOCKET_URL;
   if (fromEnv) return fromEnv;
   if (import.meta.env.DEV) return "http://127.0.0.1:3001";
-  return PRODUCTION_API_ORIGIN;
+  // В prod подключаемся к тому же origin что открыта страница
+  return window.location.origin;
 }
 
 function getStoredToken() {
@@ -150,7 +151,6 @@ function canonicalizeStoredRoom(s) {
     if (me != null && id !== me) return "lobby";
     return `saved-${id}`;
   }
-  if (s.trim().toLowerCase() === GALLERY_ROOM) return GALLERY_ROOM;
   const alnum = s.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
   if (alnum && alnum.length <= 64) return alnum;
   return "lobby";
@@ -222,7 +222,7 @@ function messagePreviewForReply(m) {
   return "📎 файл";
 }
 
-function MessageAttachment({ messageId, messageRoom, attachment, getAttachmentHeaders }) {
+function MessageAttachment({ messageId, messageRoom, attachment, getAttachmentHeaders, onOpenImage }) {
   const [url, setUrl] = useState(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -297,9 +297,14 @@ function MessageAttachment({ messageId, messageRoom, attachment, getAttachmentHe
   }
   if (attachment.kind === "image" && url) {
     return (
-      <a href={url} target="_blank" rel="noreferrer" className="mt-1.5 block max-h-64 overflow-hidden rounded-lg">
+      <button
+        type="button"
+        onClick={() => onOpenImage?.({ url, name: attachment.name })}
+        className="mt-1.5 block max-h-64 overflow-hidden rounded-lg transition hover:opacity-95"
+        title="Открыть"
+      >
         <img src={url} alt={attachment.name} className="max-h-64 w-auto max-w-full rounded-lg object-contain" />
-      </a>
+      </button>
     );
   }
   if (attachment.kind === "image" && !url) {
@@ -396,6 +401,43 @@ function ChannelIconThumb({ slug, enabled, getAuthHeaders, className }) {
   return <img src={url} alt="" className={className} />;
 }
 
+function ChannelGlyph({ slug, className }) {
+  const s = String(slug || "").toLowerCase();
+  if (s === "dreamteamdauns") {
+    // Beer mug
+    return (
+      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden>
+        <path d="M6 8h9v10a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V8z" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M15 10h2.2a2.2 2.2 0 0 1 0 4.4H15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <path d="M6 8c0-1.8 1.6-3 3.2-2.2.8-1.3 2.6-1.6 3.7-.6.9-1.1 2.7-.9 3.4.5.9-.3 1.7.5 1.7 1.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <path d="M8 12v6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" opacity=".45" />
+        <path d="M11 12v6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" opacity=".45" />
+      </svg>
+    );
+  }
+  if (s === "lobby") {
+    // Heart
+    return (
+      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden>
+        <path
+          d="M12 21.2s-7.2-4.4-9.6-9C.6 9.2 2.1 6.6 4.8 6.1c1.7-.3 3.3.5 4.2 1.9.9-1.4 2.5-2.2 4.2-1.9 2.7.5 4.2 3.1 2.4 6.1-2.4 4.6-9.6 9-9.6 9z"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M8.4 7.8c-1.1-1.2-2.9-1.5-4.2-.8"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          opacity=".35"
+        />
+      </svg>
+    );
+  }
+  return null;
+}
+
 export default function App() {
   const [token, setToken] = useState(() => getStoredToken());
   const [nickname, setNickname] = useState(() => localStorage.getItem(LS_NICKNAME) || "");
@@ -416,7 +458,6 @@ export default function App() {
   const [activeRoom, setActiveRoom] = useState(() => getInitialRoom());
   const [roomTitle, setRoomTitle] = useState(() => {
     const slug = getInitialRoom();
-    if (slug === GALLERY_ROOM) return "Галерея";
     return slug.startsWith("dm-") ? "ЛС" : slug === "lobby" ? "Семья" : "DTD";
   });
   const [messages, setMessages] = useState([]);
@@ -433,10 +474,12 @@ export default function App() {
   const [recordingPreviewStream, setRecordingPreviewStream] = useState(null);
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [voiceUploading, setVoiceUploading] = useState(false);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [hasAvatar, setHasAvatar] = useState(() => localStorage.getItem(LS_HAS_AVATAR) === "1");
   const [searchInput, setSearchInput] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [status, setStatus] = useState("offline");
   const [roomJoined, setRoomJoined] = useState(false);
   const [banner, setBanner] = useState(null);
@@ -447,9 +490,18 @@ export default function App() {
   const [changePwBusy, setChangePwBusy] = useState(false);
   const [changePwOk, setChangePwOk] = useState("");
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [themeLight, setThemeLight] = useState(() => localStorage.getItem("tatarchat_theme") === "light");
+  const [activePattern, setActivePattern] = useState(() => localStorage.getItem("tatarchat_pattern") || "bottles");
+  const [activeView, setActiveView] = useState(() => sessionStorage.getItem("tatarchat_active_view") || CHANNEL_VIEWS.chat);
+  const [channelMenuRoom, setChannelMenuRoom] = useState(null);
+  const [personalOpen, setPersonalOpen] = useState(false);
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminSaving, setAdminSaving] = useState(null);
+  const [chatImageLightbox, setChatImageLightbox] = useState(null);
+
+  const savedChannel = publicChannels.find((c) => c.isSaved) || null;
   const listRef = useRef(null);
   const chatParallaxRef = useRef(null);
   const socketRef = useRef(null);
@@ -476,13 +528,36 @@ export default function App() {
   const voiceStartedAtRef = useRef(0);
   const stopVoiceRecordRef = useRef(() => {});
   const avatarFileRef = useRef(null);
-  const channelAvatarFileRef = useRef(null);
+  // const channelAvatarFileRef = useRef(null);
   const replyToRef = useRef(null);
   const nicknameRef = useRef(nickname);
 
   useEffect(() => {
     nicknameRef.current = nickname;
   }, [nickname]);
+
+  useEffect(() => {
+    if (themeLight) document.documentElement.classList.add("theme-light");
+    else document.documentElement.classList.remove("theme-light");
+    localStorage.setItem("tatarchat_theme", themeLight ? "light" : "dark");
+  }, [themeLight]);
+
+  const PATTERNS = {
+    bottles:   { url: "/city-pattern.svg",     label: "Бутылки" },
+    beer:      { url: "/pattern-beer.svg",      label: "Пиво" },
+    wine:      { url: "/pattern-wine.svg",      label: "Вино" },
+    cocktails: { url: "/pattern-cocktail.svg",  label: "Коктейли" },
+  };
+
+  useEffect(() => {
+    const p = PATTERNS[activePattern] || PATTERNS.bottles;
+    document.documentElement.style.setProperty("--bg-pattern", `url("${p.url}")`);
+    localStorage.setItem("tatarchat_pattern", activePattern);
+  }, [activePattern]);
+
+  useEffect(() => {
+    sessionStorage.setItem("tatarchat_active_view", activeView);
+  }, [activeView]);
 
   useEffect(() => {
     replyToRef.current = replyTo;
@@ -533,12 +608,7 @@ export default function App() {
     activeRoomRef.current = activeRoom;
   }, [activeRoom]);
 
-  useEffect(() => {
-    if (!canUseGallery && activeRoom === GALLERY_ROOM) {
-      setActiveRoom("lobby");
-      setRoomTitle("Семья");
-    }
-  }, [canUseGallery, activeRoom]);
+  // галерея теперь вкладка внутри каждого канала; отдельной "__gallery" комнаты больше нет
 
   useEffect(() => {
     publicChannelsRef.current = publicChannels;
@@ -609,23 +679,17 @@ export default function App() {
 
     const inPub = publicChannels.some((c) => c.slug === activeRoom);
     const inDm = directChannels.some((c) => c.slug === activeRoom);
-    const okGallery = activeRoom === GALLERY_ROOM && canUseGallery;
-
-    if (inPub || inDm || okGallery) return;
+    if (inPub || inDm) return;
 
     const next =
       publicChannels.find((c) => !c.isSaved)?.slug ||
       publicChannels.find((c) => c.isSaved)?.slug ||
-      directChannels[0]?.slug ||
-      (canUseGallery ? GALLERY_ROOM : null);
+      directChannels[0]?.slug;
     if (next) {
       setActiveRoom(next);
-      if (next === GALLERY_ROOM) setRoomTitle("Галерея");
-      else {
-        const row =
-          publicChannels.find((x) => x.slug === next) || directChannels.find((x) => x.slug === next);
-        setRoomTitle(next.startsWith("dm-") ? "ЛС" : row?.title || next);
-      }
+      const row =
+        publicChannels.find((x) => x.slug === next) || directChannels.find((x) => x.slug === next);
+      setRoomTitle(next.startsWith("dm-") ? "ЛС" : row?.title || next);
       setBanner(null);
     }
   }, [token, activeRoom, publicChannels, directChannels, canUseGallery]);
@@ -661,33 +725,7 @@ export default function App() {
     [token]
   );
 
-  const uploadChannelIcon = useCallback(
-    async (file) => {
-      if (!file) return;
-      const slug = activeRoomRef.current;
-      if (!slug || slug.startsWith("dm-") || /^saved-\d+$/i.test(slug)) return;
-      try {
-        const base = getApiBase();
-        const fd = new FormData();
-        fd.append("file", file);
-        const res = await fetch(`${base}/api/rooms/${encodeURIComponent(slug)}/avatar`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}`, ...buildRoomHeaders() },
-          body: fd,
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          setBanner(data.error || "Не удалось загрузить иконку канала");
-          return;
-        }
-        refreshChannels();
-        setBanner(null);
-      } catch {
-        setBanner("Сеть: иконка канала");
-      }
-    },
-    [token, buildRoomHeaders, refreshChannels]
-  );
+  // channel avatars disabled in UI
 
   const createRoom = useCallback(async (slug, title) => {
     try {
@@ -779,7 +817,7 @@ export default function App() {
     setSearchLoading(true);
     const t = setTimeout(async () => {
       try {
-        if (activeRoomRef.current === GALLERY_ROOM) {
+        if (activeView !== CHANNEL_VIEWS.chat) {
           setSearchResults([]);
           setSearchLoading(false);
           return;
@@ -805,7 +843,7 @@ export default function App() {
       }
     }, 380);
     return () => clearTimeout(t);
-  }, [searchInput, token, buildRoomHeaders]);
+  }, [searchInput, token, buildRoomHeaders, activeView]);
 
   const stopTyping = useCallback(() => {
     if (typingIdleRef.current) {
@@ -1103,8 +1141,8 @@ export default function App() {
           mime !== ""
             ? new MediaRecorder(stream, {
                 mimeType: mime,
-                videoBitsPerSecond: 2_500_000,
-                audioBitsPerSecond: 128_000,
+                videoBitsPerSecond: 4_000_000,
+                audioBitsPerSecond: 160_000,
               })
             : new MediaRecorder(stream);
       } catch {
@@ -1118,13 +1156,8 @@ export default function App() {
       videoNoteStartedAtRef.current = Date.now();
       setRecordingPreviewStream(stream);
       setVideoNoteRecording(true);
-      const onGlobalUp = () => stopVideoNoteRecordRef.current();
-      window.addEventListener("pointerup", onGlobalUp, true);
-      window.addEventListener("pointercancel", onGlobalUp, true);
-      videoNoteWindowCleanRef.current = () => {
-        window.removeEventListener("pointerup", onGlobalUp, true);
-        window.removeEventListener("pointercancel", onGlobalUp, true);
-      };
+      videoNoteWindowCleanRef.current?.();
+      videoNoteWindowCleanRef.current = null;
       videoNoteMaxTimerRef.current = setTimeout(() => {
         stopVideoNoteRecordRef.current();
       }, VIDEO_NOTE_MAX_MS);
@@ -1189,20 +1222,19 @@ export default function App() {
         setBanner("Не удалось загрузить историю.");
       }
     },
-    [token, buildRoomHeaders]
+    [token, buildRoomHeaders, activeView]
   );
 
   useEffect(() => {
     if (!token) return;
     localStorage.setItem(LS_LAST_ROOM, activeRoom);
-    if (activeRoom === GALLERY_ROOM) {
-      setRoomTitle("Галерея");
+    if (activeView === CHANNEL_VIEWS.chat) {
+      loadHistoryForRoom(activeRoom);
+    } else {
       setMessages([]);
       setBanner(null);
-      return;
     }
-    loadHistoryForRoom(activeRoom);
-  }, [token, activeRoom, loadHistoryForRoom]);
+  }, [token, activeRoom, loadHistoryForRoom, activeView]);
 
   const emitJoinRoom = useCallback((socket) => {
     const r = activeRoomRef.current;
@@ -1287,16 +1319,19 @@ export default function App() {
     });
 
     socket.on("message", (msg) => {
+      if (activeView !== CHANNEL_VIEWS.chat) return;
       if (msg.room && msg.room !== activeRoomRef.current) return;
       setMessages((prev) => upsertMessageList(prev, msg));
     });
 
     socket.on("message-edited", (msg) => {
+      if (activeView !== CHANNEL_VIEWS.chat) return;
       if (msg.room && msg.room !== activeRoomRef.current) return;
       setMessages((prev) => upsertMessageList(prev, msg));
     });
 
     socket.on("message-deleted", (payload) => {
+      if (activeView !== CHANNEL_VIEWS.chat) return;
       const msg = payload?.message;
       if (!msg || (msg.room && msg.room !== activeRoomRef.current)) return;
       const id = payload.id ?? msg.id;
@@ -1584,8 +1619,36 @@ export default function App() {
   const selectChannel = (slug) => {
     setBanner(null);
     setActiveRoom(slug);
-    if (slug === GALLERY_ROOM) setRoomTitle("Галерея");
+    setActiveView(CHANNEL_VIEWS.chat);
+    setChannelMenuRoom(null);
   };
+
+  const openChannelMenu = (slug) => {
+    const s = String(slug || "").toLowerCase();
+    const enabled = s === "lobby" || s === "dreamteamdauns";
+    if (!enabled) {
+      selectChannel(slug);
+      return;
+    }
+    setActiveRoom(slug);
+    setChannelMenuRoom((prev) => (prev === slug ? null : slug));
+  };
+
+  const chooseChannelView = (view) => {
+    setActiveView(view);
+    if (channelMenuRoom) setActiveRoom(channelMenuRoom);
+    setChannelMenuRoom(null);
+  };
+
+  useEffect(() => {
+    const onDocDown = (e) => {
+      if (!attachMenuOpen) return;
+      // close on any click outside; menu button stops propagation
+      setAttachMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onDocDown);
+    return () => document.removeEventListener("pointerdown", onDocDown);
+  }, [attachMenuOpen]);
 
   const flushReaction = useCallback(
     async (messageId, emoji) => {
@@ -1906,17 +1969,6 @@ export default function App() {
           void uploadMyAvatar(f);
         }}
       />
-      <input
-        ref={channelAvatarFileRef}
-        type="file"
-        accept="image/jpeg,image/png,image/gif,image/webp"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          e.target.value = "";
-          void uploadChannelIcon(f);
-        }}
-      />
       {/* Sidebar: на iOS fixed внутри flex резервирует ~w-72 — обёртка max-md:w-0 + absolute панель */}
       <div className="relative z-40 max-md:w-0 max-md:min-w-0 max-md:flex-none max-md:overflow-visible md:w-72 md:shrink-0">
         <aside
@@ -1925,7 +1977,21 @@ export default function App() {
           }`}
         >
         <div className="flex items-center justify-between px-4 py-3">
-          <h2 className="text-base font-semibold text-tc-text">Чаты</h2>
+          <button
+            type="button"
+            onClick={() => setProfileModalOpen(true)}
+            className="flex min-w-0 items-center gap-2 rounded-lg px-1 py-0.5 transition hover:bg-tc-hover"
+            title="Профиль"
+          >
+            <UserAvatarBubble
+              userId={myUserId}
+              hasAvatar={hasAvatar}
+              getAuthHeaders={getAuthHeaders}
+              className="h-7 w-7 shrink-0 rounded-lg object-cover"
+            />
+            <span className="truncate text-sm font-semibold text-tc-text">{nickname}</span>
+            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 text-tc-text-muted" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+          </button>
           <div className="flex items-center gap-1">
             {imAdmin && (
               <button
@@ -1947,6 +2013,18 @@ export default function App() {
             </button>
             <button
               type="button"
+              onClick={() => {
+                setSearchOpen((v) => !v);
+                if (searchOpen) setSearchInput("");
+              }}
+              className={`rounded-full p-1.5 text-tc-text-sec transition hover:bg-tc-hover ${searchOpen ? "bg-tc-hover text-tc-accent" : ""}`}
+              title="Поиск"
+              aria-label="Поиск"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79L20 21.49 21.49 20 15.5 14zM9.5 14C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+            </button>
+            <button
+              type="button"
               className="rounded-full p-1.5 text-tc-text-sec transition hover:bg-tc-hover md:hidden"
               onClick={() => setSidebarOpen(false)}
             >
@@ -1955,131 +2033,138 @@ export default function App() {
           </div>
         </div>
 
-        <div className="px-3 pb-2">
-          <input
-            type="search"
-            className="w-full rounded-lg bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted"
-            placeholder="Поиск"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-          />
-          {searchInput.trim() && searchResults.length > 0 ? (
-            <div className="mt-1 max-h-40 overflow-y-auto rounded-lg bg-tc-panel">
-              {searchResults.map((r) => (
-                <button
-                  key={r.id}
-                  type="button"
-                  className="block w-full truncate px-3 py-2 text-left text-sm text-tc-text-sec transition hover:bg-tc-hover"
-                  onClick={() => {
-                    const el = document.querySelector(`[data-message-id="${r.id}"]`);
-                    el?.scrollIntoView({ behavior: "smooth", block: "center" });
-                    setSearchInput("");
-                    setSidebarOpen(false);
-                  }}
-                >
-                  <span className="font-medium text-tc-accent">{r.user_nick}</span>{" "}
-                  <span className="text-tc-text-muted">
-                    {r.deleted
-                      ? "удалено"
-                      : (r.text || "").trim().slice(0, 60) ||
-                        (r.attachment?.kind === "video_note"
-                          ? "Видео"
-                          : r.attachment?.kind === "voice"
-                            ? "Голос"
-                            : r.attachment
-                              ? `📎 ${r.attachment.name}`
-                              : "—")}
-                  </span>
-                </button>
-              ))}
+        {searchOpen ? (
+          <div className="px-3 pb-2">
+            <div className="flex items-center gap-2">
+              <input
+                type="search"
+                autoFocus
+                className="w-full rounded-lg bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted"
+                placeholder="Поиск по сообщениям…"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() => { setSearchOpen(false); setSearchInput(""); }}
+                className="rounded-lg px-2 py-2 text-sm text-tc-text-sec transition hover:bg-tc-hover"
+                title="Закрыть"
+              >
+                ✕
+              </button>
             </div>
-          ) : null}
-        </div>
+            {searchInput.trim() && searchResults.length > 0 ? (
+              <div className="mt-1 max-h-40 overflow-y-auto rounded-lg bg-tc-panel">
+                {searchResults.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    className="block w-full truncate px-3 py-2 text-left text-sm text-tc-text-sec transition hover:bg-tc-hover"
+                    onClick={() => {
+                      const el = document.querySelector(`[data-message-id="${r.id}"]`);
+                      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                      setSearchInput("");
+                      setSearchOpen(false);
+                      setSidebarOpen(false);
+                    }}
+                  >
+                    <span className="font-medium text-tc-accent">{r.user_nick}</span>{" "}
+                    <span className="text-tc-text-muted">
+                      {r.deleted
+                        ? "удалено"
+                        : (r.text || "").trim().slice(0, 60) ||
+                          (r.attachment?.kind === "video_note"
+                            ? "Видео"
+                            : r.attachment?.kind === "voice"
+                              ? "Голос"
+                              : r.attachment
+                                ? `📎 ${r.attachment.name}`
+                                : "—")}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         <nav className="sidebar-scroll flex-1 overflow-y-auto">
-          {(() => {
-            const savedCh = publicChannels.find((c) => c.isSaved);
-            const restCh = publicChannels.filter((c) => !c.isSaved);
-            return (
-              <>
-                {savedCh ? (
-                  <button
-                    key={savedCh.slug}
-                    type="button"
-                    onClick={() => { selectChannel(savedCh.slug); setSidebarOpen(false); }}
-                    className={`flex w-full items-center gap-3 px-4 py-3 transition ${
-                      activeRoom === savedCh.slug ? "bg-tc-accent/20" : "hover:bg-tc-hover"
-                    }`}
-                  >
-                    <div
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/20 text-amber-500"
-                      aria-hidden
-                    >
-                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
-                        <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
-                      </svg>
-                    </div>
-                    <div className="min-w-0 flex-1 text-left">
-                      <div className="flex items-center justify-between">
-                        <span
-                          className={`truncate text-sm font-medium ${
-                            activeRoom === savedCh.slug ? "text-tc-accent" : "text-tc-text"
-                          }`}
-                        >
-                          {savedCh.title}
-                        </span>
-                      </div>
-                      <p className="truncate text-xs text-tc-text-muted">Избранное</p>
-                    </div>
-                  </button>
-                ) : null}
-                {canUseGallery ? (
-                  <button
-                    type="button"
-                    onClick={() => { selectChannel(GALLERY_ROOM); setSidebarOpen(false); }}
-                    className={`flex w-full items-center gap-3 px-4 py-3 transition ${
-                      activeRoom === GALLERY_ROOM ? "bg-tc-accent/20" : "hover:bg-tc-hover"
-                    }`}
-                  >
-                    <div
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/20 text-violet-400"
-                      aria-hidden
-                    >
-                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
-                        <path d="M22 16V4c0-1.1-.9-2-2-2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2zm-11-4l2.03 2.71L16 11l4 5H8l3-4zM2 6v14c0 1.1.9 2 2 2h14v-2H4V6H2z" />
-                      </svg>
-                    </div>
-                    <div className="min-w-0 flex-1 text-left">
-                      <span
-                        className={`block truncate text-sm font-medium ${
-                          activeRoom === GALLERY_ROOM ? "text-tc-accent" : "text-tc-text"
-                        }`}
-                      >
-                        Галерея
-                      </span>
-                      <p className="truncate text-xs text-tc-text-muted">Общие фото</p>
-                    </div>
-                  </button>
-                ) : null}
-                {restCh.map((r) => (
+          {/* Personal (top) */}
+          <button
+            type="button"
+            onClick={() => setPersonalOpen((v) => !v)}
+            className="mx-3 mb-2 flex items-center justify-between rounded-xl border border-tc-border/70 bg-tc-panel/30 px-3 py-2 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+          >
+            <span className="flex items-center gap-2">
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+              Личное
+            </span>
+            <svg viewBox="0 0 24 24" className={`h-4 w-4 transition-transform ${personalOpen ? "rotate-180" : ""}`} fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+          </button>
+
+          <div className={`overflow-hidden px-3 transition-all duration-200 ${personalOpen ? "max-h-[520px] opacity-100 pb-2" : "max-h-0 opacity-0"}`}>
+            {savedChannel ? (
+              <button
+                type="button"
+                onClick={() => { selectChannel(savedChannel.slug); setSidebarOpen(false); }}
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 transition-colors duration-200 ${
+                  activeRoom === savedChannel.slug ? "bg-tc-accent/20" : "hover:bg-tc-hover"
+                }`}
+              >
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/20 text-amber-500" aria-hidden>
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+                </div>
+                <div className="min-w-0 flex-1 text-left">
+                  <span className={`block truncate text-sm font-medium ${activeRoom === savedChannel.slug ? "text-tc-accent" : "text-tc-text"}`}>
+                    Избранное
+                  </span>
+                  <p className="truncate text-xs text-tc-text-muted">{savedChannel.title}</p>
+                </div>
+              </button>
+            ) : null}
+
+            {directChannels.length ? (
+              <div className="mt-2 rounded-xl border border-tc-border/60 bg-tc-panel/20">
+                {directChannels.map((r) => (
                   <button
                     key={r.slug}
                     type="button"
                     onClick={() => { selectChannel(r.slug); setSidebarOpen(false); }}
-                    className={`flex w-full items-center gap-3 px-4 py-3 transition ${
+                    className={`flex w-full items-center gap-3 px-3 py-2.5 transition-colors duration-200 ${
                       activeRoom === r.slug ? "bg-tc-accent/20" : "hover:bg-tc-hover"
                     }`}
                   >
-                    {r.hasChannelAvatar ? (
-                      <ChannelIconThumb
-                        slug={r.slug}
-                        enabled
-                        getAuthHeaders={getAuthHeaders}
-                        className="h-9 w-9 shrink-0 rounded-lg object-cover"
-                      />
-                    ) : (
-                      <div className="h-9 w-9 shrink-0 rounded-lg bg-tc-asphalt/50" aria-hidden />
-                    )}
+                    <div className="min-w-0 flex-1 text-left">
+                      <span className={`block truncate text-sm font-medium ${activeRoom === r.slug ? "text-tc-accent" : "text-tc-text"}`}>
+                        {r.peer?.nickname || r.title}
+                      </span>
+                      <p className="truncate text-xs text-tc-text-muted">Личное сообщение</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="px-3 py-2 text-xs text-tc-text-muted">Нет личных диалогов</p>
+            )}
+          </div>
+
+          {/* Channels */}
+          {(() => {
+            const restCh = publicChannels.filter((c) => !c.isSaved);
+            return (
+              <>
+                {restCh.map((r) => (
+                  <div key={r.slug}>
+                  <button
+                    type="button"
+                    onClick={() => { openChannelMenu(r.slug); setSidebarOpen(false); }}
+                    className={`flex w-full items-center gap-3 px-4 py-3 transition-colors duration-200 ${
+                      activeRoom === r.slug ? "bg-tc-accent/20" : "hover:bg-tc-hover"
+                    }`}
+                  >
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-tc-asphalt/35 text-tc-text-sec" aria-hidden>
+                      <ChannelGlyph slug={r.slug} className="h-5 w-5" />
+                    </div>
                     <div className="min-w-0 flex-1 text-left">
                       <div className="flex items-center justify-between">
                         <span
@@ -2096,128 +2181,170 @@ export default function App() {
                       <p className="truncate text-xs text-tc-text-muted">Канал</p>
                     </div>
                   </button>
+                  <div
+                    className={`overflow-hidden px-4 transition-all duration-200 ${
+                      channelMenuRoom === r.slug ? "max-h-40 opacity-100 pb-2" : "max-h-0 opacity-0"
+                    }`}
+                  >
+                    <div className="mt-1 space-y-1 rounded-xl border border-tc-border/70 bg-tc-panel/40 p-2">
+                      <button
+                        type="button"
+                        onClick={() => chooseChannelView(CHANNEL_VIEWS.chat)}
+                        className="w-full rounded-lg px-3 py-2 text-left text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+                      >
+                        Чат
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!canUseGallery}
+                        onClick={() => chooseChannelView(CHANNEL_VIEWS.gallery)}
+                        className={`w-full rounded-lg px-3 py-2 text-left text-sm transition ${
+                          canUseGallery ? "text-tc-text-sec hover:bg-tc-hover hover:text-tc-accent" : "text-tc-text-muted opacity-60"
+                        }`}
+                      >
+                        Галерея
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => chooseChannelView(CHANNEL_VIEWS.calendar)}
+                        className="w-full rounded-lg px-3 py-2 text-left text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+                      >
+                        Календарь
+                      </button>
+                    </div>
+                  </div>
+                  </div>
                 ))}
               </>
             );
           })()}
-          {directChannels.length > 0 && (
-            <div className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-tc-text-muted">
-              Личные
-            </div>
-          )}
-          {directChannels.map((r) => (
-            <button
-              key={r.slug}
-              type="button"
-              onClick={() => { selectChannel(r.slug); setSidebarOpen(false); }}
-              className={`flex w-full items-center gap-3 px-4 py-3 transition ${
-                activeRoom === r.slug ? "bg-tc-accent/20" : "hover:bg-tc-hover"
-              }`}
-            >
-              <div className="min-w-0 flex-1 text-left">
-                <span className={`block truncate text-sm font-medium ${activeRoom === r.slug ? "text-tc-accent" : "text-tc-text"}`}>
-                  {r.peer?.nickname || r.title}
-                </span>
-                <p className="truncate text-xs text-tc-text-muted">Личное сообщение</p>
-              </div>
-            </button>
-          ))}
         </nav>
 
-        <div className="border-t border-tc-border p-3 space-y-2">
-          <button
-            type="button"
-            onClick={() => avatarFileRef.current?.click()}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
-          >
-            <UserAvatarBubble
-              userId={myUserId}
-              hasAvatar={hasAvatar}
-              getAuthHeaders={getAuthHeaders}
-              className="h-8 w-8 rounded-lg object-cover"
-            />
-            <span>{hasAvatar ? "Сменить аватар" : "Загрузить аватар"}</span>
-          </button>
-          <div className="rounded-lg border border-tc-border/60 bg-tc-panel/40 px-2 py-2">
-            <button
-              type="button"
-              onClick={() => {
-                setChangePwOpen((v) => !v);
-                setChangePwOk("");
-                setBanner(null);
-              }}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
-            >
-              <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" fill="currentColor" aria-hidden>
-                <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z" />
-              </svg>
-              <span className="text-left">{changePwOpen ? "Скрыть смену пароля" : "Сменить пароль"}</span>
-            </button>
-            {changePwOpen ? (
-              <form onSubmit={submitChangePassword} className="mt-2 space-y-2 px-1 pb-1">
-                <input
-                  type="password"
-                  autoComplete="current-password"
-                  className="w-full rounded-lg border border-tc-border bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted focus:border-tc-accent"
-                  placeholder="Текущий пароль"
-                  value={changePwCurrent}
-                  onChange={(e) => setChangePwCurrent(e.target.value)}
-                  disabled={changePwBusy}
-                />
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  className="w-full rounded-lg border border-tc-border bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted focus:border-tc-accent"
-                  placeholder="Новый пароль"
-                  value={changePwNew}
-                  onChange={(e) => setChangePwNew(e.target.value)}
-                  disabled={changePwBusy}
-                />
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  className="w-full rounded-lg border border-tc-border bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted focus:border-tc-accent"
-                  placeholder="Повторите новый пароль"
-                  value={changePwNew2}
-                  onChange={(e) => setChangePwNew2(e.target.value)}
-                  disabled={changePwBusy}
-                />
-                {changePwOk ? (
-                  <p className="text-center text-xs text-green-600 dark:text-green-400">{changePwOk}</p>
-                ) : null}
-                <button
-                  type="submit"
-                  disabled={changePwBusy}
-                  className="w-full rounded-lg bg-tc-accent py-2 text-sm font-medium text-white transition hover:bg-tc-accent/85 disabled:opacity-50"
-                >
-                  {changePwBusy ? "Сохранение…" : "Сохранить пароль"}
-                </button>
-              </form>
-            ) : null}
-          </div>
-          {imAdmin && (
-            <button
-              type="button"
-              onClick={openAdminPanel}
-              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
-            >
-              <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" fill="currentColor">
-                <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 4l5 2.18V11c0 3.5-2.33 6.79-5 7.93-2.67-1.14-5-4.43-5-7.93V7.18L12 5zm-1 3v4h2V8h-2zm0 5v2h2v-2h-2z"/>
-              </svg>
-              Управление пользователями
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-tc-danger transition hover:bg-tc-danger/10"
-          >
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5-5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
-            Выйти
-          </button>
-        </div>
       </aside>
       </div>
+
+      {/* Profile modal */}
+      {profileModalOpen && (
+        <div
+          className="fixed inset-0 z-[300] flex items-start justify-start p-0 md:items-center md:justify-center md:bg-black/50 md:p-4 md:backdrop-blur-sm"
+          onClick={() => setProfileModalOpen(false)}
+        >
+          <div
+            className="relative mt-12 w-72 rounded-xl bg-tc-panel shadow-2xl md:mt-0 md:w-80"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center gap-3 border-b border-tc-border px-4 py-3">
+              <UserAvatarBubble userId={myUserId} hasAvatar={hasAvatar} getAuthHeaders={getAuthHeaders} className="h-10 w-10 rounded-xl object-cover" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-tc-text">{nickname}</p>
+                <p className="text-xs text-tc-text-muted">Профиль</p>
+              </div>
+              <button type="button" onClick={() => setProfileModalOpen(false)} className="rounded-lg p-1 text-tc-text-sec hover:bg-tc-hover">
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+              </button>
+            </div>
+
+            <div className="p-2 space-y-0.5">
+              {/* Avatar */}
+              <button
+                type="button"
+                onClick={() => { avatarFileRef.current?.click(); setProfileModalOpen(false); }}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+              >
+                <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                {hasAvatar ? "Сменить аватар" : "Загрузить аватар"}
+              </button>
+
+              {/* Change password */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => { setChangePwOpen((v) => !v); setChangePwOk(""); }}
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+                  <span className="flex-1 text-left">{changePwOpen ? "Скрыть" : "Сменить пароль"}</span>
+                  <svg viewBox="0 0 24 24" className={`h-4 w-4 shrink-0 transition-transform ${changePwOpen ? "rotate-180" : ""}`} fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+                </button>
+                {changePwOpen && (
+                  <form onSubmit={submitChangePassword} className="mx-3 mb-2 mt-1 space-y-2">
+                    <input type="password" autoComplete="current-password" className="w-full rounded-lg border border-tc-border bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted focus:border-tc-accent" placeholder="Текущий пароль" value={changePwCurrent} onChange={(e) => setChangePwCurrent(e.target.value)} disabled={changePwBusy} />
+                    <input type="password" autoComplete="new-password" className="w-full rounded-lg border border-tc-border bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted focus:border-tc-accent" placeholder="Новый пароль" value={changePwNew} onChange={(e) => setChangePwNew(e.target.value)} disabled={changePwBusy} />
+                    <input type="password" autoComplete="new-password" className="w-full rounded-lg border border-tc-border bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted focus:border-tc-accent" placeholder="Повторите пароль" value={changePwNew2} onChange={(e) => setChangePwNew2(e.target.value)} disabled={changePwBusy} />
+                    {changePwOk && <p className="text-center text-xs text-tc-green">{changePwOk}</p>}
+                    <button type="submit" disabled={changePwBusy} className="w-full rounded-lg bg-tc-accent py-2 text-sm font-medium text-white transition hover:bg-tc-accent-hover disabled:opacity-50">{changePwBusy ? "Сохранение…" : "Сохранить"}</button>
+                  </form>
+                )}
+              </div>
+
+              {/* Pattern picker */}
+              <div>
+                <div className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-tc-text-sec">
+                  <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" fill="currentColor"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>
+                  <span>Фон</span>
+                </div>
+                <div className="mx-3 mb-2 grid grid-cols-4 gap-2">
+                  {Object.entries(PATTERNS).map(([key, p]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setActivePattern(key)}
+                      className={`flex flex-col items-center gap-1 rounded-lg border-2 p-1.5 transition ${activePattern === key ? "border-tc-accent" : "border-tc-border hover:border-tc-accent/50"}`}
+                      title={p.label}
+                    >
+                      <img src={p.url} alt={p.label} className="h-10 w-full rounded object-cover" style={{imageRendering:"pixelated"}} />
+                      <span className="text-[9px] leading-none text-tc-text-muted">{p.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Theme toggle */}
+              <button
+                type="button"
+                onClick={() => setThemeLight((v) => !v)}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+              >
+                <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" fill="currentColor">
+                  {themeLight
+                    ? <path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/>
+                    : <path d="M12 7a5 5 0 1 0 0 10A5 5 0 0 0 12 7zm-1-5h2v3h-2V2zm0 17h2v3h-2v-3zm8.66-14.24l1.41 1.41-2.12 2.12-1.41-1.41 2.12-2.12zM4.05 19.36l1.41 1.41-2.12 2.12-1.41-1.41 2.12-2.12zM22 11v2h-3v-2h3zm-17 0v2H2v-2h3zm14.95 8.36-2.12-2.12 1.41-1.41 2.12 2.12-1.41 1.41zM6.17 7.05 4.05 4.93l1.41-1.41 2.12 2.12-1.41 1.41z"/>
+                  }
+                </svg>
+                <span className="flex-1 text-left">{themeLight ? "Тёмная тема" : "Светлая тема"}</span>
+                <div className={`relative h-5 w-9 rounded-full transition-colors ${themeLight ? "bg-tc-accent" : "bg-tc-asphalt"}`}>
+                  <div className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${themeLight ? "translate-x-4" : "translate-x-0.5"}`}/>
+                </div>
+              </button>
+
+              {/* Admin */}
+              {imAdmin && (
+                <button
+                  type="button"
+                  onClick={() => { openAdminPanel(); setProfileModalOpen(false); }}
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
+                  Управление пользователями
+                </button>
+              )}
+
+              <div className="my-1 border-t border-tc-border"/>
+
+              {/* Logout */}
+              <button
+                type="button"
+                onClick={() => { handleLogout(); setProfileModalOpen(false); }}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-tc-danger transition hover:bg-tc-danger/10"
+              >
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5-5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+                Выйти
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {sidebarOpen && (
         <div
@@ -2225,6 +2352,48 @@ export default function App() {
           onClick={() => setSidebarOpen(false)}
         />
       )}
+
+      {/* Chat image lightbox */}
+      {chatImageLightbox?.url ? (
+        <div
+          className="fixed inset-0 z-[400] flex items-center justify-center bg-black/80 p-3 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setChatImageLightbox(null)}
+        >
+          <div className="w-full max-w-4xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="min-w-0 flex-1 truncate text-sm text-white/80">
+                {chatImageLightbox.name || "Фото"}
+              </p>
+              <div className="flex items-center gap-2">
+                <a
+                  href={chatImageLightbox.url}
+                  download={chatImageLightbox.name || "photo"}
+                  className="rounded-lg bg-white/10 px-3 py-2 text-xs text-white/90 transition hover:bg-white/15"
+                >
+                  Скачать
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setChatImageLightbox(null)}
+                  className="rounded-lg bg-white/10 p-2 text-white/90 transition hover:bg-white/15"
+                  aria-label="Закрыть"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+              </div>
+            </div>
+            <div className="overflow-hidden rounded-2xl bg-black/40">
+              <img
+                src={chatImageLightbox.url}
+                alt={chatImageLightbox.name || "Фото"}
+                className="max-h-[80vh] w-full object-contain"
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Main area */}
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -2323,31 +2492,9 @@ export default function App() {
               <span className="truncate">{nickname}</span>
             </div>
           </div>
-          {activeRoom !== GALLERY_ROOM
-            ? (() => {
-                const pub = publicChannels.find((c) => c.slug === activeRoom);
-                return pub?.hasChannelAvatar ? (
-                  <ChannelIconThumb
-                    slug={activeRoom}
-                    enabled
-                    getAuthHeaders={getAuthHeaders}
-                    className="h-9 w-9 shrink-0 rounded-lg object-cover"
-                  />
-                ) : null;
-              })()
-            : null}
-          {imAdmin &&
-          activeRoom !== GALLERY_ROOM &&
-          publicChannels.some((c) => c.slug === activeRoom && !c.isSaved) ? (
-            <button
-              type="button"
-              title="Загрузить иконку канала"
-              className="shrink-0 rounded-lg p-2 text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
-              onClick={() => channelAvatarFileRef.current?.click()}
-            >
-              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
-            </button>
-          ) : null}
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-tc-asphalt/35 text-tc-text-sec" aria-hidden>
+            <ChannelGlyph slug={activeRoom} className="h-5 w-5" />
+          </div>
         </header>
 
         {/* Banner */}
@@ -2355,8 +2502,23 @@ export default function App() {
           <div className="bg-tc-danger/15 px-4 py-2 text-sm text-tc-danger">{banner}</div>
         )}
 
-        {activeRoom === GALLERY_ROOM ? (
-          <GalleryView getApiBase={getApiBase} token={token} onError={setBanner} />
+        {activeView === CHANNEL_VIEWS.gallery ? (
+          canUseGallery ? (
+            <GalleryView getApiBase={getApiBase} token={token} room={activeRoom} onError={setBanner} />
+          ) : (
+            <div className="flex flex-1 items-center justify-center px-6">
+              <p className="text-sm text-tc-text-muted">Нет доступа к галерее</p>
+            </div>
+          )
+        ) : activeView === CHANNEL_VIEWS.calendar ? (
+          <CalendarView
+            getApiBase={getApiBase}
+            token={token}
+            room={activeRoom}
+            onError={setBanner}
+            currentUserId={myUserId}
+            isAdmin={imAdmin}
+          />
         ) : (
           <>
         {/* Messages + parallax pattern (фон медленнее ленты) */}
@@ -2392,7 +2554,7 @@ export default function App() {
                         userId={m.user_id}
                         hasAvatar={!!m.user_has_avatar}
                         getAuthHeaders={getAuthHeaders}
-                        className="h-8 w-8 shrink-0 rounded-lg object-cover"
+                        className="h-12 w-12 shrink-0 rounded-xl object-cover"
                       />
                       <div
                         className={`relative min-w-0 max-w-full flex-1 cursor-pointer rounded-xl px-3 py-2 transition-colors ${
@@ -2430,6 +2592,7 @@ export default function App() {
                               messageRoom={m.room}
                               attachment={m.attachment}
                               getAttachmentHeaders={getAttachmentHeaders}
+                              onOpenImage={setChatImageLightbox}
                             />
                           ) : null}
                         </>
@@ -2604,6 +2767,7 @@ export default function App() {
         ) : null}
 
         {/* Input area */}
+        {activeView === CHANNEL_VIEWS.chat ? (
         <form onSubmit={sendMessage} className="flex items-end gap-2 border-t border-tc-border bg-tc-header px-3 py-2">
           <input
             ref={fileInputRef}
@@ -2612,16 +2776,6 @@ export default function App() {
             accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,.pdf,.txt"
             onChange={(e) => { setPendingFile(e.target.files?.[0] || null); }}
           />
-          <button
-            type="button"
-            disabled={editingId != null}
-            title="Прикрепить файл"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent disabled:opacity-40"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 015 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 005 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/></svg>
-          </button>
-
           <div className="min-w-0 flex-1">
             {pendingFile && editingId == null ? (
               <div className="mb-1 flex items-center gap-2 rounded-lg bg-tc-input px-3 py-1.5 text-xs text-tc-text-sec">
@@ -2645,37 +2799,66 @@ export default function App() {
             />
           </div>
 
-          <button
-            type="button"
-            disabled={
-              editingId != null || !!pendingFile || videoNoteUploading || voiceUploading || voiceRecording || (status === "online" && !roomJoined)
-            }
-            title="Видеосообщение (зажмите)"
-            className={`flex h-10 w-10 shrink-0 touch-none select-none items-center justify-center rounded-full transition disabled:opacity-40 ${
-              videoNoteRecording
-                ? "animate-pulse bg-red-500 text-white"
-                : "text-tc-text-sec hover:bg-tc-hover hover:text-tc-accent"
-            }`}
-            onPointerDown={(e) => { e.preventDefault(); if (e.button !== 0) return; void startVideoNoteRecord(); }}
-          >
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
-          </button>
-
-          <button
-            type="button"
-            disabled={
-              editingId != null || !!pendingFile || videoNoteUploading || videoNoteRecording || voiceUploading || (status === "online" && !roomJoined)
-            }
-            title="Голосовое (зажмите)"
-            className={`flex h-10 w-10 shrink-0 touch-none select-none items-center justify-center rounded-full transition disabled:opacity-40 ${
-              voiceRecording
-                ? "animate-pulse bg-red-500 text-white"
-                : "text-tc-text-sec hover:bg-tc-hover hover:text-tc-accent"
-            }`}
-            onPointerDown={(e) => { e.preventDefault(); if (e.button !== 0) return; void startVoiceRecord(); }}
-          >
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-7 1h2v-1H5v1zm14 0h2v-1h-2v1zm-3 4.26V18c0 1.1-.9 2-2 2H8c-1.1 0-2-.9-2-2v-2.26C4.48 15.5 3 13.41 3 11h2c0 2.76 2.24 5 5 5s5-2.24 5-5h2c0 2.41-1.48 4.5-3.74 5.26z"/></svg>
-          </button>
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              disabled={editingId != null}
+              title="Вложения / запись"
+              className={`flex h-10 w-10 items-center justify-center rounded-full text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent disabled:opacity-40 ${
+                attachMenuOpen ? "bg-tc-hover text-tc-accent" : ""
+              }`}
+              onPointerDown={(e) => { e.stopPropagation(); }}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setAttachMenuOpen((v) => !v); }}
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 015 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 005 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/></svg>
+            </button>
+            {attachMenuOpen ? (
+              <div
+                className="absolute bottom-12 right-0 z-50 w-56 overflow-hidden rounded-xl border border-tc-border bg-tc-panel shadow-2xl"
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-3 px-4 py-3 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+                  onClick={() => { setAttachMenuOpen(false); fileInputRef.current?.click(); }}
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 015 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 005 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/></svg>
+                  Файл
+                </button>
+                <button
+                  type="button"
+                  disabled={editingId != null || !!pendingFile || videoNoteUploading || voiceUploading || voiceRecording || (status === "online" && !roomJoined)}
+                  className={`flex w-full items-center gap-3 px-4 py-3 text-sm transition ${
+                    videoNoteRecording ? "bg-red-500/20 text-red-300" : "text-tc-text-sec hover:bg-tc-hover hover:text-tc-accent"
+                  } disabled:opacity-50`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (videoNoteRecording) {
+                      setAttachMenuOpen(false);
+                      void stopVideoNoteRecord();
+                      return;
+                    }
+                    setAttachMenuOpen(false);
+                    void startVideoNoteRecord();
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+                  {videoNoteRecording ? "Остановить видео" : "Записать видео"}
+                </button>
+                <button
+                  type="button"
+                  disabled={editingId != null || !!pendingFile || videoNoteUploading || videoNoteRecording || voiceUploading || (status === "online" && !roomJoined)}
+                  className={`flex w-full items-center gap-3 px-4 py-3 text-sm transition ${
+                    voiceRecording ? "bg-red-500/20 text-red-300" : "text-tc-text-sec hover:bg-tc-hover hover:text-tc-accent"
+                  } disabled:opacity-50`}
+                  onPointerDown={(e) => { e.preventDefault(); if (e.button !== 0) return; void startVoiceRecord(); }}
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-7 1h2v-1H5v1zm14 0h2v-1h-2v1zm-3 4.26V18c0 1.1-.9 2-2 2H8c-1.1 0-2-.9-2-2v-2.26C4.48 15.5 3 13.41 3 11h2c0 2.76 2.24 5 5 5s5-2.24 5-5h2c0 2.41-1.48 4.5-3.74 5.26z"/></svg>
+                  Голос (зажмите)
+                </button>
+              </div>
+            ) : null}
+          </div>
 
           <button
             type="submit"
@@ -2686,11 +2869,16 @@ export default function App() {
                   ? !input.trim()
                   : !input.trim() && !pendingFile
             }
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-tc-accent text-white transition hover:bg-tc-accent/85 disabled:opacity-40"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent disabled:opacity-40"
           >
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            <svg viewBox="0 0 24 24" className="h-6 w-6 rotate-90" fill="currentColor">
+              <path d="M10 2h4v4l3 4v11a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V10l3-4V2z"/>
+              <rect x="9" y="12" width="6" height="1.2" rx="0.5" fill="currentColor" opacity="0.45"/>
+              <rect x="9" y="14.5" width="6" height="1.2" rx="0.5" fill="currentColor" opacity="0.45"/>
+            </svg>
           </button>
         </form>
+        ) : null}
           </>
         )}
       </main>

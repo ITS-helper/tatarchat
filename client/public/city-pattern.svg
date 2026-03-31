@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="720" height="420" viewBox="0 0 720 420">
   <!-- Ширина 720: по краям плитки пустые поля ~55–65px — стык repeat-x не даёт сгущения в центре экрана -->
-  <rect width="720" height="420" fill="#0d1118"/>
+  <rect width="720" height="420" fill="#0d0e14"/>
 
   <defs>
     <style type="text/css"><![CDATA[

@@ -2,6 +2,57 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Dark theme (default) ── */
+:root {
+  --tc-bg:             13 14 20;
+  --tc-sidebar:        9 9 14;
+  --tc-panel:          18 19 27;
+  --tc-input:          26 27 37;
+  --tc-header:         15 16 24;
+  --tc-msg:            23 24 32;
+  --tc-msg-own:        23 24 32;
+  --tc-accent:         0 245 255;
+  --tc-accent-hover:   0 216 229;
+  --tc-link:           0 255 170;
+  --tc-green:          57 255 20;
+  --tc-text:           232 236 241;
+  --tc-text-sec:       122 138 154;
+  --tc-text-muted:     74 86 104;
+  --tc-border:         30 31 44;
+  --tc-hover:          26 27 37;
+  --tc-danger:         255 49 49;
+  --tc-online:         57 255 20;
+  --tc-asphalt:        34 35 46;
+  --tc-asphalt-light:  44 45 60;
+  --tc-asphalt-dark:   26 27 38;
+  --bg-pattern:        url("/city-pattern.svg");
+}
+
+/* ── Light theme ── */
+.theme-light {
+  --tc-bg:             242 242 250;
+  --tc-sidebar:        232 232 244;
+  --tc-panel:          250 250 255;
+  --tc-input:          255 255 255;
+  --tc-header:         238 238 250;
+  --tc-msg:            255 255 255;
+  --tc-msg-own:        255 255 255;
+  --tc-accent:         0 120 155;
+  --tc-accent-hover:   0 100 135;
+  --tc-link:           0 130 85;
+  --tc-green:          20 145 0;
+  --tc-text:           20 20 42;
+  --tc-text-sec:       72 82 112;
+  --tc-text-muted:     138 145 170;
+  --tc-border:         208 210 230;
+  --tc-hover:          228 228 245;
+  --tc-danger:         195 20 40;
+  --tc-online:         20 145 0;
+  --tc-asphalt:        210 212 228;
+  --tc-asphalt-light:  220 222 238;
+  --tc-asphalt-dark:   198 200 220;
+}
+
 @layer base {
   html {
     @apply scroll-smooth;
@@ -20,18 +71,23 @@
 
 /* Фон чата: смещается медленнее ленты (parallax), высота >100% — запас при translate */
 .chat-bg-parallax {
-  background-color: #0d1118;
-  background-image: url("/city-pattern.svg");
-  background-repeat: no-repeat;
-  background-size: cover;
-  background-position: center center;
+  background-color: rgb(var(--tc-bg));
+  background-image: var(--bg-pattern);
+  background-repeat: repeat;
+  background-size: 720px 420px;
+  background-position: center top;
   will-change: transform;
   position: absolute;
   left: 0;
   right: 0;
   width: 100%;
-  top: -12%;
-  height: 124%;
+  top: -15%;
+  height: 130%;
+}
+
+/* В светлой теме паттерн скрываем — тёмные SVG не смотрятся на белом */
+.theme-light .chat-bg-parallax {
+  background-image: none;
 }
 
 /* Scrollbar */
@@ -65,4 +121,33 @@
   height: 20px;
   display: inline-block;
   vertical-align: middle;
+}
+
+/* Календарь: бегущая строка ближайших событий */
+.tc-calendar-marquee {
+  overflow: hidden;
+}
+.tc-calendar-marquee-track {
+  display: flex;
+  width: max-content;
+  animation: tc-calendar-marquee-scroll 55s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tc-calendar-marquee-track {
+    animation: none;
+    flex-wrap: wrap;
+    white-space: normal;
+    width: 100%;
+  }
+  .tc-calendar-marquee-track span:last-child {
+    display: none;
+  }
+}
+@keyframes tc-calendar-marquee-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
 }

@@ -62,7 +62,7 @@ function GalleryThumb({ itemId, getApiBase, authHeaders, className, alt }) {
   return <img src={url} alt={alt || ""} className={className} loading="lazy" />;
 }
 
-export default function GalleryView({ getApiBase, token, onError }) {
+export default function GalleryView({ getApiBase, token, room, onError }) {
   const authHeaders = useMemo(
     () => ({ Authorization: `Bearer ${token}` }),
     [token]
@@ -89,17 +89,18 @@ export default function GalleryView({ getApiBase, token, onError }) {
     try {
       const base = getApiBase();
       const h = authHeaders;
+      const roomQ = `room=${encodeURIComponent(String(room || "lobby"))}`;
       const parentQ =
-        folderId == null ? "" : `?parentId=${encodeURIComponent(String(folderId))}`;
+        folderId == null ? `?${roomQ}` : `?${roomQ}&parentId=${encodeURIComponent(String(folderId))}`;
       const itemQ =
-        folderId == null ? "" : `?folderId=${encodeURIComponent(String(folderId))}`;
+        folderId == null ? `?${roomQ}` : `?${roomQ}&folderId=${encodeURIComponent(String(folderId))}`;
       const [fr, ir, ar] = await Promise.all([
         fetch(`${base}/api/gallery/folders${parentQ}`, { headers: h }),
         fetch(
           `${base}/api/gallery/items${itemQ ? `${itemQ}&` : "?"}sort=${encodeURIComponent(sort)}`,
           { headers: h }
         ),
-        fetch(`${base}/api/gallery/folders-all`, { headers: h }),
+        fetch(`${base}/api/gallery/folders-all?${roomQ}`, { headers: h }),
       ]);
       const fd = await fr.json().catch(() => ({}));
       const id = await ir.json().catch(() => ({}));
@@ -124,7 +125,7 @@ export default function GalleryView({ getApiBase, token, onError }) {
     } finally {
       setLoading(false);
     }
-  }, [folderId, sort, getApiBase, authHeaders, onError]);
+  }, [folderId, sort, room, getApiBase, authHeaders, onError]);
 
   useEffect(() => {
     void load();
@@ -144,7 +145,7 @@ export default function GalleryView({ getApiBase, token, onError }) {
     if (!name) return;
     try {
       const base = getApiBase();
-      const res = await fetch(`${base}/api/gallery/folders`, {
+      const res = await fetch(`${base}/api/gallery/folders?room=${encodeURIComponent(String(room || "lobby"))}`, {
         method: "POST",
         headers: { ...authHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({ name, parentId: folderId ?? "" }),
@@ -167,7 +168,7 @@ export default function GalleryView({ getApiBase, token, onError }) {
     if (!window.confirm(`Удалить папку «${f.name}» и всё внутри?`)) return;
     try {
       const base = getApiBase();
-      const res = await fetch(`${base}/api/gallery/folders/${f.id}`, {
+      const res = await fetch(`${base}/api/gallery/folders/${f.id}?room=${encodeURIComponent(String(room || "lobby"))}`, {
         method: "DELETE",
         headers: authHeaders,
       });
@@ -196,7 +197,7 @@ export default function GalleryView({ getApiBase, token, onError }) {
         const fd = new FormData();
         fd.append("file", file);
         if (folderId != null) fd.append("folderId", String(folderId));
-        const res = await fetch(`${base}/api/gallery/upload`, {
+        const res = await fetch(`${base}/api/gallery/upload?room=${encodeURIComponent(String(room || "lobby"))}`, {
           method: "POST",
           headers: authHeaders,
           body: fd,
@@ -219,7 +220,7 @@ export default function GalleryView({ getApiBase, token, onError }) {
     if (!window.confirm(`Удалить «${it.original_name || "фото"}»?`)) return;
     try {
       const base = getApiBase();
-      const res = await fetch(`${base}/api/gallery/items/${it.id}`, {
+      const res = await fetch(`${base}/api/gallery/items/${it.id}?room=${encodeURIComponent(String(room || "lobby"))}`, {
         method: "DELETE",
         headers: authHeaders,
       });
@@ -239,7 +240,7 @@ export default function GalleryView({ getApiBase, token, onError }) {
     if (!moveItem) return;
     try {
       const base = getApiBase();
-      const res = await fetch(`${base}/api/gallery/items/${moveItem.id}`, {
+      const res = await fetch(`${base}/api/gallery/items/${moveItem.id}?room=${encodeURIComponent(String(room || "lobby"))}`, {
         method: "PATCH",
         headers: { ...authHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -275,7 +276,7 @@ export default function GalleryView({ getApiBase, token, onError }) {
   const saveManualOrder = async (orderedIds) => {
     try {
       const base = getApiBase();
-      const res = await fetch(`${base}/api/gallery/items/reorder`, {
+      const res = await fetch(`${base}/api/gallery/items/reorder?room=${encodeURIComponent(String(room || "lobby"))}`, {
         method: "PUT",
         headers: { ...authHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({ itemIds: orderedIds, folderId: folderId ?? "" }),
@@ -362,7 +363,7 @@ export default function GalleryView({ getApiBase, token, onError }) {
         >
           Новая папка
         </button>
-        <label className="cursor-pointer rounded-lg bg-tc-accent px-3 py-1.5 text-sm font-medium text-white transition hover:bg-tc-accent/85">
+        <label className={`cursor-pointer rounded-lg bg-tc-accent/75 px-3 py-1.5 text-sm font-medium text-white/90 transition hover:bg-tc-accent/90 ${uploading ? "opacity-70" : ""}`}>
           {uploading ? "Загрузка…" : "Добавить фото"}
           <input
             type="file"
