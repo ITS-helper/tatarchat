@@ -39,6 +39,10 @@ alwaysApply: true
   - Команда: `cd client && npm run android:debug:export`
   - Выход: `D:\\tatarchat\\apk\\TatarChat-debug-v<versionName>(<versionCode>)-<timestamp>.apk`
 
+## Удалённый доступ (Tailscale)
+
+- **Домашний сервер (хост TatarChat):** Tailscale IP **`100.123.209.16`** — для SSH и `scripts/deploy-pull.ps1` (см. `scripts/REMOTE-DEPLOY-RU.txt`).
+
 ## Типичные симптомы
 
 - **APK “нет token” + в ответе HTML**: `/api/*` попал в SPA fallback (прокси сломан).
