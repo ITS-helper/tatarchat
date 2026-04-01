@@ -1,6 +1,6 @@
-# TatarChat — удалённый деплой: git pull, сборка клиента, перезапуск только Node (порт 3001).
-# Docker и Caddy не трогаются. Запускать на СЕРВЕРЕ под тем же пользователем, от которого рабочий git pull.
-# Пример по SSH:  ssh user@100.x.x.x  powershell -ExecutionPolicy Bypass -File C:\tatarchat\scripts\deploy-pull.ps1
+# TatarChat remote deploy: git pull, client build, restart Node on port 3001 only.
+# Docker and Caddy are left running. Run as the same Windows user that can git pull.
+# Example: ssh user@100.x.x.x powershell -ExecutionPolicy Bypass -File C:\tatarchat\scripts\deploy-pull.ps1
 
 param(
     [string] $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
@@ -15,7 +15,7 @@ Write-Host "Repo: $RepoRoot"
 Set-Location $RepoRoot
 
 if (-not (Test-Path (Join-Path $RepoRoot '.git'))) {
-    throw "Не найден .git в $RepoRoot"
+    throw ".git not found: $RepoRoot"
 }
 
 $logFile = Join-Path $RepoRoot 'scripts\last-deploy.log'
@@ -29,43 +29,42 @@ try {
 
     Write-Host "[1/3] git pull origin $Branch ..."
     git pull origin $Branch
-    if ($LASTEXITCODE -ne 0) { throw "git pull завершился с кодом $LASTEXITCODE" }
+    if ($LASTEXITCODE -ne 0) { throw "git pull failed exit=$LASTEXITCODE" }
 
     if (-not $SkipBuild) {
         Write-Host "[2/3] npm run build (client) ..."
         Push-Location (Join-Path $RepoRoot 'client')
         try {
             npm run build
-            if ($LASTEXITCODE -ne 0) { throw "npm run build завершился с кодом $LASTEXITCODE" }
+            if ($LASTEXITCODE -ne 0) { throw "npm run build failed exit=$LASTEXITCODE" }
         } finally {
             Pop-Location
         }
     } else {
-        Write-Host "[2/3] пропуск сборки (-SkipBuild)"
+        Write-Host "[2/3] skip build (-SkipBuild)"
     }
 
-    Write-Host "[3/3] перезапуск Node на порту 3001 ..."
+    Write-Host "[3/3] restart Node on port 3001 ..."
     $pids = @()
     try {
         $pids = @(Get-NetTCPConnection -LocalPort 3001 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)
     } catch {
-        # старые системы без модуля
+        # older systems
     }
     foreach ($procId in $pids) {
         if ($procId -gt 0) {
             Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
-            Write-Host "  остановлен PID $procId"
+            Write-Host "  stopped PID $procId"
         }
     }
     if ($pids.Count -eq 0) {
-        # запасной вариант как в stop.bat
         $lines = netstat -ano | Select-String ':3001\s.*LISTENING'
         foreach ($line in $lines) {
             $parts = ($line -split '\s+') | Where-Object { $_ -ne '' }
             $last = $parts[-1]
             if ($last -match '^\d+$') {
                 Stop-Process -Id [int]$last -Force -ErrorAction SilentlyContinue
-                Write-Host "  остановлен PID $last (netstat)"
+                Write-Host "  stopped PID $last (netstat)"
             }
         }
     }
@@ -73,15 +72,14 @@ try {
     Start-Sleep -Seconds 1
     $nodeExe = (Get-Command node -ErrorAction Stop).Source
     $serverDir = Join-Path $RepoRoot 'server'
-    # Start-Process из сессии OpenSSH иногда гасит дочерний node при выходе SSH.
-    # Win32_Process.Create поднимает процесс вне консоли этой сессии.
+    # Win32_Process.Create avoids OpenSSH killing the child when the session ends.
     $cmdLine = '"' + $nodeExe + '" server.js'
     $cim = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
         CommandLine      = $cmdLine
         CurrentDirectory = $serverDir
     }
     if ($cim.ReturnValue -ne 0) {
-        throw "Win32_Process.Create node failed ReturnValue=$($cim.ReturnValue)"
+        throw "Win32_Process.Create failed ReturnValue=$($cim.ReturnValue)"
     }
     Write-Host "  node server.js started (PID $($cim.ProcessId))."
 
@@ -92,8 +90,8 @@ try {
     }
     Append-DeployLog ('OK git=' + $rev)
     Append-DeployLog 'DONE'
-    Write-Host "=== Готово ===" -ForegroundColor Green
-    Write-Host "Log (ASCII): $logFile" -ForegroundColor DarkGray
+    Write-Host "=== Done ===" -ForegroundColor Green
+    Write-Host "Log: $logFile" -ForegroundColor DarkGray
 } catch {
     Append-DeployLog 'FAIL'
     throw

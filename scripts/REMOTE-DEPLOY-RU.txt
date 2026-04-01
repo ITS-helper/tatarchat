@@ -61,6 +61,9 @@ Node на порту 3001. Docker и Caddy не останавливаются.
 Node поднимается через Win32_Process.Create (не через Start-Process), чтобы процесс
 не завершался при закрытии SSH-сессии.
 
+Скрипт deploy-pull.ps1 намеренно без кириллицы (ASCII): иначе PowerShell 5.1 на
+сервере при UTF-8 без BOM может выдать ParserError (TerminatorExpectedAtEndOfString).
+
 Только сервер менялся, клиент нет:
   ... deploy-pull.ps1 -SkipBuild
 
