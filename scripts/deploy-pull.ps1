@@ -73,10 +73,23 @@ try {
     Start-Sleep -Seconds 1
     $nodeExe = (Get-Command node -ErrorAction Stop).Source
     $serverDir = Join-Path $RepoRoot 'server'
-    Start-Process -FilePath $nodeExe -ArgumentList 'server.js' -WorkingDirectory $serverDir -WindowStyle Hidden
-    Write-Host "  node server.js запущен в фоне."
+    # Start-Process из сессии OpenSSH иногда гасит дочерний node при выходе SSH.
+    # Win32_Process.Create поднимает процесс вне консоли этой сессии.
+    $cmdLine = '"' + $nodeExe + '" server.js'
+    $cim = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+        CommandLine      = $cmdLine
+        CurrentDirectory = $serverDir
+    }
+    if ($cim.ReturnValue -ne 0) {
+        throw "Win32_Process.Create node failed ReturnValue=$($cim.ReturnValue)"
+    }
+    Write-Host "  node server.js started (PID $($cim.ProcessId))."
 
-    $rev = (git rev-parse --short HEAD).Trim()
+    $rev = 'unknown'
+    $g = git -C $RepoRoot rev-parse --short HEAD 2>$null
+    if ($LASTEXITCODE -eq 0 -and $g) {
+        $rev = ($g | Select-Object -First 1).ToString().Trim()
+    }
     Append-DeployLog ('OK git=' + $rev)
     Append-DeployLog 'DONE'
     Write-Host "=== Готово ===" -ForegroundColor Green

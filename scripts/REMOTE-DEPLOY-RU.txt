@@ -58,6 +58,8 @@ TatarChat — удалённый git pull / деплой без физическ
 
 Скрипт делает: git pull origin main → npm run build в client → перезапуск только
 Node на порту 3001. Docker и Caddy не останавливаются.
+Node поднимается через Win32_Process.Create (не через Start-Process), чтобы процесс
+не завершался при закрытии SSH-сессии.
 
 Только сервер менялся, клиент нет:
   ... deploy-pull.ps1 -SkipBuild
