@@ -12,3 +12,11 @@ dist/
 *.swo
 render-dump.sql
 render-dump.custom
+# локальные дампы БД и копии .env (секреты)
+backups/
+# Firebase Admin SDK (секреты; только на сервере, не в Git)
+*firebase-adminsdk*.json
+# Собранные APK из scripts/export-apk
+apk/
+# Случайный локальный файл (не часть репозитория)
+/Запуск от имени

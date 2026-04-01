@@ -1,0 +1,39 @@
+{
+  # Global options (adjust if needed)
+  # email you@example.com
+}
+
+# TatarChat (single-domain, single-origin)
+# - Static files: client/dist
+# - API + Socket.IO: Node/Express on localhost:3001
+#
+# IMPORTANT:
+# - /api/* MUST be reverse-proxied to Node, otherwise SPA fallback returns index.html
+# - /socket.io/* MUST be reverse-proxied to Node to keep WebSocket working
+#
+# Usage (example):
+#   1) Build client:   (repo)/client -> npm run build
+#   2) Run server:     (repo)/server -> NODE_ENV=production PORT=3001 npm start
+#   3) Put this file as /etc/caddy/Caddyfile and reload Caddy
+#
+dtdfamily.ru {
+  encode gzip zstd
+
+  # API -> Node (без strip префикса: Node ожидает путь /api/...)
+  handle /api/* {
+    reverse_proxy 127.0.0.1:3001
+  }
+
+  # Socket.IO -> Node (WebSocket upgrade)
+  handle /socket.io/* {
+    reverse_proxy 127.0.0.1:3001
+  }
+
+  # Static frontend (adjust path on your VPS)
+  root * /var/www/tatarchat/client/dist
+  file_server
+
+  # SPA fallback
+  try_files {path} /index.html
+}
+

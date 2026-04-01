@@ -1,9 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="720" height="420" viewBox="0 0 720 420">
-  <rect width="720" height="420" fill="#0d0e14"/>
   <defs>
     <style>.lbl{font-family:system-ui;font-size:8px;font-weight:300;letter-spacing:.12em;text-anchor:middle}</style>
   </defs>
-  <g fill="none" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">
+  <g fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" opacity=".62">
 
     <g transform="translate(55,16) rotate(-8)" stroke="#00aaff" opacity=".55">
       <path d="M0 0 L12 30 L24 0Z"/>

@@ -25,7 +25,9 @@
   --tc-asphalt:        34 35 46;
   --tc-asphalt-light:  44 45 60;
   --tc-asphalt-dark:   26 27 38;
-  --bg-pattern:        url("/city-pattern.svg");
+  /* Chat background patterns (theme-aware). Active pattern is set by App.jsx */
+  --bg-pattern-dark:   url("/city-pattern.svg");
+  --bg-pattern-light:  url("/city-pattern-light.svg");
 }
 
 /* ── Light theme ── */
@@ -37,9 +39,10 @@
   --tc-header:         238 238 250;
   --tc-msg:            255 255 255;
   --tc-msg-own:        255 255 255;
-  --tc-accent:         0 120 155;
-  --tc-accent-hover:   0 100 135;
-  --tc-link:           0 130 85;
+  /* Light theme: лёгкий голубой «неон», но без кислотности */
+  --tc-accent:         0 170 200;
+  --tc-accent-hover:   0 150 180;
+  --tc-link:           0 140 175;
   --tc-green:          20 145 0;
   --tc-text:           20 20 42;
   --tc-text-sec:       72 82 112;
@@ -53,41 +56,95 @@
   --tc-asphalt-dark:   198 200 220;
 }
 
+/* Light theme: лёгкое свечение на акцентных элементах */
+.theme-light .bg-tc-accent {
+  box-shadow:
+    0 0 0 1px rgba(0, 170, 200, 0.18),
+    0 8px 20px rgba(0, 170, 200, 0.16);
+}
+
+.theme-light .text-tc-accent {
+  text-shadow: 0 0 14px rgba(0, 170, 200, 0.22);
+}
+
+.theme-light .border-tc-accent {
+  box-shadow: 0 0 0 3px rgba(0, 170, 200, 0.10);
+}
+
 @layer base {
   html {
     @apply scroll-smooth;
+    overflow-x: hidden;
+    max-width: 100%;
   }
 
   html,
   body,
   #root {
     height: 100%;
+    max-width: 100%;
+  }
+
+  @supports (height: 100dvh) {
+    html,
+    body,
+    #root {
+      min-height: 100dvh;
+      height: 100dvh;
+    }
   }
 
   body {
-    @apply min-h-full bg-tc-bg font-sans text-tc-text antialiased;
+    @apply bg-tc-bg font-sans text-tc-text antialiased;
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+    /* Меньше случайного зума от двойного тапа на iOS */
+    touch-action: manipulation;
   }
 }
 
-/* Фон чата: смещается медленнее ленты (parallax), высота >100% — запас при translate */
-.chat-bg-parallax {
-  background-color: rgb(var(--tc-bg));
-  background-image: var(--bg-pattern);
-  background-repeat: repeat;
-  background-size: 720px 420px;
-  background-position: center top;
-  will-change: transform;
-  position: absolute;
-  left: 0;
-  right: 0;
-  width: 100%;
-  top: -15%;
-  height: 130%;
+/* iPhone: панель ввода выше home indicator; высота окна без «прыжков» от адресной строки */
+.tc-composer-bar {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
 }
 
-/* В светлой теме паттерн скрываем — тёмные SVG не смотрятся на белом */
+/* PWA / Safari: контент не под статус-бар и вырез (не использовать фиксированную h-14 вместе с pt — «съедает» кнопки) */
+.tc-safe-area-top {
+  padding-top: max(0.5rem, constant(safe-area-inset-top));
+  padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
+}
+
+/* iOS Safari: авто-зум при фокусе, если font-size поля < 16px */
+@media (max-width: 639.98px) {
+  .tc-app-shell input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"]):not([type="range"]),
+  .tc-app-shell textarea,
+  .tc-app-shell select {
+    font-size: max(1rem, 16px);
+  }
+}
+
+/* Фон чата: статичный паттерн (без parallax) */
+.chat-bg-parallax {
+  background-color: rgb(var(--tc-bg));
+  background-image: var(--bg-pattern-dark);
+  background-repeat: repeat;
+  /* Не масштабируем тайл (иначе на некоторых DPI появляется шов). Увеличение рисунка делаем внутри SVG. */
+  background-size: 720px 420px;
+  background-position: 0 0;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* В светлой теме используем отдельную цветовую схему паттернов */
 .theme-light .chat-bg-parallax {
-  background-image: none;
+  background-image: var(--bg-pattern-light);
+}
+
+/* Лента чата: не даём браузеру «держать» позицию скролла при подгрузке контента сверху */
+.messages-scroll {
+  overflow-anchor: none;
 }
 
 /* Scrollbar */

@@ -62,13 +62,13 @@ function GalleryThumb({ itemId, getApiBase, authHeaders, className, alt }) {
   return <img src={url} alt={alt || ""} className={className} loading="lazy" />;
 }
 
-export default function GalleryView({ getApiBase, token, room, onError }) {
-  const authHeaders = useMemo(
-    () => ({ Authorization: `Bearer ${token}` }),
-    [token]
-  );
+export default function GalleryView({ getApiBase, token, getAuthHeaders, room, onError, rootLabel = "Галерея" }) {
+  const authHeaders = useMemo(() => {
+    if (typeof getAuthHeaders === "function") return getAuthHeaders();
+    return { Authorization: `Bearer ${token}` };
+  }, [getAuthHeaders, token]);
   const [sort, setSort] = useState("created_desc");
-  const [stack, setStack] = useState([{ id: null, name: "Галерея" }]);
+  const [stack, setStack] = useState([{ id: null, name: rootLabel }]);
   const [folders, setFolders] = useState([]);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -130,6 +130,10 @@ export default function GalleryView({ getApiBase, token, room, onError }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    setStack([{ id: null, name: rootLabel }]);
+  }, [room, rootLabel]);
 
   const openFolder = (f) => {
     setStack((s) => [...s, { id: f.id, name: f.name }]);
@@ -324,16 +328,16 @@ export default function GalleryView({ getApiBase, token, room, onError }) {
   };
 
   return (
-    <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden bg-tc-bg">
-      <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-tc-border bg-tc-header px-4 py-3">
-        <nav className="flex min-w-0 flex-1 flex-wrap items-center gap-1 text-sm">
+    <div className="flex min-h-0 min-w-0 w-full max-w-full flex-1 flex-col overflow-hidden bg-tc-bg">
+      <div className="flex flex-shrink-0 flex-col gap-3 border-b border-tc-border bg-tc-header px-3 py-3 sm:px-4">
+        <nav className="flex min-w-0 w-full flex-wrap items-center gap-x-1 gap-y-0.5 text-sm" aria-label="Путь в галерее">
           {stack.map((cr, i) => (
-            <span key={`${cr.id ?? "root"}-${i}`} className="flex items-center gap-1">
-              {i > 0 ? <span className="text-tc-text-muted">/</span> : null}
+            <span key={`${cr.id ?? "root"}-${i}`} className="flex min-w-0 max-w-full items-center gap-1">
+              {i > 0 ? <span className="shrink-0 text-tc-text-muted">/</span> : null}
               <button
                 type="button"
                 onClick={() => crumbClick(i)}
-                className={`truncate rounded px-1.5 py-0.5 transition hover:bg-tc-hover ${
+                className={`max-w-[min(100%,14rem)] truncate rounded px-1.5 py-0.5 text-left transition hover:bg-tc-hover sm:max-w-[18rem] ${
                   i === stack.length - 1 ? "font-semibold text-tc-accent" : "text-tc-text-sec"
                 }`}
               >
@@ -342,41 +346,50 @@ export default function GalleryView({ getApiBase, token, room, onError }) {
             </span>
           ))}
         </nav>
-        <label className="text-xs text-tc-text-muted">
-          Сортировка
-          <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value)}
-            className="ml-2 rounded-lg border border-tc-border bg-tc-input px-2 py-1.5 text-sm text-tc-text outline-none"
-          >
-            {SORT_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          type="button"
-          onClick={() => setFolderModal(true)}
-          className="rounded-lg border border-tc-border bg-tc-panel px-3 py-1.5 text-sm text-tc-text transition hover:bg-tc-hover"
-        >
-          Новая папка
-        </button>
-        <label className={`cursor-pointer rounded-lg bg-tc-accent/75 px-3 py-1.5 text-sm font-medium text-white/90 transition hover:bg-tc-accent/90 ${uploading ? "opacity-70" : ""}`}>
-          {uploading ? "Загрузка…" : "Добавить фото"}
-          <input
-            type="file"
-            accept="image/jpeg,image/png,image/gif,image/webp"
-            multiple
-            className="hidden"
-            disabled={uploading}
-            onChange={(e) => {
-              void uploadFiles(e.target.files);
-              e.target.value = "";
-            }}
-          />
-        </label>
+        <div className="flex min-w-0 w-full flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:gap-x-4 sm:gap-y-2">
+          <div className="flex min-w-0 w-full flex-col gap-1 sm:w-auto sm:max-w-md">
+            <span className="text-xs font-medium text-tc-text-muted" id="gallery-sort-label">
+              Сортировка
+            </span>
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+              aria-labelledby="gallery-sort-label"
+              className="w-full min-w-0 rounded-lg border border-tc-border bg-tc-input px-3 py-2 text-sm text-tc-text outline-none focus:border-tc-accent sm:w-64"
+            >
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setFolderModal(true)}
+              className="rounded-lg border border-tc-border bg-tc-panel px-3 py-2 text-sm text-tc-text transition hover:bg-tc-hover"
+            >
+              Новая папка
+            </button>
+            <label
+              className={`inline-flex cursor-pointer items-center justify-center rounded-lg bg-tc-accent/75 px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-tc-accent/90 ${uploading ? "opacity-70" : ""}`}
+            >
+              {uploading ? "Загрузка…" : "Добавить фото"}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/gif,image/webp"
+                multiple
+                className="hidden"
+                disabled={uploading}
+                onChange={(e) => {
+                  void uploadFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4">

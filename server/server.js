@@ -16,6 +16,8 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { Pool } = require("pg");
 const { Server } = require("socket.io");
+const admin = require("firebase-admin");
+const webpush = require("web-push");
 
 const PORT = Number(process.env.PORT) || 3001;
 const MAX_MESSAGE_LEN = 2000;
@@ -25,7 +27,8 @@ const MAX_PASSWORD_LEN = 128;
 const MESSAGES_PER_MINUTE = 30;
 const BCRYPT_ROUNDS = 10;
 const JWT_EXPIRES = "7d";
-const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_MB || 16) * 1024 * 1024;
+// Сообщения/вложения: 16MB слишком мало (например, .apk). По умолчанию даём запас.
+const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_MB || 128) * 1024 * 1024;
 const UPLOAD_ROOT = path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, "data", "uploads"));
 const STAGING_DIR = path.join(UPLOAD_ROOT, "staging");
 const ALLOWED_UPLOAD_MIMES = new Set([
@@ -40,6 +43,7 @@ const ALLOWED_UPLOAD_MIMES = new Set([
   "audio/mpeg",
   "audio/mp4",
   "application/pdf",
+  "application/vnd.android.package-archive",
   "text/plain",
 ]);
 const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
@@ -61,6 +65,16 @@ const GROUP_ROOMS = {
     title: "DTD",
     roomPassword: null,
   },
+  /** DTD: внутренний чат «Работа» (не отдельной строкой канала на клиенте) */
+  dtd_work: {
+    title: "DTD · Работа",
+    roomPassword: null,
+  },
+  /** Подгруппа DTD: отдельный чат «Работа» (только [a-z0-9_]: дефисы в join-room срезает canonicalizeChannelSlug) */
+  dtd_rabota: {
+    title: "Рабочка",
+    roomPassword: null,
+  },
 };
 
 const ADMIN_NICKNAMES = (process.env.ADMIN_NICKNAMES || "Макс").split(",").map((s) => s.trim().toLowerCase());
@@ -71,15 +85,6 @@ function isAdmin(nickname) {
 
 /** Виртуальная «комната» в сайдбаре — не чат, только клиент + отдельный UI */
 const GALLERY_ROOM_SLUG = "__gallery";
-
-const GALLERY_MEMBER_NICKNAMES = (process.env.GALLERY_MEMBER_NICKNAMES || "макс,рена")
-  .split(",")
-  .map((s) => s.trim().toLowerCase())
-  .filter(Boolean);
-
-function isGalleryMember(nickname) {
-  return GALLERY_MEMBER_NICKNAMES.includes(String(nickname || "").trim().toLowerCase());
-}
 
 /** Канал lobby («Семья») в списке и доступ — только эти ники */
 const LOBBY_VISIBLE_NICKNAMES = (process.env.LOBBY_VISIBLE_NICKNAMES || "макс,рена")
@@ -126,9 +131,33 @@ const EXTRA_ORIGINS = (process.env.CLIENT_ORIGIN || "")
   .map((s) => s.trim())
   .filter(Boolean);
 
+/** Доступ с телефона в той же Wi‑Fi: Origin вида http://192.168.x.x:3001 */
+function isPrivateLanHostname(host) {
+  if (!host || typeof host !== "string") return false;
+  const h = host.toLowerCase();
+  if (h === "localhost" || h === "127.0.0.1") return false;
+  if (h.endsWith(".local")) return true;
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (!m) return false;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  if (a === 10) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  return false;
+}
+
 function corsOrigin(origin, callback) {
   if (!origin) {
     return callback(null, true);
+  }
+  // Capacitor/ionic webview origins (Android/iOS)
+  // e.g. capacitor://localhost, ionic://localhost
+  if (typeof origin === "string") {
+    const o = origin.toLowerCase();
+    if (o === "capacitor://localhost" || o === "ionic://localhost") {
+      return callback(null, true);
+    }
   }
   try {
     const u = new URL(origin);
@@ -136,6 +165,9 @@ function corsOrigin(origin, callback) {
       (u.hostname === "localhost" || u.hostname === "127.0.0.1") &&
       (u.protocol === "http:" || u.protocol === "https:")
     ) {
+      return callback(null, true);
+    }
+    if (isPrivateLanHostname(u.hostname) && (u.protocol === "http:" || u.protocol === "https:")) {
       return callback(null, true);
     }
     if (u.protocol === "https:" && u.hostname.endsWith(".onrender.com")) {
@@ -152,6 +184,8 @@ function corsOrigin(origin, callback) {
 
 const app = express();
 app.set("trust proxy", 1);
+// set after Socket.IO is created (used for server-side broadcasts from HTTP handlers)
+let ioInstance = null;
 app.use(
   helmet({
     contentSecurityPolicy: false,
@@ -312,16 +346,24 @@ async function ensureSavedChannelRow(userId) {
 
 async function getUserPerms(userId) {
   const { rows } = await pool.query(
-    `SELECT is_admin, can_see_lobby, can_see_dtd, can_use_gallery FROM users WHERE id = $1`,
+    `SELECT is_admin, can_see_lobby, can_see_dtd, can_see_dtd_work FROM users WHERE id = $1`,
     [userId]
   );
-  return rows[0] || { is_admin: false, can_see_lobby: false, can_see_dtd: true, can_use_gallery: false };
+  return (
+    rows[0] || {
+      is_admin: false,
+      can_see_lobby: false,
+      can_see_dtd: true,
+      can_see_dtd_work: true,
+    }
+  );
 }
 
 async function userCanAccessChannel(slug, userId, roomPassword) {
   if (!slug || userId == null) return false;
   const perms = await getUserPerms(userId);
-  if (slug === GALLERY_ROOM_SLUG) return !!perms.can_use_gallery;
+  // Legacy виртуальная комната: те же правила, что у «Семья» (lobby).
+  if (slug === GALLERY_ROOM_SLUG) return !!perms.can_see_lobby;
   const savedM = /^saved-(\d+)$/i.exec(slug);
   if (savedM) {
     const ownerId = parseInt(savedM[1], 10);
@@ -342,6 +384,8 @@ async function userCanAccessChannel(slug, userId, roomPassword) {
   const conf = GROUP_ROOMS[slug];
   if (conf) {
     if (slug === "dreamteamdauns" && !perms.can_see_dtd) return false;
+    if (slug === "dtd_work" && (!perms.can_see_dtd || !perms.can_see_dtd_work)) return false;
+    if (slug === "dtd_rabota" && (!perms.can_see_dtd || !perms.can_see_dtd_work)) return false;
     if (conf.roomPassword == null) return true;
     return conf.roomPassword === String(roomPassword ?? "");
   }
@@ -370,6 +414,324 @@ async function getChannelTitleForUser(slug, viewerUserId) {
   return slug;
 }
 
+/** Упоминания @ник: кому слать уведомление (без проверки пароля комнаты — по правам доступа к каналу). */
+async function userEligibleForMentionNotify(slug, userId) {
+  if (!slug || userId == null) return false;
+  const perms = await getUserPerms(userId);
+  if (slug === GALLERY_ROOM_SLUG) return false;
+  const savedM = /^saved-(\d+)$/i.exec(slug);
+  if (savedM) {
+    const ownerId = parseInt(savedM[1], 10);
+    return Number.isInteger(ownerId) && ownerId === userId;
+  }
+  if (slug.startsWith("dm-")) {
+    const m = /^dm-(\d+)-(\d+)$/.exec(slug);
+    if (!m) return false;
+    const a = parseInt(m[1], 10);
+    const b = parseInt(m[2], 10);
+    return userId === a || userId === b;
+  }
+  if (slug === "lobby") return !!perms.can_see_lobby;
+  const conf = GROUP_ROOMS[slug];
+  if (conf) {
+    if (slug === "dreamteamdauns" && !perms.can_see_dtd) return false;
+    if (slug === "dtd_work" && (!perms.can_see_dtd || !perms.can_see_dtd_work)) return false;
+    if (slug === "dtd_rabota" && (!perms.can_see_dtd || !perms.can_see_dtd_work)) return false;
+    return true;
+  }
+  const { rows } = await pool.query(`SELECT 1 FROM channels WHERE slug = $1 AND kind = 'public'`, [slug]);
+  return rows.length > 0;
+}
+
+function extractMentionNicks(text) {
+  if (!text || typeof text !== "string") return [];
+  const re = /@([^\s@]+)/g;
+  const seen = new Set();
+  const out = [];
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    let raw = m[1].replace(/[.,;:!?)\]}>]+$/, "").trim();
+    if (!raw) continue;
+    if (raw.length > 64) raw = raw.slice(0, 64);
+    const low = raw.toLowerCase();
+    if (seen.has(low)) continue;
+    seen.add(low);
+    out.push(low);
+  }
+  return out;
+}
+
+function parseServiceAccountFromEnv() {
+  const rawJson = process.env.FCM_SERVICE_ACCOUNT_JSON;
+  if (rawJson) {
+    try {
+      const obj = JSON.parse(rawJson);
+      if (obj?.private_key && typeof obj.private_key === "string") {
+        obj.private_key = obj.private_key.replace(/\\n/g, "\n");
+      }
+      return obj;
+    } catch (e) {
+      console.warn("[push] bad FCM_SERVICE_ACCOUNT_JSON:", e?.message || e);
+      return null;
+    }
+  }
+
+  const project_id = process.env.FCM_PROJECT_ID;
+  const client_email = process.env.FCM_CLIENT_EMAIL;
+  let private_key = process.env.FCM_PRIVATE_KEY;
+  if (private_key && typeof private_key === "string") private_key = private_key.replace(/\\n/g, "\n");
+
+  if (project_id && client_email && private_key) {
+    return { project_id, client_email, private_key };
+  }
+  return null;
+}
+
+let fcmReady = false;
+function initFcmIfPossible() {
+  if (fcmReady) return true;
+  try {
+    if (admin.apps && admin.apps.length > 0) {
+      fcmReady = true;
+      return true;
+    }
+    const cred = parseServiceAccountFromEnv();
+    if (!cred) return false;
+    admin.initializeApp({ credential: admin.credential.cert(cred) });
+    fcmReady = true;
+    console.log("[push] FCM ready");
+    return true;
+  } catch (e) {
+    console.warn("[push] FCM init failed:", e?.message || e);
+    return false;
+  }
+}
+
+let webPushReady = false;
+function initWebPushIfPossible() {
+  if (webPushReady) return true;
+  const pub = process.env.VAPID_PUBLIC_KEY;
+  const priv = process.env.VAPID_PRIVATE_KEY;
+  const subject = process.env.VAPID_SUBJECT || "mailto:admin@localhost";
+  if (!pub || !priv) return false;
+  try {
+    webpush.setVapidDetails(subject, pub, priv);
+    webPushReady = true;
+    console.log("[push] Web Push (VAPID) ready");
+    return true;
+  } catch (e) {
+    console.warn("[push] Web Push init failed:", e?.message || e);
+    return false;
+  }
+}
+
+function defaultPushModeForRoom(room) {
+  const slug = String(room || "").toLowerCase();
+  if (slug.startsWith("dm-")) return "all";
+  if (slug === "lobby") return "all";
+  return "off";
+}
+
+async function ensurePushSchema() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS push_tokens (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+        token TEXT NOT NULL UNIQUE,
+        platform VARCHAR(16) NOT NULL DEFAULT 'android',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        revoked_at TIMESTAMPTZ
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_push_tokens_user_id ON push_tokens (user_id)`);
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_push_tokens_active_user_id ON push_tokens (user_id) WHERE revoked_at IS NULL`
+    );
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS push_settings (
+        user_id INTEGER PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS push_prefs (
+        user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+        room_slug VARCHAR(64) NOT NULL,
+        mode VARCHAR(16) NOT NULL CHECK (mode IN ('all','mentions','off')),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (user_id, room_slug)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_push_prefs_user_id ON push_prefs (user_id)`);
+    await pool.query(`ALTER TABLE push_tokens ADD COLUMN IF NOT EXISTS web_auth TEXT`);
+    await pool.query(`ALTER TABLE push_tokens ADD COLUMN IF NOT EXISTS web_p256dh TEXT`);
+  } catch (err) {
+    console.error("[schema] push:", err?.message || err);
+    throw err;
+  }
+}
+
+async function getPushEnabled(userId) {
+  const { rows } = await pool.query(`SELECT enabled FROM push_settings WHERE user_id = $1`, [userId]);
+  if (!rows.length) return true;
+  return rows[0].enabled !== false;
+}
+
+async function getPushMode(userId, room) {
+  const slug = canonicalizeChannelSlug(room);
+  if (!slug) return "off";
+  const { rows } = await pool.query(`SELECT mode FROM push_prefs WHERE user_id = $1 AND room_slug = $2`, [
+    userId,
+    slug,
+  ]);
+  if (!rows.length) return defaultPushModeForRoom(slug);
+  const m = String(rows[0].mode || "").toLowerCase();
+  if (m === "all" || m === "mentions" || m === "off") return m;
+  return defaultPushModeForRoom(slug);
+}
+
+async function revokePushTokens(tokens) {
+  if (!tokens?.length) return;
+  await pool.query(`UPDATE push_tokens SET revoked_at = NOW() WHERE token = ANY($1::text[])`, [tokens]);
+}
+
+function getDmPeerIdFromSlug(roomSlug, senderUserId) {
+  const slug = String(roomSlug || "");
+  const m = /^dm-(\d+)-(\d+)$/.exec(slug);
+  if (!m) return null;
+  const a = parseInt(m[1], 10);
+  const b = parseInt(m[2], 10);
+  if (!Number.isInteger(a) || !Number.isInteger(b)) return null;
+  if (senderUserId === a) return b;
+  if (senderUserId === b) return a;
+  return null;
+}
+
+function buildPushPreviewText(text) {
+  const t = typeof text === "string" ? text : "";
+  const s = t.replace(/\s+/g, " ").trim();
+  if (s) return s.slice(0, 200);
+  return "Новое сообщение";
+}
+
+async function dispatchNewMessagePush({ room, formatted, senderUserId, text }) {
+  try {
+    if (!formatted || senderUserId == null) return;
+    const slug = String(room || "");
+    if (!slug || slug === GALLERY_ROOM_SLUG) return;
+
+    const preview = buildPushPreviewText(text ?? formatted.text ?? "");
+    const fromNick = formatted.user_nick || "Кто-то";
+
+    if (slug.startsWith("dm-")) {
+      const peerId = getDmPeerIdFromSlug(slug, senderUserId);
+      if (!peerId) return;
+      let title = "ЛС";
+      try {
+        title = `${fromNick} · ${await getChannelTitleForUser(slug, peerId)}`;
+      } catch {
+        title = `${fromNick} · ЛС`;
+      }
+      void sendPushToUser(peerId, {
+        kind: "message",
+        room: slug,
+        title,
+        body: preview,
+        messageId: formatted.id,
+        senderUserId,
+      });
+      return;
+    }
+
+    await ensurePushSchema();
+    let rows;
+    if (slug === "lobby") {
+      ({ rows } = await pool.query(
+        `SELECT id AS user_id FROM users WHERE can_see_lobby IS TRUE AND id <> $1`,
+        [senderUserId]
+      ));
+    } else {
+      ({ rows } = await pool.query(
+        `SELECT user_id FROM push_prefs WHERE room_slug = $1 AND mode = 'all' AND user_id <> $2`,
+        [slug, senderUserId]
+      ));
+    }
+    if (!rows.length) return;
+
+    let roomTitle = slug;
+    try {
+      roomTitle = await getChannelTitleForUser(slug, senderUserId);
+    } catch {
+      roomTitle = slug;
+    }
+
+    for (const r of rows) {
+      const uid = r.user_id;
+      if (uid == null) continue;
+      if (!(await userEligibleForMentionNotify(slug, uid))) continue;
+      void sendPushToUser(uid, {
+        kind: "message",
+        room: slug,
+        title: `${fromNick} · ${roomTitle}`,
+        body: preview,
+        messageId: formatted.id,
+        senderUserId,
+      });
+    }
+  } catch (e) {
+    console.warn("[push] dispatchNewMessagePush failed:", e?.message || e);
+  }
+}
+
+async function dispatchMentionNotifications(io, { room, formatted, senderUserId, text }) {
+  if (!io || !formatted || senderUserId == null) return;
+  const body = typeof text === "string" ? text : "";
+  const nicks = extractMentionNicks(body);
+  if (nicks.length === 0) return;
+  let rows;
+  try {
+    ({ rows } = await pool.query(`SELECT id, nickname FROM users WHERE LOWER(nickname) = ANY($1::text[])`, [nicks]));
+  } catch (err) {
+    console.error("dispatchMentionNotifications lookup", err?.message || err);
+    return;
+  }
+  const seenIds = new Set();
+  for (const row of rows) {
+    const targetId = row.id;
+    if (targetId === senderUserId || seenIds.has(targetId)) continue;
+    seenIds.add(targetId);
+    if (!(await userEligibleForMentionNotify(room, targetId))) continue;
+    let channelTitle;
+    try {
+      channelTitle = await getChannelTitleForUser(room, targetId);
+    } catch {
+      channelTitle = room;
+    }
+    const preview = body.replace(/\s+/g, " ").trim().slice(0, 160);
+    io.to(`user:${targetId}`).emit("mention", {
+      room,
+      channelTitle,
+      from: formatted.user_nick || "Кто-то",
+      messageId: formatted.id,
+      preview,
+      message: formatted,
+    });
+    void sendPushToUser(targetId, {
+      kind: "mention",
+      room,
+      title: `${formatted.user_nick || "Кто-то"} · ${channelTitle || room}`,
+      body: preview || "Вас упомянули",
+      messageId: formatted.id,
+      senderUserId,
+    });
+  }
+}
+
 const presenceByUserId = new Map();
 function incPresence(userId) {
   presenceByUserId.set(userId, (presenceByUserId.get(userId) || 0) + 1);
@@ -384,6 +746,117 @@ function decPresence(userId) {
   }
   presenceByUserId.set(userId, next);
   return false;
+}
+
+function userSocketPresenceCount(userId) {
+  return presenceByUserId.get(userId) || 0;
+}
+
+/** FCM (Android/iOS) + Web Push (PWA/браузер, VAPID). */
+async function sendPushToUser(userId, { kind, room, title, body, messageId, senderUserId }) {
+  try {
+    await ensurePushSchema();
+
+    const enabled = await getPushEnabled(userId);
+    if (!enabled) return;
+
+    const mode = await getPushMode(userId, room);
+    if (kind === "message") {
+      if (mode !== "all") return;
+    } else if (kind === "mention") {
+      if (mode === "off") return;
+    }
+
+    const { rows } = await pool.query(
+      `SELECT token, platform, web_auth, web_p256dh FROM push_tokens WHERE user_id = $1 AND revoked_at IS NULL ORDER BY last_seen_at DESC`,
+      [userId]
+    );
+    if (!rows.length) return;
+
+    const titleS = String(title || "TatarChat").slice(0, 120);
+    const bodyS = String(body || "").slice(0, 240);
+    const payloadData = {
+      kind: String(kind || ""),
+      room: String(room || ""),
+      messageId: messageId != null ? String(messageId) : "",
+      senderUserId: senderUserId != null ? String(senderUserId) : "",
+    };
+    const tag = `tatarchat-${kind}-${room}-${messageId ?? Date.now()}`;
+
+    const fcmTokens = [];
+    const webSubs = [];
+    for (const r of rows) {
+      const p = String(r.platform || "android").toLowerCase();
+      if (p === "web" && r.web_auth && r.web_p256dh && r.token) {
+        webSubs.push(r);
+      } else if (p !== "web") {
+        fcmTokens.push(r.token);
+      }
+    }
+
+    if (fcmTokens.length && initFcmIfPossible()) {
+      const response = await admin.messaging().sendEachForMulticast({
+        tokens: fcmTokens,
+        notification: {
+          title: titleS,
+          body: bodyS,
+        },
+        data: payloadData,
+        android: {
+          priority: "high",
+        },
+      });
+
+      const bad = [];
+      response.responses.forEach((r, idx) => {
+        if (r.success) return;
+        const code = r.error?.code || "";
+        if (
+          code.includes("registration-token-not-registered") ||
+          code.includes("invalid-registration-token") ||
+          code.includes("invalid-argument")
+        ) {
+          bad.push(fcmTokens[idx]);
+        }
+      });
+      if (bad.length) await revokePushTokens(bad);
+    }
+
+    if (webSubs.length && initWebPushIfPossible()) {
+      const skipWebBecauseSocket = kind === "mention" && userSocketPresenceCount(userId) > 0;
+      if (!skipWebBecauseSocket) {
+        const payload = JSON.stringify({
+          title: titleS,
+          body: bodyS,
+          room: payloadData.room,
+          kind: payloadData.kind,
+          messageId: payloadData.messageId,
+          tag,
+        });
+        for (const r of webSubs) {
+          try {
+            await webpush.sendNotification(
+              {
+                endpoint: r.token,
+                keys: { auth: r.web_auth, p256dh: r.web_p256dh },
+              },
+              payload,
+              { TTL: 86_400 }
+            );
+          } catch (e) {
+            const st = Number(e?.statusCode);
+            if (st === 404 || st === 410) {
+              await revokePushTokens([r.token]);
+            } else {
+              console.warn("[push] web push failed:", e?.message || e);
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[push] send failed:", e?.message || e);
+  }
 }
 
 const rateBuckets = new Map();
@@ -494,6 +967,12 @@ async function ensureCorePublicChannelRows() {
     `UPDATE channels SET title = $1 WHERE slug = 'lobby' AND kind = 'public'`,
     ["Семья"]
   );
+  await pool.query(
+    `UPDATE channels SET title = $1 WHERE slug = 'dtd_rabota' AND kind = 'public'`,
+    ["Рабочка"]
+  );
+  /* Старый slug с дефисом давал дубликат в списке и не совпадал с canonicalize */
+  await pool.query(`DELETE FROM channels WHERE slug = 'dtd-rabota' AND kind = 'public'`);
 }
 
 async function ensurePhase3Schema() {
@@ -552,11 +1031,11 @@ async function ensureUserPermissionsSchema() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_see_lobby   BOOLEAN NOT NULL DEFAULT FALSE`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_see_dtd     BOOLEAN NOT NULL DEFAULT TRUE`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_use_gallery BOOLEAN NOT NULL DEFAULT FALSE`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_see_dtd_work BOOLEAN NOT NULL DEFAULT TRUE`);
 
     // Инициализируем из env-переменных для уже существующих пользователей (только если is_admin ещё не проставлен)
     const adminNicks = ADMIN_NICKNAMES;
     const lobbyNicks = LOBBY_VISIBLE_NICKNAMES;
-    const galleryNicks = GALLERY_MEMBER_NICKNAMES;
     const dtdHidden = DTD_HIDDEN_NICKNAMES;
 
     if (adminNicks.length) {
@@ -571,15 +1050,9 @@ async function ensureUserPermissionsSchema() {
         [lobbyNicks]
       );
     }
-    if (galleryNicks.length) {
-      await pool.query(
-        `UPDATE users SET can_use_gallery = TRUE WHERE LOWER(nickname) = ANY($1::text[]) AND can_use_gallery = FALSE`,
-        [galleryNicks]
-      );
-    }
     if (dtdHidden.length) {
       await pool.query(
-        `UPDATE users SET can_see_dtd = FALSE WHERE LOWER(nickname) = ANY($1::text[])`,
+        `UPDATE users SET can_see_dtd = FALSE, can_see_dtd_work = FALSE WHERE LOWER(nickname) = ANY($1::text[])`,
         [dtdHidden]
       );
     }
@@ -661,7 +1134,8 @@ async function requireGalleryRoom(req, res, next) {
   try {
     const room = parseGalleryRoom(req);
     req.galleryRoom = room;
-    const ok = await userCanAccessChannel(room, req.user.userId);
+    const pw = getRoomPasswordFromRequest(req);
+    const ok = await userCanAccessChannel(room, req.user.userId, pw);
     if (!ok) return res.status(403).json({ error: "Нет доступа к каналу" });
     next();
   } catch (err) {
@@ -692,6 +1166,10 @@ const upload = multer({
     const mime = normalizeContentTypeMime(file.mimetype || "");
     if (ALLOWED_UPLOAD_MIMES.has(mime)) return cb(null, true);
     const name = String(file.originalname || "").toLowerCase();
+    // APK: некоторые браузеры/OS отдают application/octet-stream
+    if (/\.apk$/.test(name) && (mime === "application/octet-stream" || mime === "")) {
+      return cb(null, true);
+    }
     if (
       isVideoNoteHeader(req) &&
       /^videonote\.(webm|mp4)$/.test(name) &&
@@ -1306,13 +1784,6 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-function requireGallery(req, res, next) {
-  if (!isGalleryMember(req.user?.nickname)) {
-    return res.status(403).json({ error: "Нет доступа к галерее" });
-  }
-  next();
-}
-
 function parseGalleryParentQuery(val) {
   if (val == null || val === "") return { ok: true, id: null };
   const n = parseInt(val, 10);
@@ -1347,24 +1818,192 @@ function getRoomPasswordFromRequest(req) {
 
 // --- REST ---
 
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true });
+app.get("/api/health", async (_req, res) => {
+  let dbOk = false;
+  let dbErr = null;
+  try {
+    await Promise.race([
+      pool.query("SELECT 1"),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("DB_TIMEOUT")), 1500)),
+    ]);
+    dbOk = true;
+  } catch (e) {
+    dbOk = false;
+    dbErr = e?.message || String(e);
+  }
+  res.json({
+    ok: true,
+    dbOk,
+    dbErr,
+    maxUploadMb: Math.round(MAX_UPLOAD_BYTES / (1024 * 1024)),
+  });
+});
+
+app.get("/api/push/web-vapid-key", (req, res) => {
+  try {
+    const publicKey = process.env.VAPID_PUBLIC_KEY;
+    if (!publicKey || !process.env.VAPID_PRIVATE_KEY) {
+      return res.status(503).json({ ok: false, error: "Web push не настроен" });
+    }
+    res.json({ ok: true, publicKey });
+  } catch (err) {
+    console.error("GET /api/push/web-vapid-key", err?.message || err);
+    res.status(500).json({ ok: false, error: "Ошибка" });
+  }
+});
+
+app.post("/api/push/register", requireAuth, async (req, res) => {
+  try {
+    await ensurePushSchema();
+    const userId = req.user.userId;
+    const platformRaw = String(req.body?.platform || "android").trim().toLowerCase() || "android";
+
+    if (platformRaw === "web") {
+      if (!initWebPushIfPossible()) {
+        return res.status(503).json({ error: "Web push не настроен на сервере" });
+      }
+      const sub = req.body?.subscription;
+      const endpoint = String(sub?.endpoint || "").trim();
+      const auth = String(sub?.keys?.auth || "").trim();
+      const p256dh = String(sub?.keys?.p256dh || "").trim();
+      if (!endpoint || endpoint.length < 16 || !auth || !p256dh) {
+        return res.status(400).json({ error: "Некорректная web-подписка" });
+      }
+      await pool.query(
+        `
+        INSERT INTO push_tokens (user_id, token, platform, web_auth, web_p256dh, created_at, last_seen_at, revoked_at)
+        VALUES ($1, $2, 'web', $3, $4, NOW(), NOW(), NULL)
+        ON CONFLICT (token) DO UPDATE SET
+          user_id = EXCLUDED.user_id,
+          platform = 'web',
+          web_auth = EXCLUDED.web_auth,
+          web_p256dh = EXCLUDED.web_p256dh,
+          last_seen_at = NOW(),
+          revoked_at = NULL
+        `,
+        [userId, endpoint, auth, p256dh]
+      );
+      return res.json({ ok: true });
+    }
+
+    const token = String(req.body?.token || "").trim();
+    const platform = platformRaw || "android";
+    if (!token || token.length < 12) return res.status(400).json({ error: "Некорректный token" });
+
+    await pool.query(
+      `
+      INSERT INTO push_tokens (user_id, token, platform, web_auth, web_p256dh, created_at, last_seen_at, revoked_at)
+      VALUES ($1, $2, $3, NULL, NULL, NOW(), NOW(), NULL)
+      ON CONFLICT (token) DO UPDATE SET
+        user_id = EXCLUDED.user_id,
+        platform = EXCLUDED.platform,
+        web_auth = NULL,
+        web_p256dh = NULL,
+        last_seen_at = NOW(),
+        revoked_at = NULL
+      `,
+      [userId, token, platform]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("POST /api/push/register", err?.message || err);
+    res.status(500).json({ error: "Не удалось сохранить токен" });
+  }
+});
+
+app.post("/api/push/unregister", requireAuth, async (req, res) => {
+  try {
+    await ensurePushSchema();
+    const userId = req.user.userId;
+    const token = String(req.body?.token || "").trim();
+    if (!token) return res.status(400).json({ error: "Некорректный token" });
+    await pool.query(`UPDATE push_tokens SET revoked_at = NOW() WHERE user_id = $1 AND token = $2`, [
+      userId,
+      token,
+    ]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("POST /api/push/unregister", err?.message || err);
+    res.status(500).json({ error: "Не удалось удалить токен" });
+  }
+});
+
+app.get("/api/push/prefs", requireAuth, async (req, res) => {
+  try {
+    await ensurePushSchema();
+    const userId = req.user.userId;
+    const { rows: srows } = await pool.query(`SELECT enabled FROM push_settings WHERE user_id = $1`, [userId]);
+    const enabled = srows.length ? srows[0].enabled !== false : true;
+    const { rows } = await pool.query(`SELECT room_slug, mode FROM push_prefs WHERE user_id = $1`, [userId]);
+    res.json({
+      ok: true,
+      enabled,
+      rooms: rows.map((r) => ({ roomSlug: r.room_slug, mode: r.mode })),
+    });
+  } catch (err) {
+    console.error("GET /api/push/prefs", err?.message || err);
+    res.status(500).json({ error: "Не удалось загрузить настройки" });
+  }
+});
+
+app.put("/api/push/prefs", requireAuth, async (req, res) => {
+  try {
+    await ensurePushSchema();
+    const userId = req.user.userId;
+    const enabled = req.body?.enabled;
+    const rooms = Array.isArray(req.body?.rooms) ? req.body.rooms : [];
+
+    if (enabled != null) {
+      await pool.query(
+        `
+        INSERT INTO push_settings (user_id, enabled, updated_at)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (user_id) DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = NOW()
+        `,
+        [userId, enabled !== false]
+      );
+    }
+
+    for (const r of rooms) {
+      const roomSlug = canonicalizeChannelSlug(r?.roomSlug ?? r?.room ?? r?.slug);
+      if (!roomSlug) continue;
+      const mode = String(r?.mode || "").toLowerCase();
+      if (mode !== "all" && mode !== "mentions" && mode !== "off") continue;
+      await pool.query(
+        `
+        INSERT INTO push_prefs (user_id, room_slug, mode, updated_at)
+        VALUES ($1, $2, $3, NOW())
+        ON CONFLICT (user_id, room_slug) DO UPDATE SET mode = EXCLUDED.mode, updated_at = NOW()
+        `,
+        [userId, roomSlug, mode]
+      );
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("PUT /api/push/prefs", err?.message || err);
+    res.status(500).json({ error: "Не удалось сохранить настройки" });
+  }
 });
 
 app.get("/api/rooms", requireAuth, async (req, res) => {
   try {
     await ensureCorePublicChannelRows();
     const nick = req.user.nickname;
+    const perms = await getUserPerms(req.user.userId);
     const { rows } = await pool.query(
       `SELECT slug, title FROM channels WHERE kind = 'public' ORDER BY slug`
     );
     const merged = mergeMissingCorePublicRows(
       rows.map((r) => ({ slug: r.slug, title: r.title, avatar_storage_key: null }))
-    ).filter((r) => {
-      if (r.slug === "lobby") return canUserSeeLobby(nick);
-      if (r.slug === "dreamteamdauns") return canUserSeeDtd(nick);
-      return true;
-    });
+    )
+      .filter((r) => r.slug !== "dtd-rabota")
+      .filter((r) => {
+        if (r.slug === "lobby") return canUserSeeLobby(nick);
+        if (r.slug === "dreamteamdauns") return !!perms.can_see_dtd;
+        if (r.slug === "dtd_rabota") return !!perms.can_see_dtd && !!perms.can_see_dtd_work;
+        return true;
+      });
     const rooms = merged.map((r) => ({
       slug: r.slug,
       title: r.title || GROUP_ROOMS[r.slug]?.title || r.slug,
@@ -1438,7 +2077,11 @@ app.get("/api/channels", requireAuth, async (req, res) => {
       `SELECT slug, title, avatar_storage_key FROM channels WHERE kind = 'public' ORDER BY slug`
     );
     const nick = req.user.nickname;
+    const perms = await getUserPerms(me);
     const filtered = mergeMissingCorePublicRows(pubRows)
+      // dtd_work — внутренний чат DTD, не показываем отдельной строкой канала
+      .filter((r) => r.slug !== "dtd_work")
+      .filter((r) => r.slug !== "dtd-rabota")
       .filter((r) => {
         const m = /^saved-(\d+)$/i.exec(r.slug);
         if (!m) return true;
@@ -1446,7 +2089,9 @@ app.get("/api/channels", requireAuth, async (req, res) => {
       })
       .filter((r) => {
         if (r.slug === "lobby") return canUserSeeLobby(nick);
-        if (r.slug === "dreamteamdauns") return canUserSeeDtd(nick);
+        if (r.slug === "dreamteamdauns") return !!perms.can_see_dtd;
+        if (r.slug === "dtd_work") return !!perms.can_see_dtd && !!perms.can_see_dtd_work;
+        if (r.slug === "dtd_rabota") return !!perms.can_see_dtd && !!perms.can_see_dtd_work;
         return true;
       });
     const mapChannel = (r) => ({
@@ -1496,7 +2141,7 @@ app.get("/api/channels", requireAuth, async (req, res) => {
 app.get("/api/me", requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, nickname, is_admin, can_see_lobby, can_see_dtd, can_use_gallery,
+      `SELECT id, nickname, is_admin, can_see_lobby, can_see_dtd, can_see_dtd_work,
         (avatar_storage_key IS NOT NULL AND TRIM(avatar_storage_key) <> '') AS has_avatar
        FROM users WHERE id = $1`,
       [req.user.userId]
@@ -1508,9 +2153,9 @@ app.get("/api/me", requireAuth, async (req, res) => {
       nickname: u.nickname,
       isAdmin: !!u.is_admin,
       hasAvatar: !!u.has_avatar,
-      canUseGallery: !!u.can_use_gallery,
       canSeeLobby: !!u.can_see_lobby,
       canSeeDtd: !!u.can_see_dtd,
+      canSeeDtdWork: !!u.can_see_dtd_work,
     });
   } catch (err) {
     console.error("GET /api/me", err);
@@ -1518,7 +2163,7 @@ app.get("/api/me", requireAuth, async (req, res) => {
   }
 });
 
-app.get("/api/gallery/folders", requireAuth, requireGallery, requireGalleryRoom, async (req, res) => {
+app.get("/api/gallery/folders", requireAuth, requireGalleryRoom, async (req, res) => {
   try {
     const parsed = parseGalleryParentQuery(req.query.parentId);
     if (!parsed.ok) return res.status(400).json({ error: "Некорректный parentId" });
@@ -1536,7 +2181,7 @@ app.get("/api/gallery/folders", requireAuth, requireGallery, requireGalleryRoom,
   }
 });
 
-app.get("/api/gallery/folders-all", requireAuth, requireGallery, requireGalleryRoom, async (req, res) => {
+app.get("/api/gallery/folders-all", requireAuth, requireGalleryRoom, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT id, parent_id, name FROM gallery_folders WHERE room_slug = $1 ORDER BY name ASC`,
@@ -1549,7 +2194,7 @@ app.get("/api/gallery/folders-all", requireAuth, requireGallery, requireGalleryR
   }
 });
 
-app.post("/api/gallery/folders", requireAuth, requireGallery, requireGalleryRoom, async (req, res) => {
+app.post("/api/gallery/folders", requireAuth, requireGalleryRoom, async (req, res) => {
   try {
     const name = sanitizeGalleryFolderName(req.body?.name);
     if (!name) return res.status(400).json({ error: "Укажите название папки" });
@@ -1579,7 +2224,7 @@ app.post("/api/gallery/folders", requireAuth, requireGallery, requireGalleryRoom
   }
 });
 
-app.patch("/api/gallery/folders/:id", requireAuth, requireGallery, requireGalleryRoom, async (req, res) => {
+app.patch("/api/gallery/folders/:id", requireAuth, requireGalleryRoom, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Некорректный id" });
@@ -1606,7 +2251,7 @@ app.patch("/api/gallery/folders/:id", requireAuth, requireGallery, requireGaller
   }
 });
 
-app.delete("/api/gallery/folders/:id", requireAuth, requireGallery, requireGalleryRoom, async (req, res) => {
+app.delete("/api/gallery/folders/:id", requireAuth, requireGalleryRoom, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Некорректный id" });
@@ -1631,7 +2276,7 @@ app.delete("/api/gallery/folders/:id", requireAuth, requireGallery, requireGalle
   }
 });
 
-app.get("/api/gallery/items", requireAuth, requireGallery, requireGalleryRoom, async (req, res) => {
+app.get("/api/gallery/items", requireAuth, requireGalleryRoom, async (req, res) => {
   try {
     const parsed = parseGalleryParentQuery(req.query.folderId);
     if (!parsed.ok) return res.status(400).json({ error: "Некорректный folderId" });
@@ -1650,7 +2295,7 @@ app.get("/api/gallery/items", requireAuth, requireGallery, requireGalleryRoom, a
   }
 });
 
-app.put("/api/gallery/items/reorder", requireAuth, requireGallery, requireGalleryRoom, async (req, res) => {
+app.put("/api/gallery/items/reorder", requireAuth, requireGalleryRoom, async (req, res) => {
   try {
     const ids = req.body?.itemIds;
     if (!Array.isArray(ids) || ids.length === 0) {
@@ -1692,7 +2337,6 @@ app.put("/api/gallery/items/reorder", requireAuth, requireGallery, requireGaller
 app.post(
   "/api/gallery/upload",
   requireAuth,
-  requireGallery,
   requireGalleryRoom,
   (req, res, next) => {
     uploadGalleryImage.single("file")(req, res, (err) => {
@@ -1744,7 +2388,7 @@ app.post(
   }
 );
 
-app.patch("/api/gallery/items/:id", requireAuth, requireGallery, requireGalleryRoom, async (req, res) => {
+app.patch("/api/gallery/items/:id", requireAuth, requireGalleryRoom, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Некорректный id" });
@@ -1778,7 +2422,7 @@ app.patch("/api/gallery/items/:id", requireAuth, requireGallery, requireGalleryR
   }
 });
 
-app.delete("/api/gallery/items/:id", requireAuth, requireGallery, requireGalleryRoom, async (req, res) => {
+app.delete("/api/gallery/items/:id", requireAuth, requireGalleryRoom, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Некорректный id" });
@@ -1794,15 +2438,19 @@ app.delete("/api/gallery/items/:id", requireAuth, requireGallery, requireGallery
   }
 });
 
-app.get("/api/gallery/file/:id", requireAuth, requireGallery, async (req, res) => {
+app.get("/api/gallery/file/:id", requireAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Некорректный id" });
     const { rows } = await pool.query(
-      `SELECT storage_key, original_name, mime FROM gallery_items WHERE id = $1`,
+      `SELECT storage_key, original_name, mime, room_slug FROM gallery_items WHERE id = $1`,
       [id]
     );
     if (!rows[0]) return res.status(404).json({ error: "Нет файла" });
+    const roomSlug = rows[0].room_slug;
+    const pw = getRoomPasswordFromRequest(req);
+    const ok = await userCanAccessChannel(roomSlug, req.user.userId, pw);
+    if (!ok) return res.status(403).json({ error: "Нет доступа к файлу" });
     const { storage_key: storageKey, original_name: oname, mime } = rows[0];
     const full = path.join(UPLOAD_ROOT, storageKey);
     if (!fs.existsSync(full)) return res.status(404).json({ error: "Файл отсутствует на диске" });
@@ -1820,7 +2468,7 @@ app.get("/api/gallery/file/:id", requireAuth, requireGallery, async (req, res) =
 app.get("/api/calendar/events", requireAuth, async (req, res) => {
   try {
     const room = parseGalleryRoom(req);
-    const ok = await userCanAccessChannel(room, req.user.userId);
+    const ok = await userCanAccessChannel(room, req.user.userId, getRoomPasswordFromRequest(req));
     if (!ok) return res.status(403).json({ error: "Нет доступа к каналу" });
     const fromRaw = req.query.from;
     const toRaw = req.query.to;
@@ -1849,7 +2497,7 @@ app.get("/api/calendar/events", requireAuth, async (req, res) => {
 app.get("/api/calendar/upcoming", requireAuth, async (req, res) => {
   try {
     const room = parseGalleryRoom(req);
-    const ok = await userCanAccessChannel(room, req.user.userId);
+    const ok = await userCanAccessChannel(room, req.user.userId, getRoomPasswordFromRequest(req));
     if (!ok) return res.status(403).json({ error: "Нет доступа к каналу" });
     const lim = Math.min(30, Math.max(1, parseInt(String(req.query.limit || "12"), 10) || 12));
     const { rows } = await pool.query(
@@ -1872,7 +2520,7 @@ app.get("/api/calendar/upcoming", requireAuth, async (req, res) => {
 app.post("/api/calendar/events", requireAuth, async (req, res) => {
   try {
     const room = String(req.body?.room ?? "").trim().toLowerCase() || "lobby";
-    const ok = await userCanAccessChannel(room, req.user.userId);
+    const ok = await userCanAccessChannel(room, req.user.userId, getRoomPasswordFromRequest(req));
     if (!ok) return res.status(403).json({ error: "Нет доступа к каналу" });
     const title = String(req.body?.title ?? "").trim().slice(0, 240);
     if (!title) return res.status(400).json({ error: "Нужен заголовок" });
@@ -1904,7 +2552,7 @@ app.patch("/api/calendar/events/:id", requireAuth, async (req, res) => {
     const { rows: evRows } = await pool.query(`SELECT * FROM channel_calendar_events WHERE id = $1`, [id]);
     const ev = evRows[0];
     if (!ev) return res.status(404).json({ error: "Событие не найдено" });
-    const okRoom = await userCanAccessChannel(ev.room_slug, req.user.userId);
+    const okRoom = await userCanAccessChannel(ev.room_slug, req.user.userId, getRoomPasswordFromRequest(req));
     if (!okRoom) return res.status(403).json({ error: "Нет доступа" });
     if (ev.user_id !== req.user.userId && !req.user.isAdmin) return res.status(403).json({ error: "Нельзя редактировать чужое событие" });
     const title =
@@ -1951,7 +2599,7 @@ app.delete("/api/calendar/events/:id", requireAuth, async (req, res) => {
     const { rows: evRows } = await pool.query(`SELECT * FROM channel_calendar_events WHERE id = $1`, [id]);
     const ev = evRows[0];
     if (!ev) return res.status(404).json({ error: "Событие не найдено" });
-    const okRoom = await userCanAccessChannel(ev.room_slug, req.user.userId);
+    const okRoom = await userCanAccessChannel(ev.room_slug, req.user.userId, getRoomPasswordFromRequest(req));
     if (!okRoom) return res.status(403).json({ error: "Нет доступа" });
     if (ev.user_id !== req.user.userId && !req.user.isAdmin) return res.status(403).json({ error: "Нельзя удалить чужое событие" });
     await pool.query(`DELETE FROM channel_calendar_events WHERE id = $1`, [id]);
@@ -2104,9 +2752,6 @@ app.post("/api/channels/open-dm", requireAuth, async (req, res) => {
 
 app.post("/api/auth/register", async (req, res) => {
   try {
-    if (process.env.ALLOW_REGISTRATION === "false") {
-      return res.status(403).json({ error: "Регистрация закрыта" });
-    }
     const ip = req.ip || "unknown";
     if (!checkRegRateLimit(ip)) {
       return res.status(429).json({ error: "Слишком много попыток регистрации" });
@@ -2130,16 +2775,23 @@ app.post("/api/auth/register", async (req, res) => {
     );
     const user = rows[0];
     const token = signToken(user.id);
+    const perms = await getUserPerms(user.id);
+    try {
+      ioInstance?.to("admins").emit("admin-users-changed", {
+        reason: "registered",
+        user: { id: user.id, nickname: user.nickname },
+      });
+    } catch (_) {}
     res.status(201).json({
       token,
       user: {
         id: user.id,
         nickname: user.nickname,
-        isAdmin: isAdmin(user.nickname),
+        isAdmin: !!perms.is_admin,
         hasAvatar: false,
-        canUseGallery: isGalleryMember(user.nickname),
-        canSeeLobby: canUserSeeLobby(user.nickname),
-        canSeeDtd: canUserSeeDtd(user.nickname),
+        canSeeLobby: !!perms.can_see_lobby,
+        canSeeDtd: !!perms.can_see_dtd,
+        canSeeDtdWork: !!perms.can_see_dtd_work,
       },
     });
   } catch (err) {
@@ -2181,16 +2833,17 @@ app.post("/api/auth/login", async (req, res) => {
       [user.id]
     );
     const token = signToken(user.id);
+    const perms = await getUserPerms(user.id);
     res.json({
       token,
       user: {
         id: user.id,
         nickname: user.nickname,
-        isAdmin: isAdmin(user.nickname),
+        isAdmin: !!perms.is_admin,
         hasAvatar: !!avRows[0]?.ha,
-        canUseGallery: isGalleryMember(user.nickname),
-        canSeeLobby: canUserSeeLobby(user.nickname),
-        canSeeDtd: canUserSeeDtd(user.nickname),
+        canSeeLobby: !!perms.can_see_lobby,
+        canSeeDtd: !!perms.can_see_dtd,
+        canSeeDtdWork: !!perms.can_see_dtd_work,
       },
     });
   } catch (err) {
@@ -2204,7 +2857,7 @@ app.post("/api/auth/login", async (req, res) => {
 app.get("/api/admin/users", requireAuth, requireAdmin, async (_req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, nickname, is_admin, can_see_lobby, can_see_dtd, can_use_gallery, created_at
+      `SELECT id, nickname, is_admin, can_see_lobby, can_see_dtd, can_see_dtd_work, created_at
        FROM users ORDER BY id`
     );
     res.json({ users: rows });
@@ -2220,7 +2873,7 @@ app.patch("/api/admin/users/:id", requireAuth, requireAdmin, async (req, res) =>
     if (!Number.isInteger(targetId) || targetId < 1) {
       return res.status(400).json({ error: "Некорректный id" });
     }
-    const allowed = ["is_admin", "can_see_lobby", "can_see_dtd", "can_use_gallery"];
+    const allowed = ["is_admin", "can_see_lobby", "can_see_dtd", "can_see_dtd_work"];
     const updates = {};
     for (const key of allowed) {
       if (key in req.body) updates[key] = !!req.body[key];
@@ -2232,7 +2885,7 @@ app.patch("/api/admin/users/:id", requireAuth, requireAdmin, async (req, res) =>
     const values = [targetId, ...Object.values(updates)];
     const { rows } = await pool.query(
       `UPDATE users SET ${setClauses} WHERE id = $1
-       RETURNING id, nickname, is_admin, can_see_lobby, can_see_dtd, can_use_gallery`,
+       RETURNING id, nickname, is_admin, can_see_lobby, can_see_dtd, can_see_dtd_work`,
       values
     );
     if (!rows[0]) return res.status(404).json({ error: "Пользователь не найден" });
@@ -2427,6 +3080,20 @@ app.post("/api/messages/send-with-file", requireAuth, handleUpload, async (req, 
       voiceMessage: !videoNote && isVoiceMessageRequest(req),
     });
     io.to(slug).emit("message", formatted);
+    if (formatted) {
+      void dispatchMentionNotifications(io, {
+        room: slug,
+        formatted,
+        senderUserId: userId,
+        text: normalizedText || "",
+      });
+      void dispatchNewMessagePush({
+        room: slug,
+        formatted,
+        senderUserId: userId,
+        text: normalizedText || (req.file ? "Вложение" : ""),
+      });
+    }
     res.status(201).json({ ok: true, message: formatted });
   } catch (err) {
     if (err.code === "EMPTY_MSG" || err.code === "BAD_MIME") {
@@ -2445,6 +3112,7 @@ const io = new Server(server, {
   },
   transports: ["websocket", "polling"],
 });
+ioInstance = io;
 
 io.use(async (socket, next) => {
   try {
@@ -2454,7 +3122,7 @@ io.use(async (socket, next) => {
     }
     const payload = jwt.verify(token, JWT_SECRET);
     const { rows } = await pool.query(
-      `SELECT id, nickname, password_hash FROM users WHERE id = $1`,
+      `SELECT id, nickname, password_hash, is_admin FROM users WHERE id = $1`,
       [payload.userId]
     );
     const user = rows[0];
@@ -2463,6 +3131,7 @@ io.use(async (socket, next) => {
     }
     socket.data.userId = user.id;
     socket.data.nickname = user.nickname;
+    socket.data.isAdmin = !!user.is_admin;
     next();
   } catch {
     next(new Error("Недействительный токен"));
@@ -2508,6 +3177,8 @@ app.post("/api/messages", requireAuth, async (req, res) => {
     const formatted = await formatMessageById(row.id);
     if (formatted) {
       io.to(slug).emit("message", formatted);
+      void dispatchMentionNotifications(io, { room: slug, formatted, senderUserId: userId, text: body });
+      void dispatchNewMessagePush({ room: slug, formatted, senderUserId: userId, text: body });
     }
     res.status(201).json({ ok: true, message: formatted });
   } catch (err) {
@@ -2674,6 +3345,13 @@ async function processJoinRoom(socket, payload, ack) {
 }
 
 io.on("connection", (socket) => {
+  const uid0 = socket.data.userId;
+  if (uid0 != null) {
+    socket.join(`user:${uid0}`);
+  }
+  if (socket.data.isAdmin) {
+    socket.join("admins");
+  }
   /** Несколько join-room подряд без await дают параллельные async-обработчики — гонка и падения в БД/socket */
   socket.on("join-room", (payload, ack) => {
     socket.data._joinQueue = (socket.data._joinQueue || Promise.resolve())
@@ -2735,6 +3413,8 @@ io.on("connection", (socket) => {
       const formatted = await formatMessageById(row.id);
       if (formatted) {
         io.to(slug).emit("message", formatted);
+        void dispatchMentionNotifications(io, { room: slug, formatted, senderUserId: uid, text: body });
+        void dispatchNewMessagePush({ room: slug, formatted, senderUserId: uid, text: body });
       }
       if (typeof ack === "function") ack({ ok: true });
     } catch (err) {
@@ -2918,6 +3598,8 @@ async function start() {
   await ensureGallerySchema();
   await ensureCalendarSchema();
   await ensureUserPermissionsSchema();
+  await ensurePushSchema();
+  initFcmIfPossible();
   ensureUploadDirs();
   server.listen(PORT, () => {
     console.log(`Сервер: http://localhost:${PORT}`);

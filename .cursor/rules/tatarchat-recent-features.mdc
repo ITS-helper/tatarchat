@@ -1,0 +1,56 @@
+---
+description: Недавние доработки чата, мобильной вёрстки и упоминаний @ — контекст для ассистента
+alwaysApply: true
+---
+
+# TatarChat — зафиксированный контекст (недавние фичи)
+
+## Мобильный чат / iOS (client)
+
+- Корневой layout: класс **`tc-app-shell`** на корневом `div` в `client/src/App.jsx` — для глобальных правил полей ввода.
+- **`client/src/index.css`**: у `body` — `touch-action: manipulation`; для экранов `<640px` внутри `.tc-app-shell` у `input`/`textarea`/`select` — `font-size: max(1rem, 16px)` (меньше авто-зума Safari при фокусе).
+- Композер: одна полоска **`rounded-xl bg-tc-input`** — поле «Сообщение» + скрепка + отправка в одной строке; у поля `tc-msg-input`, на мобиле `text-base`, с `sm` — `text-sm`; `enterKeyHint="send"`.
+- Safe-area: класс **`tc-composer-bar`** (нижний отступ под home indicator).
+
+## Упоминания @ «как в Telegram» (server + client)
+
+- **Сервер** `server/server.js`:
+  - Парсинг `@ник` в тексте: `extractMentionNicks`, поиск пользователей `LOWER(nickname) = ANY(...)`.
+  - Доставка: `io.to(\`user:${targetId}\`).emit("mention", { room, channelTitle, from, messageId, preview, message })`.
+  - При подключении сокета: `socket.join(\`user:${socket.data.userId}\`)`.
+  - Вызов **`dispatchMentionNotifications`** после сохранения сообщения: обработчик Socket `message`, `POST /api/messages`, `POST /api/messages/send-with-file`.
+  - Кому слать: **`userEligibleForMentionNotify`** (права на канал; для групповых комнат с паролем пароль комнаты для цели **не** проверяется — только права, например DTD).
+  - Не уведомлять автора сообщения; дубликаты `@` к одному пользователю — одно уведомление.
+- **Клиент** `client/src/App.jsx`:
+  - Слушатель **`mention`**: бейджи **`mentionBadges[slug]`** в сайдбаре (каналы, ЛС, избранное); сброс при открытии чата этой комнаты (`activeView === chat` + `activeRoom`).
+  - **Notification API** при фоне / другой комнате / не вкладка «Чат»; клик — переход в чат комнаты через **`goToChatRoomRef`** / **`goToChatRoom`**.
+  - Лёгкая вибрация: `navigator.vibrate?.(12)` при бейдже.
+  - Подсветка в тексте: **`renderTextWithMentions`**, **`MentionCountBadge`**.
+
+## Права доступа: канал = чат + галерея + календарь
+
+- Один смысл **«доступ к каналу»**: если пользователь может зайти в комнату (`userCanAccessChannel` по `room_slug`), он может и **чат**, и **REST галереи** для этой `room`, и **календарь** для той же `room`.
+- Отдельного флага админки **«Галерея»** (`can_use_gallery`) больше нет в UI и в `PATCH /api/admin/users`; колонка в БД может оставаться для совместимости, но **не участвует** в проверках доступа к вкладкам канала.
+- Раньше галерея дополнительно резалась через `isGalleryMember` (whitelist ников) — это снято; проверка только **доступ к `room`** + заголовок **`X-Room-Password`** для закрытых комнат (тот же механизм, что у чата).
+- Клиент: `GalleryView` / `CalendarView` получают **`getAuthHeaders`** из `App.jsx`, чтобы запросы шли с паролем комнаты при необходимости.
+
+## Погода в сайдбаре (client)
+
+- В **`client/src/App.jsx`**: компонент **`SidebarWeatherStrip`** — внизу левой колонки, сразу после **`</nav>`** (у `<nav>` уже **`flex-1`** — список каналов прокручивается, погода закреплена снизу).
+- Города: **Тюмень**, **Челябинск**, **Санкт‑Петербург** («Питер» в UI); координаты в **`SIDEBAR_WEATHER_CITIES`** рядом с компонентом.
+- API: **`https://api.open-meteo.com/v1/forecast`** (без ключа), `current=temperature_2m,weather_code,wind_speed_10m`, `timezone=auto`; погодный код → эмодзи **`wmoWeatherEmoji`**.
+- Обновление: при монтировании, кнопка **↻**, интервал **30 минут**; ссылка «Open‑Meteo» внизу блока.
+
+## Push / уведомления (server + client)
+
+- **Сервер** `server/server.js`: доставка через **`sendPushToUser`** — **FCM** для нативного клиента (`push_tokens` с `platform !== 'web'`), **Web Push (VAPID)** для браузера/PWA (`platform === 'web'`, колонки `web_auth`, `web_p256dh`). Режим комнаты **`getPushMode`** + глобальный **`push_settings.enabled`**. Для **`kind: "message"`** пуш шлётся только при **`mode === 'all'`**; для **`kind: "mention"`** — при **`mode !== 'off'`**. Web Push для упоминаний не дублируется, если у пользователя есть активный сокет (**`userSocketPresenceCount`**). Регистрация: **`POST /api/push/register`** (в т.ч. `platform: "web"`, `subscription`), **`GET /api/push/web-vapid-key`**.
+- **Клиент** `client/src/App.jsx`: при **`!IS_NATIVE`** — подписка на push после входа; **`public/web-push-sw.js`** подключается через **`vite.config.js`** → `workbox.importScripts`; открытие комнаты с уведомления — **`?tc_room=`** / **`postMessage TATARCHAT_OPEN_ROOM`**.
+- **Канал «Семья» (`lobby`)**: по умолчанию **`defaultPushModeForRoom('lobby') === 'all'`** (как у ЛС), если нет строки в **`push_prefs`** для этого slug. Рассылка **каждого сообщения** в **`lobby`** (**`dispatchNewMessagePush`**) идёт всем пользователям с **`can_see_lobby = TRUE`**, кроме отправителя; **`userEligibleForMentionNotify`** + **`sendPushToUser`** по-прежнему отсекают отключённые глобально или выставившие для комнаты **`mentions`** / **`off`**. **Остальные групповые каналы** (не `lobby`, не ЛС): получатели с **`push_prefs.mode = 'all'`** для этого `room_slug`, как раньше.
+
+## Прочее (из связанных сессий, не дублировать ломая код)
+
+- После правок **backend** перезапуск сервера — см. правило `server-restart-when-needed.mdc`.
+- После **`git commit`** — **`git push`** на `origin` текущей ветки — см. `git-push-after-commit.mdc`.
+- Операционка/деплой/Android APK — см. правило `tatarchat-ops-and-build.mdc`.
+
+При изменении этих механизмов обновляй этот файл или связанный код согласованно.

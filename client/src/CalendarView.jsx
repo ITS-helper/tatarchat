@@ -66,10 +66,13 @@ function formatMarqueeLine(ev) {
   return `${dateStr}, ${t} — ${ev.title}`;
 }
 
-export default function CalendarView({ getApiBase, token, room, onError, currentUserId, isAdmin }) {
-  const authHeaders = useMemo(
-    () => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" }),
-    [token]
+export default function CalendarView({ getApiBase, token, getAuthHeaders, room, onError, currentUserId, isAdmin }) {
+  const bareHeaders = useMemo(() => {
+    return typeof getAuthHeaders === "function" ? getAuthHeaders() : { Authorization: `Bearer ${token}` };
+  }, [getAuthHeaders, token]);
+  const jsonHeaders = useMemo(
+    () => ({ ...bareHeaders, "Content-Type": "application/json" }),
+    [bareHeaders]
   );
 
   const now = new Date();
@@ -103,7 +106,7 @@ export default function CalendarView({ getApiBase, token, room, onError, current
     try {
       const { from, to } = monthRangeISO(viewY, viewM);
       const q = new URLSearchParams({ room, from, to });
-      const res = await fetch(`${getApiBase()}/api/calendar/events?${q}`, { headers: authHeaders });
+      const res = await fetch(`${getApiBase()}/api/calendar/events?${q}`, { headers: bareHeaders });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.error || "Не удалось загрузить календарь");
@@ -116,22 +119,20 @@ export default function CalendarView({ getApiBase, token, room, onError, current
     } finally {
       setLoading(false);
     }
-  }, [token, room, viewY, viewM, getApiBase, authHeaders, onError]);
+  }, [token, room, viewY, viewM, getApiBase, bareHeaders, onError]);
 
   const loadUpcoming = useCallback(async () => {
     if (!token || !room) return;
     try {
       const q = new URLSearchParams({ room, limit: "14" });
-      const res = await fetch(`${getApiBase()}/api/calendar/upcoming?${q}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch(`${getApiBase()}/api/calendar/upcoming?${q}`, { headers: bareHeaders });
       if (!res.ok) return;
       const data = await res.json();
       setUpcoming(Array.isArray(data.events) ? data.events : []);
     } catch {
       setUpcoming([]);
     }
-  }, [token, room, getApiBase]);
+  }, [token, room, getApiBase, bareHeaders]);
 
   useEffect(() => {
     loadMonth();
@@ -206,7 +207,7 @@ export default function CalendarView({ getApiBase, token, room, onError, current
     try {
       const res = await fetch(`${getApiBase()}/api/calendar/events`, {
         method: "POST",
-        headers: authHeaders,
+        headers: jsonHeaders,
         body: JSON.stringify({
           room,
           title: newTitle.trim(),
@@ -230,7 +231,7 @@ export default function CalendarView({ getApiBase, token, room, onError, current
     try {
       const res = await fetch(`${getApiBase()}/api/calendar/events/${id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: bareHeaders,
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Не удалось удалить");

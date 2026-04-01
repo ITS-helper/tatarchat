@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="420" viewBox="0 0 720 420">
+  <defs>
+    <style>.lbl{font-family:system-ui;font-size:8px;font-weight:300;letter-spacing:.12em;text-anchor:middle}</style>
+  </defs>
+  <!-- Light theme: 1:1 как dark по плотности, приглушаем одной общей прозрачностью -->
+  <g fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" opacity=".32">
+
+    <g transform="translate(55,18) rotate(-8)" stroke="#ff9100" opacity=".55">
+      <path d="M3 14 L1 58 L30 58 L28 14 Z"/>
+      <path d="M28 22 Q38 22 38 32 Q38 42 28 42" fill="none"/>
+      <path d="M3 14 Q7 5 12 9 Q17 3 22 7 Q26 2 29 7 Q31 13 28 14 L3 14Z"/>
+      <line x1="4" y1="40" x2="27" y2="40" opacity=".5"/>
+      <text class="lbl" x="15" y="52" fill="#ffcc66">BEER</text>
+    </g>
+    <g transform="translate(140,35)" stroke="#88cc00" opacity=".5">
+      <circle cx="8" cy="18" r="7"/><circle cx="22" cy="18" r="7"/><circle cx="15" cy="7" r="7"/><circle cx="15" cy="29" r="7"/>
+      <line x1="15" y1="0" x2="15" y2="-10"/>
+    </g>
+    <g transform="translate(225,14) rotate(11)" stroke="#ffcc00" opacity=".52">
+      <path d="M3 14 L1 58 L30 58 L28 14 Z"/>
+      <path d="M28 22 Q38 22 38 32 Q38 42 28 42" fill="none"/>
+      <path d="M3 14 Q7 5 12 9 Q17 3 22 7 Q26 2 29 7 Q31 13 28 14 L3 14Z"/>
+      <text class="lbl" x="15" y="52" fill="#ffee88">LAGER</text>
+    </g>
+    <g transform="translate(325,28)" stroke="#ff9100" opacity=".38">
+      <circle cx="5" cy="8" r="4"/><circle cx="16" cy="4" r="5.5"/><circle cx="25" cy="10" r="3.5"/><circle cx="10" cy="18" r="4.5"/>
+    </g>
+    <g transform="translate(408,10) rotate(-12)" stroke="#ff6600" opacity=".52">
+      <path d="M3 14 L1 58 L30 58 L28 14 Z"/>
+      <path d="M28 22 Q38 22 38 32 Q38 42 28 42" fill="none"/>
+      <path d="M3 14 Q7 5 12 9 Q17 3 22 7 Q26 2 29 7 Q31 13 28 14 L3 14Z"/>
+      <text class="lbl" x="15" y="52" fill="#ffaa66">ALE</text>
+    </g>
+    <g transform="translate(500,30)" stroke="#aadd00" opacity=".5">
+      <circle cx="8" cy="18" r="7"/><circle cx="22" cy="18" r="7"/><circle cx="15" cy="7" r="7"/><circle cx="15" cy="29" r="7"/>
+      <line x1="15" y1="0" x2="15" y2="-10"/>
+    </g>
+    <g transform="translate(590,18) rotate(8)" stroke="#ffaa00" opacity=".52">
+      <path d="M3 14 L1 58 L30 58 L28 14 Z"/>
+      <path d="M28 22 Q38 22 38 32 Q38 42 28 42" fill="none"/>
+      <path d="M3 14 Q7 5 12 9 Q17 3 22 7 Q26 2 29 7 Q31 13 28 14 L3 14Z"/>
+      <text class="lbl" x="15" y="52" fill="#ffcc88">STOUT</text>
+    </g>
+
+    <g transform="translate(68,148) rotate(-6)" stroke="#ffdd00" opacity=".52">
+      <path d="M3 14 L1 58 L30 58 L28 14 Z"/>
+      <path d="M28 22 Q38 22 38 32 Q38 42 28 42" fill="none"/>
+      <path d="M3 14 Q7 5 12 9 Q17 3 22 7 Q26 2 29 7 Q31 13 28 14 L3 14Z"/>
+      <text class="lbl" x="15" y="52" fill="#ffee88">IPA</text>
+    </g>
+    <g transform="translate(162,158)" stroke="#88cc00" opacity=".5">
+      <circle cx="8" cy="18" r="7"/><circle cx="22" cy="18" r="7"/><circle cx="15" cy="7" r="7"/><circle cx="15" cy="29" r="7"/>
+      <line x1="15" y1="0" x2="15" y2="-10"/>
+    </g>
+    <g transform="translate(255,135) rotate(14)" stroke="#ff9900" opacity=".52">
+      <path d="M3 14 L1 58 L30 58 L28 14 Z"/>
+      <path d="M28 22 Q38 22 38 32 Q38 42 28 42" fill="none"/>
+      <path d="M3 14 Q7 5 12 9 Q17 3 22 7 Q26 2 29 7 Q31 13 28 14 L3 14Z"/>
+      <text class="lbl" x="15" y="52" fill="#ffbb66">WHEAT</text>
+    </g>
+    <g transform="translate(358,148)" stroke="#cc7700" opacity=".52">
+      <ellipse cx="19" cy="8" rx="19" ry="7"/><ellipse cx="19" cy="46" rx="19" ry="7"/>
+      <line x1="0" y1="8" x2="0" y2="46"/><line x1="38" y1="8" x2="38" y2="46"/>
+      <ellipse cx="19" cy="27" rx="20" ry="8"/>
+    </g>
+    <g transform="translate(458,142) rotate(-10)" stroke="#ffbb00" opacity=".52">
+      <path d="M3 14 L1 58 L30 58 L28 14 Z"/>
+      <path d="M28 22 Q38 22 38 32 Q38 42 28 42" fill="none"/>
+      <path d="M3 14 Q7 5 12 9 Q17 3 22 7 Q26 2 29 7 Q31 13 28 14 L3 14Z"/>
+      <text class="lbl" x="15" y="52" fill="#ffdd88">PORTER</text>
+    </g>
+    <g transform="translate(558,152)" stroke="#ff9100" opacity=".38">
+      <circle cx="5" cy="8" r="4"/><circle cx="16" cy="4" r="5.5"/><circle cx="25" cy="10" r="3.5"/><circle cx="10" cy="18" r="4.5"/>
+    </g>
+    <g transform="translate(640,145) rotate(9)" stroke="#ff8800" opacity=".52">
+      <path d="M3 14 L1 58 L30 58 L28 14 Z"/>
+      <path d="M28 22 Q38 22 38 32 Q38 42 28 42" fill="none"/>
+      <path d="M3 14 Q7 5 12 9 Q17 3 22 7 Q26 2 29 7 Q31 13 28 14 L3 14Z"/>
+    </g>
+
+    <g transform="translate(50,278)" stroke="#aa6600" opacity=".52">
+      <ellipse cx="19" cy="8" rx="19" ry="7"/><ellipse cx="19" cy="46" rx="19" ry="7"/>
+      <line x1="0" y1="8" x2="0" y2="46"/><line x1="38" y1="8" x2="38" y2="46"/>
+      <ellipse cx="19" cy="27" rx="20" ry="8"/>
+    </g>
+    <g transform="translate(162,268) rotate(7)" stroke="#ff8800" opacity=".52">
+      <path d="M3 14 L1 58 L30 58 L28 14 Z"/>
+      <path d="M28 22 Q38 22 38 32 Q38 42 28 42" fill="none"/>
+      <path d="M3 14 Q7 5 12 9 Q17 3 22 7 Q26 2 29 7 Q31 13 28 14 L3 14Z"/>
+      <text class="lbl" x="15" y="52" fill="#ffaa66">CRAFT</text>
+    </g>
+    <g transform="translate(265,282)" stroke="#aadd00" opacity=".5">
+      <circle cx="8" cy="18" r="7"/><circle cx="22" cy="18" r="7"/><circle cx="15" cy="7" r="7"/>
+      <line x1="15" y1="0" x2="15" y2="-10"/>
+    </g>
+    <g transform="translate(375,270) rotate(-9)" stroke="#ffcc44" opacity=".52">
+      <path d="M3 14 L1 58 L30 58 L28 14 Z"/>
+      <path d="M28 22 Q38 22 38 32 Q38 42 28 42" fill="none"/>
+      <path d="M3 14 Q7 5 12 9 Q17 3 22 7 Q26 2 29 7 Q31 13 28 14 L3 14Z"/>
+      <text class="lbl" x="15" y="52" fill="#ffee99">DARK</text>
+    </g>
+    <g transform="translate(472,265)" stroke="#ff9100" opacity=".38">
+      <circle cx="5" cy="8" r="4"/><circle cx="16" cy="4" r="5.5"/><circle cx="25" cy="10" r="3.5"/><circle cx="10" cy="18" r="4.5"/>
+    </g>
+    <g transform="translate(558,272) rotate(12)" stroke="#ffbb00" opacity=".52">
+      <path d="M3 14 L1 58 L30 58 L28 14 Z"/>
+      <path d="M28 22 Q38 22 38 32 Q38 42 28 42" fill="none"/>
+      <path d="M3 14 Q7 5 12 9 Q17 3 22 7 Q26 2 29 7 Q31 13 28 14 L3 14Z"/>
+      <text class="lbl" x="15" y="52" fill="#ffdd88">BIER</text>
+    </g>
+    <g transform="translate(648,278)" stroke="#88cc00" opacity=".5">
+      <circle cx="8" cy="18" r="7"/><circle cx="22" cy="18" r="7"/><circle cx="15" cy="7" r="7"/>
+      <line x1="15" y1="0" x2="15" y2="-10"/>
+    </g>
+
+    <g transform="translate(95,365) rotate(12)" stroke="#ff9100" opacity=".52">
+      <path d="M3 14 L1 58 L30 58 L28 14 Z"/>
+      <path d="M28 22 Q38 22 38 32 Q38 42 28 42" fill="none"/>
+      <path d="M3 14 Q7 5 12 9 Q17 3 22 7 Q26 2 29 7 Q31 13 28 14 L3 14Z"/>
+      <text class="lbl" x="15" y="52" fill="#ffcc66">BOCK</text>
+    </g>
+    <g transform="translate(198,358)" stroke="#aa6600" opacity=".52">
+      <ellipse cx="19" cy="8" rx="19" ry="7"/><ellipse cx="19" cy="46" rx="19" ry="7"/>
+      <line x1="0" y1="8" x2="0" y2="46"/><line x1="38" y1="8" x2="38" y2="46"/>
+      <ellipse cx="19" cy="27" rx="20" ry="8"/>
+    </g>
+    <g transform="translate(312,360)" stroke="#ccee00" opacity=".5">
+      <circle cx="8" cy="18" r="7"/><circle cx="22" cy="18" r="7"/><circle cx="15" cy="7" r="7"/>
+      <line x1="15" y1="0" x2="15" y2="-10"/>
+    </g>
+    <g transform="translate(415,358) rotate(-6)" stroke="#ffaa00" opacity=".52">
+      <path d="M3 14 L1 58 L30 58 L28 14 Z"/>
+      <path d="M28 22 Q38 22 38 32 Q38 42 28 42" fill="none"/>
+      <path d="M3 14 Q7 5 12 9 Q17 3 22 7 Q26 2 29 7 Q31 13 28 14 L3 14Z"/>
+      <text class="lbl" x="15" y="52" fill="#ffcc88">PILSNER</text>
+    </g>
+    <g transform="translate(532,365)" stroke="#ff9100" opacity=".38">
+      <circle cx="5" cy="8" r="4"/><circle cx="16" cy="4" r="5.5"/><circle cx="25" cy="10" r="3.5"/>
+    </g>
+    <g transform="translate(625,355) rotate(9)" stroke="#ff8800" opacity=".52">
+      <path d="M3 14 L1 58 L30 58 L28 14 Z"/>
+      <path d="M28 22 Q38 22 38 32 Q38 42 28 42" fill="none"/>
+      <path d="M3 14 Q7 5 12 9 Q17 3 22 7 Q26 2 29 7 Q31 13 28 14 L3 14Z"/>
+      <text class="lbl" x="15" y="52" fill="#ffaa66">WEISS</text>
+    </g>
+
+  </g>
+</svg>

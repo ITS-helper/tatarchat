@@ -161,6 +161,16 @@ cd server && npm start
 
 Один процесс слушает порт (например Render Web Service): и API, и статика, и WebSocket на том же хосте.
 
+## VPS + Caddy (важно для APK/Capacitor)
+
+Если фронт открывается по домену (например `https://dtdfamily.ru`) и **APK использует тот же домен** в `VITE_API_URL` / `VITE_SOCKET_URL`,
+то reverse proxy **обязан** проксировать:
+
+- `/api/*` → Node (иначе вернётся `index.html` и клиент увидит «нет token»)
+- `/socket.io/*` → Node (иначе сломаются сокеты/чат)
+
+Готовый пример лежит в `deploy/Caddyfile` (подправьте путь `root` и адрес Node при необходимости).
+
 ## Деплой (кратко)
 
 1. **Render (или аналог):** **Web Service** (Node) и **Managed Postgres**; `DATABASE_URL`, `NODE_ENV=production`, `JWT_SECRET`. Папка сервиса — **`server`**.

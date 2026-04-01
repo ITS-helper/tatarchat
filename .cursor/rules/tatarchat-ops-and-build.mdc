@@ -1,0 +1,47 @@
+---
+description: Операционные настройки TatarChat (Windows): start.bat, Caddy, Android APK сборка
+alwaysApply: true
+---
+
+# TatarChat — операции, деплой, APK (Windows)
+
+## Запуск на Windows (локально + домен)
+
+- **Стартовый батник**: `start.bat` (запуск от администратора).
+  - Поднимает Postgres через `docker compose up -d`
+  - Освобождает порт **3001**
+  - Запускает **Caddy**: `D:\\caddy\\caddy.exe run`
+  - Запускает Node: `d:\\tatarchat\\server\\server.js` (слушает **3001**)
+- Остановка: `stop.bat` (глушит порт 3001 + `caddy.exe`, гасит docker compose).
+
+## Caddy (TLS + домен)
+
+- Бинарник: `D:\\caddy\\caddy.exe`
+- Конфиг: `D:\\caddy\\Caddyfile`
+- Важно: если в Android/Capacitor APK используются `VITE_API_URL=https://dtdfamily.ru` и `VITE_SOCKET_URL=https://dtdfamily.ru`,
+  то **Caddy обязан** маршрутизировать:
+  - `/api/*` → Node (не отдавать SPA `index.html`)
+  - `/socket.io/*` → Node (для WebSocket)
+- Если поставить `handle_path /api/*`, то Caddy **срежет префикс `/api`** и Node начнёт отвечать неверно (вплоть до 405).
+  Для текущего сервера, который ожидает `/api/...`, нужен `handle /api/*` (без strip).
+
+## Android APK (Capacitor)
+
+- Проект Android: `client/android/`
+- Версия приложения берётся из `client/android/app/build.gradle` (`versionName`, `versionCode`).
+- Для сборки нужен **JDK 21** (Gradle target source release 21).
+  - На этой машине используется Temurin: `C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.10.7-hotspot`
+- Сборка debug APK:
+  - `cd client && npm run android:debug`
+  - Артефакт: `client/android/app/build/outputs/apk/debug/app-debug.apk`
+- Экспорт APK в папку релизов:
+  - Скрипт: `client/scripts/export-apk.ps1`
+  - Команда: `cd client && npm run android:debug:export`
+  - Выход: `D:\\tatarchat\\apk\\TatarChat-debug-v<versionName>(<versionCode>)-<timestamp>.apk`
+
+## Типичные симптомы
+
+- **APK “нет token” + в ответе HTML**: `/api/*` попал в SPA fallback (прокси сломан).
+- **405 на `/api/auth/login`**: часто результат `handle_path /api/*` (strip `/api`).
+- **PWA: разрешение на уведомления есть, push не приходит**: в DevTools → Console ищи **`[tatarchat-push]`**; часто **`404/405` на `/api/push/register`** (тот же неверный Caddy), либо нет **`VAPID_*`** в окружении Node. Образец без strip: `deploy/Caddyfile`.
+

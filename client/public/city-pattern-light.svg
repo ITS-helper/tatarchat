@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="420" viewBox="0 0 720 420">
+  <!-- Light theme version: B5 65 8:>=:8, => <O3G5 8 "=5>=" =0 A25B;>< D>=5 -->
+  <defs>
+    <style><![CDATA[
+      .lbl{font-family:system-ui,-apple-system,"Segoe UI","Roboto",sans-serif;font-size:8px;font-weight:200;letter-spacing:.14em;text-anchor:middle}
+    ]]></style>
+  </defs>
+
+  <!-- Light theme: как у "Коктейлей" — плотность та же, приглушаем одной общей прозрачностью -->
+  <g fill="none" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" opacity="0.32">
+    <g id="b">
+      <path d="M16 0 h8 q2 0 2 2 v10 q0 4 4 10 l2 3 q3 5 3 12 v54 q0 10-12 10 h-8 q-12 0-12-10 v-54 q0-7 3-12 l2-3 q4-6 4-10 v-10 q0-2 2-2z"/>
+      <path d="M6 44 h26" opacity=".55"/>
+      <path d="M6 54 h26" opacity=".35"/>
+      <rect x="8" y="60" width="22" height="22" rx="4" opacity=".35"/>
+    </g>
+
+    <g transform="translate(78,60) rotate(-10)" stroke="#00AEEF"><use href="#b"/><text class="lbl" x="14" y="118" fill="#0088B8" opacity=".95">VODKA</text></g>
+    <g transform="translate(204,46) rotate(8)" stroke="#FF8A00"><use href="#b"/><text class="lbl" x="14" y="118" fill="#C76A00" opacity=".95">COGNAC</text></g>
+    <g transform="translate(338,64) rotate(-6)" stroke="#FF4BD6"><use href="#b"/><text class="lbl" x="14" y="118" fill="#B4007F" opacity=".95">MARTINI</text></g>
+    <g transform="translate(468,48) rotate(12)" stroke="#76D700"><use href="#b"/><text class="lbl" x="14" y="118" fill="#3A8F00" opacity=".95">GIN</text></g>
+    <g transform="translate(592,66) rotate(-12)" stroke="#FFD000"><use href="#b"/><text class="lbl" x="14" y="118" fill="#A98600" opacity=".95">WHISKY</text></g>
+
+    <g transform="translate(112,214) rotate(9)" stroke="#7B61FF"><use href="#b"/><text class="lbl" x="14" y="118" fill="#4A38CC" opacity=".95">PORT</text></g>
+    <g transform="translate(248,230) rotate(-14)" stroke="#FF4A4A"><use href="#b"/><text class="lbl" x="14" y="118" fill="#B21F1F" opacity=".95">RUM</text></g>
+    <g transform="translate(382,212) rotate(6)" stroke="#00D7A0"><use href="#b"/><text class="lbl" x="14" y="118" fill="#008B6A" opacity=".95">TEQUILA</text></g>
+    <g transform="translate(516,232) rotate(-8)" stroke="#00A6FF"><use href="#b"/><text class="lbl" x="14" y="118" fill="#0069B2" opacity=".95">SAKE</text></g>
+    <g transform="translate(640,214) rotate(10)" stroke="#FF7A00"><use href="#b"/><text class="lbl" x="14" y="118" fill="#B85A00" opacity=".95">APEROL</text></g>
+  </g>
+</svg>
