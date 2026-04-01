@@ -47,6 +47,15 @@ TatarChat — удалённый git pull / деплой без физическ
 
   ssh USER@100.x.x.x powershell -ExecutionPolicy Bypass -File C:\tatarchat\scripts\deploy-pull.ps1
 
+Если в cmd текст «кракозябрами» — это кодировка консоли, скрипт всё равно мог отработать.
+Проверка: на сервере пишется ASCII-лог. С ноута:
+
+  ssh USER@100.x.x.x type C:\tatarchat\scripts\last-deploy.log
+
+В конце должны быть строки OK git=… и DONE (или FAIL при ошибке).
+Удобнее открыть PowerShell на ноуте и перед ssh выполнить:  chcp 65001
+
+
 Скрипт делает: git pull origin main → npm run build в client → перезапуск только
 Node на порту 3001. Docker и Caddy не останавливаются.
 

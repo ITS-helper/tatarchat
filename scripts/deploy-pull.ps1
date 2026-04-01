@@ -18,52 +18,70 @@ if (-not (Test-Path (Join-Path $RepoRoot '.git'))) {
     throw "Не найден .git в $RepoRoot"
 }
 
-Write-Host "[1/3] git pull origin $Branch ..."
-git pull origin $Branch
-if ($LASTEXITCODE -ne 0) { throw "git pull завершился с кодом $LASTEXITCODE" }
-
-if (-not $SkipBuild) {
-    Write-Host "[2/3] npm run build (client) ..."
-    Push-Location (Join-Path $RepoRoot 'client')
-    try {
-        npm run build
-        if ($LASTEXITCODE -ne 0) { throw "npm run build завершился с кодом $LASTEXITCODE" }
-    } finally {
-        Pop-Location
-    }
-} else {
-    Write-Host "[2/3] пропуск сборки (-SkipBuild)"
+$logFile = Join-Path $RepoRoot 'scripts\last-deploy.log'
+function Append-DeployLog([string]$msg) {
+    Add-Content -LiteralPath $logFile -Value $msg -Encoding ascii
 }
 
-Write-Host "[3/3] перезапуск Node на порту 3001 ..."
-$pids = @()
 try {
-    $pids = @(Get-NetTCPConnection -LocalPort 3001 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)
-} catch {
-    # старые системы без модуля
-}
-foreach ($procId in $pids) {
-    if ($procId -gt 0) {
-        Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
-        Write-Host "  остановлен PID $procId"
+    Append-DeployLog '----'
+    Append-DeployLog ('START ' + (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))
+
+    Write-Host "[1/3] git pull origin $Branch ..."
+    git pull origin $Branch
+    if ($LASTEXITCODE -ne 0) { throw "git pull завершился с кодом $LASTEXITCODE" }
+
+    if (-not $SkipBuild) {
+        Write-Host "[2/3] npm run build (client) ..."
+        Push-Location (Join-Path $RepoRoot 'client')
+        try {
+            npm run build
+            if ($LASTEXITCODE -ne 0) { throw "npm run build завершился с кодом $LASTEXITCODE" }
+        } finally {
+            Pop-Location
+        }
+    } else {
+        Write-Host "[2/3] пропуск сборки (-SkipBuild)"
     }
-}
-if ($pids.Count -eq 0) {
-    # запасной вариант как в stop.bat
-    $lines = netstat -ano | Select-String ':3001\s.*LISTENING'
-    foreach ($line in $lines) {
-        $parts = ($line -split '\s+') | Where-Object { $_ -ne '' }
-        $last = $parts[-1]
-        if ($last -match '^\d+$') {
-            Stop-Process -Id [int]$last -Force -ErrorAction SilentlyContinue
-            Write-Host "  остановлен PID $last (netstat)"
+
+    Write-Host "[3/3] перезапуск Node на порту 3001 ..."
+    $pids = @()
+    try {
+        $pids = @(Get-NetTCPConnection -LocalPort 3001 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)
+    } catch {
+        # старые системы без модуля
+    }
+    foreach ($procId in $pids) {
+        if ($procId -gt 0) {
+            Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+            Write-Host "  остановлен PID $procId"
         }
     }
-}
+    if ($pids.Count -eq 0) {
+        # запасной вариант как в stop.bat
+        $lines = netstat -ano | Select-String ':3001\s.*LISTENING'
+        foreach ($line in $lines) {
+            $parts = ($line -split '\s+') | Where-Object { $_ -ne '' }
+            $last = $parts[-1]
+            if ($last -match '^\d+$') {
+                Stop-Process -Id [int]$last -Force -ErrorAction SilentlyContinue
+                Write-Host "  остановлен PID $last (netstat)"
+            }
+        }
+    }
 
-Start-Sleep -Seconds 1
-$nodeExe = (Get-Command node -ErrorAction Stop).Source
-$serverDir = Join-Path $RepoRoot 'server'
-Start-Process -FilePath $nodeExe -ArgumentList 'server.js' -WorkingDirectory $serverDir -WindowStyle Hidden
-Write-Host "  node server.js запущен в фоне."
-Write-Host "=== Готово ===" -ForegroundColor Green
+    Start-Sleep -Seconds 1
+    $nodeExe = (Get-Command node -ErrorAction Stop).Source
+    $serverDir = Join-Path $RepoRoot 'server'
+    Start-Process -FilePath $nodeExe -ArgumentList 'server.js' -WorkingDirectory $serverDir -WindowStyle Hidden
+    Write-Host "  node server.js запущен в фоне."
+
+    $rev = (git rev-parse --short HEAD).Trim()
+    Append-DeployLog ('OK git=' + $rev)
+    Append-DeployLog 'DONE'
+    Write-Host "=== Готово ===" -ForegroundColor Green
+    Write-Host "Log (ASCII): $logFile" -ForegroundColor DarkGray
+} catch {
+    Append-DeployLog 'FAIL'
+    throw
+}
