@@ -1124,6 +1124,7 @@ export default function App() {
   const goToChatRoomRef = useRef(() => {});
   const typingIdleRef = useRef(null);
   const fileInputRef = useRef(null);
+  const mediaInputRef = useRef(null);
   const videoNoteLiveRef = useRef(null);
   const videoNoteChunksRef = useRef([]);
   const videoNoteStreamRef = useRef(null);
@@ -1295,6 +1296,7 @@ export default function App() {
     setTypingPeers([]);
     setPendingFile(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
+    if (mediaInputRef.current) mediaInputRef.current.value = "";
     setSearchInput("");
     setSearchResults([]);
   }, [activeRoom]);
@@ -2696,6 +2698,7 @@ export default function App() {
     setTypingPeers([]);
     setPendingFile(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
+    if (mediaInputRef.current) mediaInputRef.current.value = "";
     setSearchInput("");
     setSearchResults([]);
     setPublicChannels([]);
@@ -2941,6 +2944,7 @@ export default function App() {
         setInput("");
         setPendingFile(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
+        if (mediaInputRef.current) mediaInputRef.current.value = "";
         setReplyTo(null);
       } catch (err) {
         console.error(err);
@@ -4118,6 +4122,7 @@ export default function App() {
                                 setReplyTo(null);
                                 setPendingFile(null);
                                 if (fileInputRef.current) fileInputRef.current.value = "";
+                                if (mediaInputRef.current) mediaInputRef.current.value = "";
                                 setSelectedMsgId(null);
                               }}
                               className="rounded-full px-2 py-1 text-xs text-tc-text-sec transition hover:bg-white/10 hover:text-tc-accent"
@@ -4274,7 +4279,7 @@ export default function App() {
               <button
                 type="button"
                 className="shrink-0 text-tc-danger hover:underline"
-                onClick={() => { setPendingFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                onClick={() => { setPendingFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; if (mediaInputRef.current) mediaInputRef.current.value = ""; }}
               >
                 ✕
               </button>
@@ -4318,6 +4323,14 @@ export default function App() {
                 >
                   <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 015 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 005 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/></svg>
                 </button>
+                <input
+                  ref={mediaInputRef}
+                  type="file"
+                  className="sr-only"
+                  tabIndex={-1}
+                  accept="image/*,video/*"
+                  onChange={(e) => { setPendingFile(e.target.files?.[0] || null); }}
+                />
                 {attachMenuOpen ? (
                   <div
                     data-attach-menu-root="1"
@@ -4331,71 +4344,31 @@ export default function App() {
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        const el = fileInputRef.current;
-                        try {
-                          el?.showPicker?.();
-                        } catch (_) {}
-                        try {
-                          el?.click?.();
-                        } catch (_) {}
+                        const el = mediaInputRef.current;
+                        try { el?.showPicker?.(); } catch (_) {}
+                        try { el?.click?.(); } catch (_) {}
                         setTimeout(() => setAttachMenuOpen(false), 0);
                       }}
                     >
-                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 015 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 005 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/></svg>
-                      Файл
+                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                      Фото или видео
                     </button>
+                    <div className="mx-3 border-t border-tc-border/50" />
                     <button
                       type="button"
-                      disabled={editingId != null || !!pendingFile || videoNoteUploading || voiceUploading || voiceRecording || (status === "online" && !roomJoined)}
-                      className={`flex w-full items-center gap-3 px-4 py-3 text-sm transition ${
-                        videoNoteRecording ? "bg-red-500/20 text-red-300" : "text-tc-text-sec hover:bg-tc-hover hover:text-tc-accent"
-                      } disabled:opacity-50`}
+                      className="flex w-full items-center gap-3 px-4 py-3 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
                       onClick={(e) => {
                         e.preventDefault();
-                        setAttachMenuOpen(false);
-                        void beginRecordingGesture("video", e);
+                        e.stopPropagation();
+                        const el = fileInputRef.current;
+                        try { el?.showPicker?.(); } catch (_) {}
+                        try { el?.click?.(); } catch (_) {}
+                        setTimeout(() => setAttachMenuOpen(false), 0);
                       }}
                     >
-                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
-                      Записать видео
+                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11zM8 15.01l1.41 1.41L11 14.84V19h2v-4.16l1.59 1.59L16 15.01 12.01 11 8 15.01z"/></svg>
+                      Документ
                     </button>
-                    {IS_NATIVE ? (
-                      <button
-                        type="button"
-                        disabled={editingId != null || !!pendingFile || videoNoteUploading || videoNoteRecording || voiceUploading || voiceRecording || (status === "online" && !roomJoined)}
-                        className="flex w-full items-center gap-3 px-4 py-3 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent disabled:opacity-50"
-                        onClick={(e) => { e.preventDefault(); void captureNativeMedia("video"); }}
-                      >
-                        <span className="text-base">📹</span>
-                        Записать видео (Android)
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      disabled={editingId != null || !!pendingFile || videoNoteUploading || videoNoteRecording || voiceUploading || (status === "online" && !roomJoined)}
-                      className={`flex w-full items-center gap-3 px-4 py-3 text-sm transition ${
-                        voiceRecording ? "bg-red-500/20 text-red-300" : "text-tc-text-sec hover:bg-tc-hover hover:text-tc-accent"
-                      } disabled:opacity-50`}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        setAttachMenuOpen(false);
-                        void beginRecordingGesture("voice", e);
-                      }}
-                    >
-                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-7 1h2v-1H5v1zm14 0h2v-1h-2v1zm-3 4.26V18c0 1.1-.9 2-2 2H8c-1.1 0-2-.9-2-2v-2.26C4.48 15.5 3 13.41 3 11h2c0 2.76 2.24 5 5 5s5-2.24 5-5h2c0 2.41-1.48 4.5-3.74 5.26z"/></svg>
-                      Записать голос
-                    </button>
-                    {IS_NATIVE ? (
-                      <button
-                        type="button"
-                        disabled={editingId != null || !!pendingFile || videoNoteUploading || videoNoteRecording || voiceUploading || voiceRecording || (status === "online" && !roomJoined)}
-                        className="flex w-full items-center gap-3 px-4 py-3 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent disabled:opacity-50"
-                        onClick={(e) => { e.preventDefault(); void captureNativeMedia("audio"); }}
-                      >
-                        <span className="text-base">🎙️</span>
-                        Записать аудио (Android)
-                      </button>
-                    ) : null}
                   </div>
                 ) : null}
               </div>
