@@ -869,10 +869,22 @@ export default function App() {
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [videoFacingMode, setVideoFacingMode] = useState("user"); // "user" | "environment"
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  /** Меню вложений на узком экране выносим в portal на body — иначе backdrop z-210 перекрывает пункты */
+  const [attachMenuNarrow, setAttachMenuNarrow] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches
+  );
   const [hasAvatar, setHasAvatar] = useState(() => localStorage.getItem(LS_HAS_AVATAR) === "1");
   const [searchInput, setSearchInput] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const mq = window.matchMedia("(max-width: 767px)");
+    const fn = () => setAttachMenuNarrow(mq.matches);
+    mq.addEventListener("change", fn);
+    return () => mq.removeEventListener("change", fn);
+  }, []);
 
   // Capacitor: native notifications + click-to-open room
   useEffect(() => {
@@ -1639,54 +1651,47 @@ export default function App() {
     [getAuthHeaders, stopTyping]
   );
 
-  const captureNativeMedia = useCallback(
-    async (kind) => {
-      if (!IS_NATIVE) return;
-      if (editingId != null || pendingFile != null || videoNoteUploading || voiceUploading || videoNoteRecording || voiceRecording) return;
-      try {
-        setAttachMenuOpen(false);
-        const { MediaCapture } = await import("@whiteguru/capacitor-plugin-media-capture");
-        const res =
-          kind === "video"
-            ? await MediaCapture.captureVideo({ duration: 60, quality: "hd", frameRate: 30 })
-            : await MediaCapture.captureAudio({ duration: 120 });
-        const mf = res?.file || (res?.files || res || [])?.[0];
-        const path =
-          mf?.fullPath ||
-          mf?.localURL ||
-          mf?.path ||
-          mf?.uri ||
-          mf?.filePath ||
-          mf?.webPath ||
-          mf?.nativeURL ||
-          mf?.localUri;
-        if (!path) {
-          setBanner("Не удалось получить файл записи");
-          return;
-        }
-        const url = Capacitor.convertFileSrc(path);
-        const resp = await fetch(url);
-        const rawBlob = await resp.blob();
-        const mime = stripMimeParams(mf?.type || rawBlob.type || "");
-        const blob = mime ? rawBlob.slice(0, rawBlob.size, mime) : rawBlob;
-        if (kind === "video") await uploadVideoNoteBlob(blob);
-        else await uploadVoiceBlob(blob);
-      } catch (e) {
-        console.error(e);
-        setBanner(kind === "video" ? "Не удалось записать видео" : "Не удалось записать аудио");
+  /** Только видео: в @whiteguru/capacitor-plugin-media-capture нет нативного captureAudio */
+  const captureNativeVideo = useCallback(async () => {
+    if (!IS_NATIVE) return;
+    if (editingId != null || pendingFile != null || videoNoteUploading || voiceUploading || videoNoteRecording || voiceRecording) return;
+    try {
+      setAttachMenuOpen(false);
+      const { MediaCapture } = await import("@whiteguru/capacitor-plugin-media-capture");
+      const res = await MediaCapture.captureVideo({ duration: 60, quality: "hd", frameRate: 30 });
+      const mf = res?.file || (res?.files || res || [])?.[0];
+      const path =
+        mf?.fullPath ||
+        mf?.localURL ||
+        mf?.path ||
+        mf?.uri ||
+        mf?.filePath ||
+        mf?.webPath ||
+        mf?.nativeURL ||
+        mf?.localUri;
+      if (!path) {
+        setBanner("Не удалось получить файл записи");
+        return;
       }
-    },
-    [
-      editingId,
-      pendingFile,
-      videoNoteUploading,
-      voiceUploading,
-      videoNoteRecording,
-      voiceRecording,
-      uploadVideoNoteBlob,
-      uploadVoiceBlob,
-    ]
-  );
+      const url = Capacitor.convertFileSrc(path);
+      const resp = await fetch(url);
+      const rawBlob = await resp.blob();
+      const mime = stripMimeParams(mf?.type || rawBlob.type || "");
+      const blob = mime ? rawBlob.slice(0, rawBlob.size, mime) : rawBlob;
+      await uploadVideoNoteBlob(blob);
+    } catch (e) {
+      console.error(e);
+      setBanner("Не удалось записать видео");
+    }
+  }, [
+    editingId,
+    pendingFile,
+    videoNoteUploading,
+    voiceUploading,
+    videoNoteRecording,
+    voiceRecording,
+    uploadVideoNoteBlob,
+  ]);
 
   const stopVoiceRecord = useCallback(async (opts) => {
     const discard = !!opts?.discard;
@@ -1938,10 +1943,11 @@ export default function App() {
   const toggleRecording = useCallback(
     async (kind) => {
       if (kind !== "voice" && kind !== "video") return;
-      if (IS_NATIVE) {
-        void captureNativeMedia(kind === "video" ? "video" : "audio");
+      if (IS_NATIVE && kind === "video") {
+        void captureNativeVideo();
         return;
       }
+      // Native voice: тот же WebView MediaRecorder (RECORD_AUDIO в манифесте); плагин audio не экспортирует
       const isActive = kind === "voice" ? voiceRecording : videoNoteRecording;
       if (isActive) {
         if (kind === "voice") void stopVoiceRecord({ discard: false });
@@ -1960,7 +1966,7 @@ export default function App() {
       } catch (_) {}
     },
     [
-      captureNativeMedia,
+      captureNativeVideo,
       editingId,
       pendingFile,
       videoNoteUploading,
@@ -2739,6 +2745,32 @@ export default function App() {
     document.addEventListener("pointerdown", onDocDown);
     return () => document.removeEventListener("pointerdown", onDocDown);
   }, [attachMenuOpen]);
+
+  const pickAttachMedia = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = mediaInputRef.current;
+    try {
+      el?.showPicker?.();
+    } catch (_) {}
+    try {
+      el?.click?.();
+    } catch (_) {}
+    setTimeout(() => setAttachMenuOpen(false), 0);
+  }, []);
+
+  const pickAttachDocument = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = fileInputRef.current;
+    try {
+      el?.showPicker?.();
+    } catch (_) {}
+    try {
+      el?.click?.();
+    } catch (_) {}
+    setTimeout(() => setAttachMenuOpen(false), 0);
+  }, []);
 
   const flushReaction = useCallback(
     async (messageId, emoji) => {
@@ -4216,14 +4248,47 @@ export default function App() {
           onSubmit={sendMessage}
           className="relative z-10 tc-composer-bar flex flex-col gap-2 border-t border-tc-border bg-tc-header px-2 py-2 sm:px-3"
         >
-          {attachMenuOpen && typeof document !== "undefined"
+          {attachMenuOpen && typeof document !== "undefined" && attachMenuNarrow
             ? createPortal(
-                <div
-                  data-attach-backdrop="1"
-                  className="fixed inset-0 z-[210] bg-black/40 md:hidden"
-                  aria-hidden
-                  onPointerDown={() => setAttachMenuOpen(false)}
-                />,
+                <>
+                  <div
+                    data-attach-backdrop="1"
+                    className="fixed inset-0 z-[210] bg-black/40"
+                    aria-hidden
+                    onPointerDown={() => setAttachMenuOpen(false)}
+                  />
+                  <div
+                    data-attach-menu-root="1"
+                    className="fixed left-3 right-3 z-[230] max-h-[min(70vh,30rem)] overflow-y-auto rounded-2xl border border-tc-border bg-tc-panel shadow-2xl"
+                    style={{
+                      bottom: "max(6rem, calc(5rem + env(safe-area-inset-bottom, 0px)))",
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      className="flex w-full min-h-[52px] items-center gap-4 px-5 py-4 text-left text-base font-medium text-tc-text-sec transition active:bg-tc-hover hover:bg-tc-hover hover:text-tc-accent"
+                      onClick={pickAttachMedia}
+                    >
+                      <svg viewBox="0 0 24 24" className="h-7 w-7 shrink-0" fill="currentColor">
+                        <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" />
+                      </svg>
+                      Фото или видео
+                    </button>
+                    <div className="mx-4 border-t border-tc-border/50" />
+                    <button
+                      type="button"
+                      className="flex w-full min-h-[52px] items-center gap-4 px-5 py-4 text-left text-base font-medium text-tc-text-sec transition active:bg-tc-hover hover:bg-tc-hover hover:text-tc-accent"
+                      onClick={pickAttachDocument}
+                    >
+                      <svg viewBox="0 0 24 24" className="h-7 w-7 shrink-0" fill="currentColor">
+                        <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11zM8 15.01l1.41 1.41L11 14.84V19h2v-4.16l1.59 1.59L16 15.01 12.01 11 8 15.01z" />
+                      </svg>
+                      Документ
+                    </button>
+                  </div>
+                </>,
                 document.body
               )
             : null}
@@ -4285,42 +4350,28 @@ export default function App() {
                   accept="image/*,video/*"
                   onChange={(e) => { setPendingFile(e.target.files?.[0] || null); }}
                 />
-                {attachMenuOpen ? (
+                {attachMenuOpen && !attachMenuNarrow ? (
                   <div
                     data-attach-menu-root="1"
-                    className="z-[220] w-56 overflow-hidden rounded-xl border border-tc-border bg-tc-panel shadow-2xl max-md:fixed max-md:bottom-[max(0.75rem,env(safe-area-inset-bottom,0px))] max-md:left-3 max-md:right-3 max-md:top-auto max-md:w-auto max-md:max-h-[min(55vh,26rem)] max-md:overflow-y-auto md:absolute md:bottom-full md:right-0 md:mb-1 md:max-h-none"
+                    className="z-[220] w-60 overflow-hidden rounded-xl border border-tc-border bg-tc-panel shadow-2xl md:absolute md:bottom-full md:right-0 md:mb-1"
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => e.stopPropagation()}
                   >
                     <button
                       type="button"
-                      className="flex w-full items-center gap-3 px-4 py-3 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const el = mediaInputRef.current;
-                        try { el?.showPicker?.(); } catch (_) {}
-                        try { el?.click?.(); } catch (_) {}
-                        setTimeout(() => setAttachMenuOpen(false), 0);
-                      }}
+                      className="flex w-full items-center gap-3 px-4 py-3.5 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+                      onClick={pickAttachMedia}
                     >
-                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                      <svg viewBox="0 0 24 24" className="h-6 w-6 shrink-0" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
                       Фото или видео
                     </button>
                     <div className="mx-3 border-t border-tc-border/50" />
                     <button
                       type="button"
-                      className="flex w-full items-center gap-3 px-4 py-3 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const el = fileInputRef.current;
-                        try { el?.showPicker?.(); } catch (_) {}
-                        try { el?.click?.(); } catch (_) {}
-                        setTimeout(() => setAttachMenuOpen(false), 0);
-                      }}
+                      className="flex w-full items-center gap-3 px-4 py-3.5 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+                      onClick={pickAttachDocument}
                     >
-                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11zM8 15.01l1.41 1.41L11 14.84V19h2v-4.16l1.59 1.59L16 15.01 12.01 11 8 15.01z"/></svg>
+                      <svg viewBox="0 0 24 24" className="h-6 w-6 shrink-0" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11zM8 15.01l1.41 1.41L11 14.84V19h2v-4.16l1.59 1.59L16 15.01 12.01 11 8 15.01z"/></svg>
                       Документ
                     </button>
                   </div>
