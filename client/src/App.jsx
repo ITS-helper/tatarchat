@@ -4311,29 +4311,31 @@ export default function App() {
                     className={`flex ${mine ? "justify-end" : "justify-start"}${i === messages.length - 1 ? " animate-slide-up" : ""}`}
                   >
                     <div
-                      className={`flex max-w-[92%] items-end gap-2 sm:max-w-[80%] ${mine ? "flex-row-reverse" : "flex-row"}`}
+                      className="flex max-w-[92%] flex-row items-end gap-2 sm:max-w-[80%]"
                     >
-                      <button
-                        type="button"
-                        className="shrink-0 rounded-xl outline-none focus:ring-2 focus:ring-tc-accent/60"
-                        title={mine ? "Ваш аватар" : "Открыть профиль"}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (!mine) openUserCard({ id: m.user_id, nickname: m.user_nick, user_has_avatar: m.user_has_avatar });
-                        }}
-                      >
-                        <UserAvatarBubble
-                          userId={m.user_id}
-                          hasAvatar={!!m.user_has_avatar}
-                          getAuthHeaders={getAuthHeaders}
-                          className="h-12 w-12 rounded-xl object-cover"
-                        />
-                      </button>
-                      {mine && !deleted && (
+                      {!mine ? (
+                        <button
+                          type="button"
+                          className="shrink-0 rounded-xl outline-none focus:ring-2 focus:ring-tc-accent/60"
+                          title="Открыть профиль"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openUserCard({ id: m.user_id, nickname: m.user_nick, user_has_avatar: m.user_has_avatar });
+                          }}
+                        >
+                          <UserAvatarBubble
+                            userId={m.user_id}
+                            hasAvatar={!!m.user_has_avatar}
+                            getAuthHeaders={getAuthHeaders}
+                            className="h-12 w-12 rounded-xl object-cover"
+                          />
+                        </button>
+                      ) : null}
+                      {mine && !deleted ? (
                         <span className="pointer-events-none flex shrink-0 select-none items-end pb-1">
                           <MessageDeliveryTick level={getMessageDeliveryLevel(m, mine)} />
                         </span>
-                      )}
+                      ) : null}
                       <div
                         className={`relative min-w-0 max-w-full flex-1 cursor-pointer rounded-xl px-3 py-2 transition-colors ${
                           mine
@@ -4483,6 +4485,23 @@ export default function App() {
                         </div>
                       )}
                       </div>
+                      {mine ? (
+                        <button
+                          type="button"
+                          className="shrink-0 rounded-xl outline-none focus:ring-2 focus:ring-tc-accent/60"
+                          title="Ваш аватар"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                          }}
+                        >
+                          <UserAvatarBubble
+                            userId={m.user_id}
+                            hasAvatar={!!m.user_has_avatar}
+                            getAuthHeaders={getAuthHeaders}
+                            className="h-12 w-12 rounded-xl object-cover"
+                          />
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 );
