@@ -1800,7 +1800,13 @@ export default function App() {
       }, VOICE_MAX_MS);
     } catch (e) {
       console.error(e);
-      setBanner("Нет доступа к микрофону");
+      const name = e && typeof e === "object" ? e.name : "";
+      const denied = name === "NotAllowedError" || name === "PermissionDeniedError";
+      setBanner(
+        IS_NATIVE && denied
+          ? "Микрофон недоступен. Разрешите «Микрофон» для TatarChat в настройках приложения."
+          : "Нет доступа к микрофону"
+      );
       voiceStreamRef.current?.getTracks().forEach((t) => t.stop());
       voiceStreamRef.current = null;
     }
