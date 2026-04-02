@@ -25,6 +25,11 @@ const OLLAMA_BASE_URL = String(process.env.OLLAMA_BASE_URL || "http://127.0.0.1:
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "deepseek-r1:8b";
 const MAX_AI_USER_MESSAGE_CHARS = Math.min(Math.max(Number(process.env.MAX_AI_USER_MESSAGE_CHARS) || 6000, 500), 32000);
 const OLLAMA_HTTP_TIMEOUT_MS = Math.min(Math.max(Number(process.env.OLLAMA_HTTP_TIMEOUT_MS) || 300000, 10000), 600000);
+/** Google Programmable Search (Custom Search JSON API): ключ + id поисковой системы.cse.cx */
+const GOOGLE_CSE_API_KEY = String(process.env.GOOGLE_CSE_API_KEY || "").trim();
+const GOOGLE_CSE_CX = String(process.env.GOOGLE_CSE_CX || "").trim();
+const GOOGLE_CSE_NUM = Math.min(Math.max(Number(process.env.GOOGLE_CSE_NUM_RESULTS) || 5, 1), 10);
+const GOOGLE_CSE_TIMEOUT_MS = Math.min(Math.max(Number(process.env.GOOGLE_CSE_TIMEOUT_MS) || 12_000, 3000), 60_000);
 const MAX_MESSAGE_LEN = 2000;
 const MAX_NICK_LEN = 64;
 const MIN_PASSWORD_LEN = 6;
@@ -586,6 +591,72 @@ function trimMessagesForOllama(list, maxPairs = 28) {
   const n = maxPairs * 2;
   if (list.length <= n) return list;
   return list.slice(list.length - n);
+}
+
+function isGoogleCseConfigured() {
+  return Boolean(GOOGLE_CSE_API_KEY && GOOGLE_CSE_CX);
+}
+
+/** Сниппеты Google для одного запроса к Ollama (не сохраняются в БД отдельно). */
+async function runGoogleCse(searchQuery) {
+  const q = String(searchQuery ?? "")
+    .trim()
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .slice(0, 200);
+  if (!q) return { ok: false, error: "Пустой поисковый запрос" };
+  const url = new URL("https://www.googleapis.com/customsearch/v1");
+  url.searchParams.set("key", GOOGLE_CSE_API_KEY);
+  url.searchParams.set("cx", GOOGLE_CSE_CX);
+  url.searchParams.set("q", q);
+  url.searchParams.set("num", String(GOOGLE_CSE_NUM));
+
+  const ac = new AbortController();
+  const to = setTimeout(() => ac.abort(), GOOGLE_CSE_TIMEOUT_MS);
+  try {
+    const res = await fetch(url.toString(), { signal: ac.signal });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = data?.error?.message || `HTTP ${res.status}`;
+      return { ok: false, error: msg };
+    }
+    const items = Array.isArray(data.items) ? data.items : [];
+    if (!items.length) {
+      return {
+        ok: true,
+        block: "По этому запросу поиск Google не вернул результатов. Сообщи пользователю и ответь из своих знаний, если уместно.",
+      };
+    }
+    const lines = items.map((it, i) => {
+      const title = String(it.title || "").replace(/\s+/g, " ").trim();
+      const link = String(it.link || "").trim();
+      const snippet = String(it.snippet || "")
+        .replace(/\s+/g, " ")
+        .trim();
+      return `[${i + 1}] ${title}\nURL: ${link}\n${snippet}`;
+    });
+    return {
+      ok: true,
+      block:
+        "Ниже сжатые результаты поиска Google по текущему вопросу. Опирайся на них; для спорных фактов укажи номер источника [1], [2]. Не выдумывай URL и цитаты, которых нет в сниппетах.\n\n" +
+        lines.join("\n\n"),
+    };
+  } catch (e) {
+    if (e?.name === "AbortError") return { ok: false, error: "Таймаут поиска Google" };
+    return { ok: false, error: e?.message || "Ошибка поиска" };
+  } finally {
+    clearTimeout(to);
+  }
+}
+
+const DEFAULT_OLLAMA_SYSTEM_PROMPT = `You are a helpful assistant in the TatarChat messenger. The conversation history is in the following messages — use it, including the user's name and facts they already stated. Reply in Russian unless the user writes in another language. Be concise unless asked for detail.`;
+
+function buildAiSystemPrompt(nickname, webSearchBlock) {
+  const base = (process.env.OLLAMA_SYSTEM_PROMPT || "").trim() || DEFAULT_OLLAMA_SYSTEM_PROMPT;
+  let s = base;
+  const nick = String(nickname || "").trim();
+  if (nick) s += `\n\nПользователь в приложении подписан как: ${nick}.`;
+  if (webSearchBlock) s += `\n\n${webSearchBlock}`;
+  return s.slice(0, 120_000);
 }
 
 async function callOllamaChat(messages) {
@@ -2261,7 +2332,11 @@ app.get("/api/ai/chat", requireAuth, async (req, res) => {
       req.user.userId,
     ]);
     const list = rows[0] ? normalizeStoredAiMessages(rows[0].messages) : [];
-    res.json({ messages: list, model: OLLAMA_MODEL });
+    res.json({
+      messages: list,
+      model: OLLAMA_MODEL,
+      webSearchAvailable: isGoogleCseConfigured(),
+    });
   } catch (err) {
     console.error("GET /api/ai/chat", err);
     res.status(500).json({ error: "Ошибка" });
@@ -2285,11 +2360,30 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
     const text = sanitizeAiUserMessage(req.body?.message);
     if (!text) return res.status(400).json({ error: "Пустое сообщение" });
 
+    const wantSearch = req.body?.search === true || req.body?.webSearch === true;
+    if (wantSearch && !isGoogleCseConfigured()) {
+      return res.status(501).json({
+        error: "Поиск не настроен: задайте GOOGLE_CSE_API_KEY и GOOGLE_CSE_CX в .env на сервере.",
+      });
+    }
+
+    let webBlock = null;
+    if (wantSearch) {
+      const sr = await runGoogleCse(text);
+      if (!sr.ok) {
+        console.warn("[ai] Google CSE:", sr.error);
+        return res.status(502).json({ error: sr.error || "Поиск Google недоступен" });
+      }
+      webBlock = sr.block;
+    }
+
     const { rows } = await pool.query(`SELECT messages FROM user_ollama_chats WHERE user_id = $1`, [userId]);
     let list = rows[0] ? normalizeStoredAiMessages(rows[0].messages) : [];
     list.push({ role: "user", content: text });
 
-    const ollamaMessages = trimMessagesForOllama(list).map(({ role, content }) => ({ role, content }));
+    const historyForModel = trimMessagesForOllama(list).map(({ role, content }) => ({ role, content }));
+    const systemPrompt = buildAiSystemPrompt(req.user.nickname, webBlock);
+    const ollamaMessages = [{ role: "system", content: systemPrompt }, ...historyForModel];
 
     let reply;
     try {

@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
+const LS_AI_WEB = "tatarchat_ai_web_search";
+
 export default function PersonalAiChat({ getApiBase, token, nickname, onError }) {
   const [messages, setMessages] = useState([]);
   const [model, setModel] = useState("");
+  const [webSearchAvailable, setWebSearchAvailable] = useState(false);
+  const [webSearchOn, setWebSearchOn] = useState(() => localStorage.getItem(LS_AI_WEB) === "1");
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -37,6 +41,7 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
         if (!cancelled) {
           setMessages(Array.isArray(data.messages) ? data.messages : []);
           if (data.model) setModel(data.model);
+          if (typeof data.webSearchAvailable === "boolean") setWebSearchAvailable(data.webSearchAvailable);
         }
       } catch (e) {
         console.error(e);
@@ -61,7 +66,7 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
       const res = await fetch(`${base}/api/ai/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ message: t }),
+        body: JSON.stringify({ message: t, search: webSearchOn && webSearchAvailable }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -152,14 +157,38 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
 
       <div className="tc-composer-bar relative z-10 flex flex-col gap-2 border-t border-tc-border bg-tc-header px-2 py-2 sm:px-3">
         <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-          <button
-            type="button"
-            disabled={sending || loading}
-            onClick={clearChat}
-            className="text-xs text-tc-text-muted underline decoration-tc-border underline-offset-2 hover:text-tc-accent disabled:opacity-40"
-          >
-            Очистить историю
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={sending || loading}
+              onClick={clearChat}
+              className="text-xs text-tc-text-muted underline decoration-tc-border underline-offset-2 hover:text-tc-accent disabled:opacity-40"
+            >
+              Очистить историю
+            </button>
+            {webSearchAvailable ? (
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-tc-text-sec select-none">
+                <input
+                  type="checkbox"
+                  className="tc-msg-input rounded border-tc-border text-tc-accent focus:ring-tc-accent"
+                  checked={webSearchOn}
+                  disabled={sending || loading}
+                  onChange={(e) => {
+                    const v = e.target.checked;
+                    setWebSearchOn(v);
+                    localStorage.setItem(LS_AI_WEB, v ? "1" : "0");
+                  }}
+                />
+                <span title="Перед ответом модели запрос к Google (Programmable Search). Расходует квоту API.">
+                  Искать в интернете
+                </span>
+              </label>
+            ) : (
+              <span className="text-[10px] text-tc-text-muted" title="На сервере не заданы GOOGLE_CSE_API_KEY и GOOGLE_CSE_CX">
+                Поиск: не настроен
+              </span>
+            )}
+          </div>
         </div>
         <form onSubmit={send} className="flex min-h-[44px] min-w-0 items-center gap-0.5 rounded-xl bg-tc-input pl-3 pr-1 sm:pl-4">
           <textarea
