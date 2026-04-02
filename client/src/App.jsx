@@ -139,6 +139,17 @@ function stripMimeParams(m) {
   return (i === -1 ? s : s.slice(0, i)).trim();
 }
 
+/** Голосовое в API или старое вложение file + audio + имя как у записи с клиента */
+function isVoiceLikeAttachment(attachment) {
+  if (!attachment) return false;
+  if (attachment.kind === "voice") return true;
+  if (attachment.kind !== "file") return false;
+  const mime = stripMimeParams(attachment.mime || "");
+  const name = String(attachment.name || "").toLowerCase();
+  if (!mime.startsWith("audio/")) return false;
+  return /^voicemessage\.(webm|ogg|mp3|m4a)$/.test(name);
+}
+
 function extFromMime(mime, fallback = "bin") {
   const m = stripMimeParams(mime);
   if (!m) return fallback;
@@ -354,9 +365,10 @@ function formatVoiceTime(s) {
   return `${m}:${sec.toString().padStart(2, "0")}`;
 }
 
-/** Голосовое в чате: кастомный плеер (нативный controls мелкий и плохо выглядит на мобильных) */
+/** Голосовое в чате: только кастомные кнопки; без controls (иначе WebView/браузер рисует системный плеер) */
 function VoiceMessagePlayer({ url }) {
   const aRef = useRef(null);
+  const barRef = useRef(null);
   const [playing, setPlaying] = useState(false);
   const [dur, setDur] = useState(0);
   const [t, setT] = useState(0);
@@ -387,41 +399,89 @@ function VoiceMessagePlayer({ url }) {
     };
   }, [url]);
   const pct = dur > 0 ? Math.min(100, (t / dur) * 100) : 0;
+  const seekToClientX = (clientX) => {
+    const a = aRef.current;
+    const track = barRef.current;
+    if (!a || !track || !(dur > 0)) return;
+    const r = track.getBoundingClientRect();
+    const x = Math.min(Math.max(0, clientX - r.left), r.width);
+    a.currentTime = (x / r.width) * dur;
+  };
   return (
-    <div className="mt-2 flex min-w-[min(100%,260px)] max-w-sm items-center gap-3 rounded-2xl border border-tc-accent/25 bg-gradient-to-r from-tc-input to-tc-panel px-3 py-2.5 shadow-md">
-      <audio ref={aRef} src={url} preload="metadata" className="hidden" />
-      <button
-        type="button"
-        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-tc-accent text-lg text-black shadow-md transition active:scale-95 hover:brightness-110"
-        aria-label={playing ? "Пауза" : "Воспроизвести"}
-        onClick={() => {
-          const a = aRef.current;
-          if (!a) return;
-          if (playing) a.pause();
-          else void a.play().catch(() => {});
+    <div
+      className="mt-2 w-full min-w-[min(100%,280px)] max-w-[min(100%,320px)] rounded-2xl border border-tc-accent/30 bg-tc-input/80 px-3 py-3 shadow-sm backdrop-blur-sm dark:bg-black/25"
+      onClick={(e) => e.stopPropagation()}
+      role="group"
+      aria-label="Голосовое сообщение"
+    >
+      <audio
+        ref={aRef}
+        src={url}
+        preload="metadata"
+        playsInline
+        tabIndex={-1}
+        aria-hidden="true"
+        style={{
+          position: "fixed",
+          left: -9999,
+          top: 0,
+          width: 1,
+          height: 1,
+          opacity: 0,
+          pointerEvents: "none",
         }}
-      >
-        {playing ? (
-          <span className="flex gap-0.5">
-            <span className="block h-4 w-1 rounded-sm bg-black" />
-            <span className="block h-4 w-1 rounded-sm bg-black" />
-          </span>
-        ) : (
-          <span className="ml-0.5 block w-0 border-y-[7px] border-l-[12px] border-y-transparent border-l-black" aria-hidden />
-        )}
-      </button>
-      <div className="min-w-0 flex-1">
-        <div className="mb-1 flex items-center gap-2">
-          <span className="h-1 flex-1 overflow-hidden rounded-full bg-tc-border">
-            <span className="block h-full rounded-full bg-tc-accent transition-[width] duration-150" style={{ width: `${pct}%` }} />
-          </span>
-        </div>
-        <div className="flex items-center justify-between gap-2 text-[11px] font-medium tabular-nums text-tc-text-muted">
-          <span className="text-tc-text-sec">Голосовое</span>
-          <span>
-            {formatVoiceTime(t)}
-            {dur > 0 ? <span className="text-tc-text-muted"> / {formatVoiceTime(dur)}</span> : null}
-          </span>
+      />
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-tc-accent text-neutral-950 shadow-md ring-2 ring-tc-accent/30 transition active:scale-95 hover:brightness-110"
+          aria-label={playing ? "Пауза" : "Воспроизвести"}
+          onClick={() => {
+            const a = aRef.current;
+            if (!a) return;
+            if (playing) a.pause();
+            else void a.play().catch(() => {});
+          }}
+        >
+          {playing ? (
+            <span className="flex gap-0.5">
+              <span className="block h-3.5 w-1 rounded-sm bg-current" />
+              <span className="block h-3.5 w-1 rounded-sm bg-current" />
+            </span>
+          ) : (
+            <span className="ml-0.5 block w-0 border-y-[6px] border-l-[10px] border-y-transparent border-l-current" aria-hidden />
+          )}
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="mb-1.5 flex items-center gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-tc-accent">Голосовое</span>
+            <span className="ml-auto tabular-nums text-[11px] text-tc-text-muted">
+              {formatVoiceTime(t)}
+              {dur > 0 ? <span className="text-tc-text-muted/80"> · {formatVoiceTime(dur)}</span> : null}
+            </span>
+          </div>
+          <button
+            type="button"
+            ref={barRef}
+            className="flex h-4 w-full cursor-pointer items-center rounded-full bg-tc-border/70 py-1 touch-manipulation"
+            aria-label="Перемотка"
+            onPointerUp={(e) => {
+              if (e.button !== 0 && e.button !== -1) return;
+              e.stopPropagation();
+              seekToClientX(e.clientX);
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
+            }}
+          >
+            <span className="pointer-events-none relative h-1.5 w-full overflow-hidden rounded-full bg-tc-border">
+              <span
+                className="block h-full rounded-full bg-tc-accent transition-[width] duration-100"
+                style={{ width: `${pct}%` }}
+              />
+            </span>
+          </button>
         </div>
       </div>
     </div>
@@ -594,7 +654,7 @@ function messagePreviewForReply(m) {
   const t = (m.text || "").trim();
   if (t) return t.slice(0, 120);
   if (m.attachment?.kind === "video_note") return "Видеосообщение";
-  if (m.attachment?.kind === "voice") return "Голосовое сообщение";
+  if (isVoiceLikeAttachment(m.attachment)) return "Голосовое сообщение";
   if (m.attachment?.name) return `📎 ${m.attachment.name}`;
   return "📎 файл";
 }
@@ -638,7 +698,7 @@ function MessageAttachment({ messageId, messageRoom, attachment, getAttachmentHe
       cancelled = true;
       if (revoke) URL.revokeObjectURL(revoke);
     };
-  }, [messageId, messageRoom, attachment?.kind, getAttachmentHeaders]);
+  }, [messageId, messageRoom, attachment?.kind, attachment?.name, attachment?.mime, getAttachmentHeaders]);
 
   if (!attachment) return null;
   if (failed) {
@@ -677,10 +737,10 @@ function MessageAttachment({ messageId, messageRoom, attachment, getAttachmentHe
   if (attachment.kind === "image" && !url) {
     return <p className="mt-1 text-xs text-tc-text-muted">Загрузка изображения…</p>;
   }
-  if (attachment.kind === "voice" && url) {
+  if (isVoiceLikeAttachment(attachment) && url) {
     return <VoiceMessagePlayer url={url} />;
   }
-  if (attachment.kind === "voice" && !url) {
+  if (isVoiceLikeAttachment(attachment) && !url) {
     return <p className="mt-1 text-xs text-tc-text-muted">Загрузка аудио…</p>;
   }
   if (!url) {
@@ -3329,7 +3389,7 @@ export default function App() {
                         : (r.text || "").trim().slice(0, 60) ||
                           (r.attachment?.kind === "video_note"
                             ? "Видео"
-                            : r.attachment?.kind === "voice"
+                            : isVoiceLikeAttachment(r.attachment)
                               ? "Голос"
                               : r.attachment
                                 ? `📎 ${r.attachment.name}`
