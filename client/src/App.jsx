@@ -2753,9 +2753,9 @@ export default function App() {
   }, [attachMenuOpen]);
 
   const pickAttachMedia = useCallback((e) => {
-    e.preventDefault();
     e.stopPropagation();
     const el = mediaInputRef.current;
+    if (el) el.value = "";
     try {
       el?.showPicker?.();
     } catch (_) {}
@@ -2766,9 +2766,9 @@ export default function App() {
   }, []);
 
   const pickAttachDocument = useCallback((e) => {
-    e.preventDefault();
     e.stopPropagation();
     const el = fileInputRef.current;
+    if (el) el.value = "";
     try {
       el?.showPicker?.();
     } catch (_) {}
