@@ -962,6 +962,34 @@ async function callOllamaChat(model, messages) {
   }
 }
 
+function isOllamaModelNotFoundDetail(detail) {
+  const s = String(detail || "").toLowerCase();
+  return s.includes("model") && s.includes("not found");
+}
+
+async function callOllamaChatWithFallback({ userId, preferredModel, messages }) {
+  try {
+    return { ok: true, model: preferredModel, reply: await callOllamaChat(preferredModel, messages) };
+  } catch (e) {
+    if (String(e?.message || "").startsWith("ollama_http_") && isOllamaModelNotFoundDetail(e?.detail)) {
+      const fallback = normalizeOllamaModelName(OLLAMA_MODEL);
+      if (fallback && fallback !== preferredModel) {
+        try {
+          const reply = await callOllamaChat(fallback, messages);
+          // Best effort: fix stored preference so the next request doesn't fail.
+          if (userId != null) {
+            try {
+              await setUserAiModel(userId, fallback);
+            } catch (_) {}
+          }
+          return { ok: true, model: fallback, reply };
+        } catch (_) {}
+      }
+    }
+    throw e;
+  }
+}
+
 async function ensurePushSchema() {
   try {
     await pool.query(`
@@ -2716,7 +2744,13 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
 
     let reply;
     try {
-      reply = await callOllamaChat(selectedModel, ollamaMessages);
+      const rr = await callOllamaChatWithFallback({ userId, preferredModel: selectedModel, messages: ollamaMessages });
+      reply = rr.reply;
+      // ensure response reflects actual model used
+      if (rr.model && rr.model !== selectedModel) {
+        // eslint-disable-next-line no-unused-vars
+        // (selectedModel is const; override for response payload below)
+      }
     } catch (e) {
       if (e?.name === "AbortError") {
         return res.status(504).json({ error: "Модель отвечает слишком долго" });
@@ -2748,9 +2782,10 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
       [userId, JSON.stringify(list)]
     );
 
+    const effectiveModel = await getUserAiModel(userId);
     res.json({
       messages: list,
-      model: selectedModel,
+      model: effectiveModel,
       web: wantSearch ? { images: webImages, sources: webSources.slice(0, 8) } : undefined,
       facts,
     });
