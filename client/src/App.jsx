@@ -1009,38 +1009,40 @@ function ChannelGlyph({ slug, className }) {
     );
   }
   if (s.includes("obshag")) {
-    // Общага: бутылка слева; VODKA — столбик крупных букв (читаемо в 20px)
-    const vx = 23.35;
-    const vodkaYs = [4.05, 8.2, 12.35, 16.5, 20.65];
+    // Общага: бутылка + столбик VODKA в одной группе, поворот ~диагональ квадрата (низ-слева → верх-справа)
+    const vx = 17.65;
+    const vodkaYs = [3.55, 7.35, 11.15, 14.95, 18.75];
     const letters = ["V", "O", "D", "K", "A"];
     return (
-      <svg viewBox="0 0 30 24" className={className} fill="none" aria-hidden preserveAspectRatio="xMidYMid meet">
-        <g transform="translate(-4.6 0.15)">
-          <g transform="translate(7.75 10.75) scale(1.05) translate(-7.75 -10.75)">
-            <rect x="10.2" y="1" width="3.6" height="2.35" rx="0.5" stroke="currentColor" strokeWidth="1.15" />
-            <path
-              d="M10.2 3.35h3.6l1.4 2.25V18.9q-3 2.55-6 0V5.6l1.4-2.25z"
-              stroke="currentColor"
-              strokeWidth="1.15"
-              strokeLinejoin="round"
-            />
+      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden preserveAspectRatio="xMidYMid meet">
+        <g transform="rotate(-44, 12, 12)">
+          <g transform="translate(-4.9 0.12)">
+            <g transform="translate(7.75 10.75) scale(1.02) translate(-7.75 -10.75)">
+              <rect x="10.2" y="1" width="3.6" height="2.35" rx="0.5" stroke="currentColor" strokeWidth="1.08" />
+              <path
+                d="M10.2 3.35h3.6l1.4 2.25V18.9q-3 2.55-6 0V5.6l1.4-2.25z"
+                stroke="currentColor"
+                strokeWidth="1.08"
+                strokeLinejoin="round"
+              />
+            </g>
           </g>
-        </g>
-        <g fontFamily="system-ui, -apple-system, 'Segoe UI', sans-serif" fontWeight="900" fontSize="6.55" textAnchor="middle">
-          {letters.map((ch, i) => (
-            <text
-              key={ch + i}
-              x={vx}
-              y={vodkaYs[i]}
-              dominantBaseline="central"
-              fill="currentColor"
-              stroke="currentColor"
-              strokeWidth="0.45"
-              paintOrder="stroke fill"
-            >
-              {ch}
-            </text>
-          ))}
+          <g fontFamily="system-ui, -apple-system, 'Segoe UI', sans-serif" fontWeight="900" fontSize="6.2" textAnchor="middle">
+            {letters.map((ch, i) => (
+              <text
+                key={ch + i}
+                x={vx}
+                y={vodkaYs[i]}
+                dominantBaseline="central"
+                fill="currentColor"
+                stroke="currentColor"
+                strokeWidth="0.42"
+                paintOrder="stroke fill"
+              >
+                {ch}
+              </text>
+            ))}
+          </g>
         </g>
       </svg>
     );
