@@ -347,6 +347,117 @@ function formatFileSize(n) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatVoiceTime(s) {
+  if (!Number.isFinite(s) || s < 0) return "0:00";
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2, "0")}`;
+}
+
+/** Голосовое в чате: кастомный плеер (нативный controls мелкий и плохо выглядит на мобильных) */
+function VoiceMessagePlayer({ url }) {
+  const aRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  const [dur, setDur] = useState(0);
+  const [t, setT] = useState(0);
+  useEffect(() => {
+    const a = aRef.current;
+    if (!a) return undefined;
+    const onTime = () => setT(a.currentTime);
+    const onMeta = () => {
+      const d = a.duration;
+      setDur(Number.isFinite(d) && d > 0 ? d : 0);
+    };
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    const onEnded = () => setPlaying(false);
+    a.addEventListener("timeupdate", onTime);
+    a.addEventListener("loadedmetadata", onMeta);
+    a.addEventListener("durationchange", onMeta);
+    a.addEventListener("play", onPlay);
+    a.addEventListener("pause", onPause);
+    a.addEventListener("ended", onEnded);
+    return () => {
+      a.removeEventListener("timeupdate", onTime);
+      a.removeEventListener("loadedmetadata", onMeta);
+      a.removeEventListener("durationchange", onMeta);
+      a.removeEventListener("play", onPlay);
+      a.removeEventListener("pause", onPause);
+      a.removeEventListener("ended", onEnded);
+    };
+  }, [url]);
+  const pct = dur > 0 ? Math.min(100, (t / dur) * 100) : 0;
+  return (
+    <div className="mt-2 flex min-w-[min(100%,260px)] max-w-sm items-center gap-3 rounded-2xl border border-tc-accent/25 bg-gradient-to-r from-tc-input to-tc-panel px-3 py-2.5 shadow-md">
+      <audio ref={aRef} src={url} preload="metadata" className="hidden" />
+      <button
+        type="button"
+        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-tc-accent text-lg text-black shadow-md transition active:scale-95 hover:brightness-110"
+        aria-label={playing ? "Пауза" : "Воспроизвести"}
+        onClick={() => {
+          const a = aRef.current;
+          if (!a) return;
+          if (playing) a.pause();
+          else void a.play().catch(() => {});
+        }}
+      >
+        {playing ? (
+          <span className="flex gap-0.5">
+            <span className="block h-4 w-1 rounded-sm bg-black" />
+            <span className="block h-4 w-1 rounded-sm bg-black" />
+          </span>
+        ) : (
+          <span className="ml-0.5 block w-0 border-y-[7px] border-l-[12px] border-y-transparent border-l-black" aria-hidden />
+        )}
+      </button>
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-center gap-2">
+          <span className="h-1 flex-1 overflow-hidden rounded-full bg-tc-border">
+            <span className="block h-full rounded-full bg-tc-accent transition-[width] duration-150" style={{ width: `${pct}%` }} />
+          </span>
+        </div>
+        <div className="flex items-center justify-between gap-2 text-[11px] font-medium tabular-nums text-tc-text-muted">
+          <span className="text-tc-text-sec">Голосовое</span>
+          <span>
+            {formatVoiceTime(t)}
+            {dur > 0 ? <span className="text-tc-text-muted"> / {formatVoiceTime(dur)}</span> : null}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Видеосообщение в ленте: крупнее, первый кадр после metadata */
+function MessageVideoNote({ url, mime, name }) {
+  const vRef = useRef(null);
+  const pokeFrame = useCallback(() => {
+    const v = vRef.current;
+    if (!v) return;
+    try {
+      v.currentTime = 0.05;
+    } catch (_) {}
+  }, []);
+  return (
+    <div className="mt-2 w-full max-w-[min(280px,92vw)] sm:max-w-[300px]">
+      <div className="overflow-hidden rounded-2xl border-2 border-tc-border/60 bg-black shadow-lg ring-1 ring-black/20">
+        <video
+          ref={vRef}
+          className="aspect-square w-full bg-black object-cover"
+          controls
+          playsInline
+          preload="auto"
+          onLoadedData={pokeFrame}
+          onLoadedMetadata={pokeFrame}
+          aria-label={name || "Видеосообщение"}
+        >
+          <source src={url} type={mime} />
+        </video>
+      </div>
+    </div>
+  );
+}
+
 /** Погода в сайдбаре: Open‑Meteo, без API‑ключа */
 const SIDEBAR_WEATHER_CITIES = [
   { key: "tyumen", label: "Тюмень", lat: 57.1522, lon: 65.5272 },
@@ -542,21 +653,7 @@ function MessageAttachment({ messageId, messageRoom, attachment, getAttachmentHe
   }
   if (attachment.kind === "video_note" && url) {
     const vt = stripMimeParams(attachment.mime) || "video/webm";
-    return (
-      <div className="mt-1.5 w-52">
-        <div className="aspect-square overflow-hidden rounded-xl bg-black">
-          <video
-            className="h-full w-full object-cover"
-            controls
-            playsInline
-            preload="metadata"
-            aria-label={attachment.name || "Видеосообщение"}
-          >
-            <source src={url} type={vt} />
-          </video>
-        </div>
-      </div>
-    );
+    return <MessageVideoNote url={url} mime={vt} name={attachment.name} />;
   }
   if (attachment.kind === "video_note" && !url) {
     return <p className="mt-1 text-xs text-tc-text-muted">Загрузка видео…</p>;
@@ -566,10 +663,14 @@ function MessageAttachment({ messageId, messageRoom, attachment, getAttachmentHe
       <button
         type="button"
         onClick={() => onOpenImage?.({ url, name: attachment.name })}
-        className="mt-1.5 block max-h-64 overflow-hidden rounded-lg transition hover:opacity-95"
+        className="mt-2 block max-h-[min(70vh,22rem)] w-full max-w-full overflow-hidden rounded-2xl border-2 border-tc-border/50 bg-black/20 shadow-md transition hover:opacity-95 sm:max-w-md"
         title="Открыть"
       >
-        <img src={url} alt={attachment.name} className="max-h-64 w-auto max-w-full rounded-lg object-contain" />
+        <img
+          src={url}
+          alt={attachment.name}
+          className="mx-auto max-h-[min(70vh,22rem)] w-auto max-w-full object-contain"
+        />
       </button>
     );
   }
@@ -577,11 +678,7 @@ function MessageAttachment({ messageId, messageRoom, attachment, getAttachmentHe
     return <p className="mt-1 text-xs text-tc-text-muted">Загрузка изображения…</p>;
   }
   if (attachment.kind === "voice" && url) {
-    return (
-      <div className="mt-1.5 min-w-[200px]">
-        <audio src={url} controls className="h-9 w-full max-w-xs" preload="metadata" aria-label="Голосовое сообщение" />
-      </div>
-    );
+    return <VoiceMessagePlayer url={url} />;
   }
   if (attachment.kind === "voice" && !url) {
     return <p className="mt-1 text-xs text-tc-text-muted">Загрузка аудио…</p>;
@@ -593,10 +690,17 @@ function MessageAttachment({ messageId, messageRoom, attachment, getAttachmentHe
     <a
       href={url}
       download={attachment.name}
-      className="mt-1.5 inline-flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-tc-link transition hover:bg-white/10"
+      className="mt-2 flex max-w-full items-center gap-3 rounded-xl border border-tc-border/60 bg-tc-input px-4 py-3 text-sm text-tc-link transition hover:border-tc-accent/40 hover:bg-tc-hover"
     >
-      📎 {attachment.name}
-      {attachment.size != null ? <span className="text-tc-text-muted">({formatFileSize(attachment.size)})</span> : null}
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-tc-accent/15 text-lg" aria-hidden>
+        📎
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium text-tc-text">{attachment.name}</span>
+        {attachment.size != null ? (
+          <span className="text-xs text-tc-text-muted">{formatFileSize(attachment.size)}</span>
+        ) : null}
+      </span>
     </a>
   );
 }
@@ -885,6 +989,17 @@ export default function App() {
     mq.addEventListener("change", fn);
     return () => mq.removeEventListener("change", fn);
   }, []);
+
+  const [pendingFileThumb, setPendingFileThumb] = useState(null);
+  useEffect(() => {
+    if (!pendingFile || !String(pendingFile.type || "").startsWith("image/")) {
+      setPendingFileThumb(null);
+      return undefined;
+    }
+    const u = URL.createObjectURL(pendingFile);
+    setPendingFileThumb(u);
+    return () => URL.revokeObjectURL(u);
+  }, [pendingFile]);
 
   // Capacitor: native notifications + click-to-open room
   useEffect(() => {
@@ -4159,40 +4274,44 @@ export default function App() {
 
         {/* Video note recording / uploading */}
         {videoNoteRecording && recordingPreviewStream ? (
-          <div className="flex items-center gap-3 border-t border-tc-border bg-tc-header px-4 py-2">
-            <div className="h-12 w-12 shrink-0 overflow-hidden rounded-xl border-2 border-red-500 bg-black">
-              <video ref={videoNoteLiveRef} className="h-full w-full scale-x-[-1] object-cover" muted playsInline autoPlay />
-            </div>
-            <div className="flex-1">
-              <div className="flex items-baseline gap-2">
-                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-red-500" />
-                <p className="text-sm font-medium text-red-400">Запись видео</p>
-                <p className="text-xs font-semibold text-red-300/90">{recordingTimeLabel()}</p>
+          <div className="border-t border-tc-border bg-tc-header px-3 py-2 pb-[max(10px,env(safe-area-inset-bottom,0px))] pt-2 sm:px-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl border-2 border-red-500 bg-black sm:h-16 sm:w-16">
+                <video ref={videoNoteLiveRef} className="h-full w-full scale-x-[-1] object-cover" muted playsInline autoPlay />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                  <span className="inline-block h-2 w-2 animate-pulse shrink-0 rounded-full bg-red-500" />
+                  <p className="text-sm font-medium text-red-400">Запись видео</p>
+                  <p className="text-xs font-semibold tabular-nums text-red-300/90">{recordingTimeLabel()}</p>
+                </div>
               </div>
             </div>
-            <button
-              type="button"
-              className="shrink-0 rounded-xl bg-white/5 px-3 py-2 text-xs font-semibold text-tc-text-sec transition hover:bg-white/10"
-              onClick={() => { void switchVideoFacing(); }}
-              title="Переключить камеру"
-              aria-label="Переключить камеру"
-            >
-              Камера
-            </button>
-            <button
-              type="button"
-              className="shrink-0 rounded-xl bg-tc-border px-3 py-2 text-xs font-semibold text-tc-text-sec transition hover:bg-tc-hover"
-              onClick={() => { void stopVideoNoteRecord({ discard: true }); recordingGestureRef.current = { active: false, kind: null }; }}
-            >
-              Отмена
-            </button>
-            <button
-              type="button"
-              className="shrink-0 rounded-xl bg-red-500/20 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-red-500/30"
-              onClick={() => { void stopVideoNoteRecord({ discard: false }); recordingGestureRef.current = { active: false, kind: null }; }}
-            >
-              Отправить
-            </button>
+            <div className="mt-2 grid w-full grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:justify-end">
+              <button
+                type="button"
+                className="rounded-xl bg-white/5 px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-tc-text-sec transition hover:bg-white/10 sm:min-w-0 sm:px-3 sm:text-xs"
+                onClick={() => { void switchVideoFacing(); }}
+                title="Переключить камеру"
+                aria-label="Переключить камеру"
+              >
+                Камера
+              </button>
+              <button
+                type="button"
+                className="rounded-xl bg-tc-border px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-tc-text-sec transition hover:bg-tc-hover sm:px-3 sm:text-xs"
+                onClick={() => { void stopVideoNoteRecord({ discard: true }); recordingGestureRef.current = { active: false, kind: null }; }}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="rounded-xl bg-red-500/25 px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-red-200 transition hover:bg-red-500/35 sm:px-3 sm:text-xs"
+                onClick={() => { void stopVideoNoteRecord({ discard: false }); recordingGestureRef.current = { active: false, kind: null }; }}
+              >
+                Отправить
+              </button>
+            </div>
           </div>
         ) : null}
         {videoNoteUploading && !videoNoteRecording ? (
@@ -4201,31 +4320,35 @@ export default function App() {
           </div>
         ) : null}
         {voiceRecording ? (
-          <div className="flex items-center gap-3 border-t border-tc-border bg-tc-header px-4 py-2">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-500/25 text-red-400">
-              <svg viewBox="0 0 24 24" className="h-6 w-6" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.3 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.77 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>
-            </div>
-            <div className="flex-1">
-              <div className="flex items-baseline gap-2">
-                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-red-500" />
-                <p className="text-sm font-medium text-red-400">Запись голоса</p>
-                <p className="text-xs font-semibold text-red-300/90">{recordingTimeLabel()}</p>
+          <div className="border-t border-tc-border bg-tc-header px-3 py-2 pb-[max(10px,env(safe-area-inset-bottom,0px))] sm:px-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-red-500/25 text-red-400">
+                <svg viewBox="0 0 24 24" className="h-7 w-7" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.3 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.77 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                  <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-red-500" />
+                  <p className="text-sm font-medium text-red-400">Запись голоса</p>
+                  <p className="text-xs font-semibold tabular-nums text-red-300/90">{recordingTimeLabel()}</p>
+                </div>
               </div>
             </div>
-            <button
-              type="button"
-              className="shrink-0 rounded-xl bg-tc-border px-3 py-2 text-xs font-semibold text-tc-text-sec transition hover:bg-tc-hover"
-              onClick={() => { void stopVoiceRecord({ discard: true }); recordingGestureRef.current = { active: false, kind: null }; }}
-            >
-              Отмена
-            </button>
-            <button
-              type="button"
-              className="shrink-0 rounded-xl bg-red-500/20 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-red-500/30"
-              onClick={() => { void stopVoiceRecord({ discard: false }); recordingGestureRef.current = { active: false, kind: null }; }}
-            >
-              Отправить
-            </button>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                className="rounded-xl bg-tc-border px-3 py-2.5 text-sm font-semibold text-tc-text-sec transition hover:bg-tc-hover"
+                onClick={() => { void stopVoiceRecord({ discard: true }); recordingGestureRef.current = { active: false, kind: null }; }}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="rounded-xl bg-red-500/25 px-3 py-2.5 text-sm font-semibold text-red-200 transition hover:bg-red-500/35"
+                onClick={() => { void stopVoiceRecord({ discard: false }); recordingGestureRef.current = { active: false, kind: null }; }}
+              >
+                Отправить
+              </button>
+            </div>
           </div>
         ) : null}
         {voiceUploading && !voiceRecording ? (
@@ -4286,11 +4409,29 @@ export default function App() {
               )
             : null}
           {pendingFile && editingId == null ? (
-            <div className="flex items-center gap-2 rounded-lg bg-tc-input px-3 py-1.5 text-xs text-tc-text-sec">
-              <span className="truncate">📎 {pendingFile.name}</span>
+            <div className="flex items-stretch gap-3 rounded-xl border border-tc-border/70 bg-tc-input px-3 py-2.5 sm:px-4">
+              {pendingFileThumb ? (
+                <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-tc-border/50 bg-black/30">
+                  <img src={pendingFileThumb} alt="" className="h-full w-full object-cover" />
+                </div>
+              ) : (
+                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border border-tc-border/50 bg-tc-accent/10 text-2xl" aria-hidden>
+                  📎
+                </div>
+              )}
+              <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
+                <span className="truncate text-sm font-medium text-tc-text" title={pendingFile.name}>
+                  {pendingFile.name}
+                </span>
+                {pendingFile.size > 0 ? (
+                  <span className="text-xs text-tc-text-muted">{formatFileSize(pendingFile.size)}</span>
+                ) : null}
+              </div>
               <button
                 type="button"
-                className="shrink-0 text-tc-danger hover:underline"
+                className="flex h-10 w-10 shrink-0 items-center justify-center self-center rounded-full text-tc-danger transition hover:bg-tc-danger/15"
+                title="Убрать вложение"
+                aria-label="Убрать вложение"
                 onClick={() => { setPendingFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; if (mediaInputRef.current) mediaInputRef.current.value = ""; }}
               >
                 ✕
