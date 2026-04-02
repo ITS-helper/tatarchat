@@ -1033,30 +1033,16 @@ function ChannelGlyph({ slug, className }) {
     );
   }
   if (s.includes("obshag")) {
-    // Общага: только VODKA столбиком, по диагонали, крупно
-    const vx = 12;
-    const vodkaYs = [3.35, 7.65, 11.95, 16.25, 20.55];
-    const letters = ["V", "O", "D", "K", "A"];
+    // Общага: простая бутылка
     return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden preserveAspectRatio="xMidYMid meet">
-        <g transform="rotate(-44, 12, 12)">
-          <g fontFamily="system-ui, -apple-system, 'Segoe UI', sans-serif" fontWeight="900" fontSize="7.85" textAnchor="middle">
-            {letters.map((ch, i) => (
-              <text
-                key={ch + i}
-                x={vx}
-                y={vodkaYs[i]}
-                dominantBaseline="central"
-                fill="currentColor"
-                stroke="currentColor"
-                strokeWidth="0.38"
-                paintOrder="stroke fill"
-              >
-                {ch}
-              </text>
-            ))}
-          </g>
-        </g>
+      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden>
+        <path
+          d="M10.25 2h3.5v3.4c2.6.5 4.25 2.5 4.25 5.1V19a2.35 2.35 0 0 1-2.35 2.35h-5.1A2.35 2.35 0 0 1 8 19V10.5c0-2.6 1.65-4.6 4.25-5.1V2z"
+          stroke="currentColor"
+          strokeWidth="1.55"
+          strokeLinejoin="round"
+        />
+        <path d="M9 2.75h6" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" />
       </svg>
     );
   }
