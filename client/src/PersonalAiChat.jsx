@@ -216,6 +216,7 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
 
   const modelLabel = (m) => {
     if (m === "qwen3-vl:8b") return "qwen3-vl:8b · картинки";
+    if (m === "qwen3.5:4b") return "qwen3:5.4b · текст";
     if (m === "qwen3:5.4b") return "qwen3:5.4b · текст";
     return m;
   };

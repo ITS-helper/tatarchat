@@ -581,14 +581,14 @@ async function ensureUserOllamaPrefsSchema() {
 async function getUserAiModel(userId) {
   await ensureUserOllamaPrefsSchema();
   const { rows } = await pool.query(`SELECT model FROM user_ollama_prefs WHERE user_id = $1`, [userId]);
-  const m = String(rows[0]?.model || "").trim();
+  const m = normalizeOllamaModelName(String(rows[0]?.model || "").trim());
   if (m && OLLAMA_MODELS.includes(m)) return m;
-  return OLLAMA_MODEL;
+  return normalizeOllamaModelName(OLLAMA_MODEL);
 }
 
 async function setUserAiModel(userId, model) {
   await ensureUserOllamaPrefsSchema();
-  const m = String(model || "").trim();
+  const m = normalizeOllamaModelName(String(model || "").trim());
   if (!m || !OLLAMA_MODELS.includes(m)) return { ok: false, error: "Недоступная модель" };
   await pool.query(
     `INSERT INTO user_ollama_prefs (user_id, model, updated_at) VALUES ($1, $2, NOW())
@@ -596,6 +596,15 @@ async function setUserAiModel(userId, model) {
     [userId, m]
   );
   return { ok: true, model: m };
+}
+
+function normalizeOllamaModelName(input) {
+  const s = String(input || "").trim();
+  if (!s) return "";
+  const low = s.toLowerCase();
+  // Common alias typo seen in UI: qwen3.5:4b (does not exist) -> qwen3:5.4b
+  if (low === "qwen3.5:4b" || low === "qwen3.5:4b ") return "qwen3:5.4b";
+  return s;
 }
 
 async function ensureUserAiFactsSchema() {
@@ -921,11 +930,12 @@ async function callOllamaChat(model, messages) {
   const ac = new AbortController();
   const to = setTimeout(() => ac.abort(), OLLAMA_HTTP_TIMEOUT_MS);
   try {
+    const m = normalizeOllamaModelName(model || OLLAMA_MODEL);
     const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: model || OLLAMA_MODEL,
+        model: m || OLLAMA_MODEL,
         messages,
         stream: false,
       }),
