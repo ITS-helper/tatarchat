@@ -925,7 +925,7 @@ async function filterWorkingImageUrls(images, limit = 8) {
   }
 }
 
-const DEFAULT_OLLAMA_SYSTEM_PROMPT = `You are a helpful assistant in the TatarChat messenger. The conversation history is in the following messages — use it, including the user's name and facts they already stated. Reply in Russian unless the user writes in another language. Be concise unless asked for detail.`;
+const DEFAULT_OLLAMA_SYSTEM_PROMPT = `You are a helpful assistant in the TatarChat messenger. The conversation history is in the following messages — use it, including the user's name and facts they already stated. Reply in Russian unless the user writes in another language. Be concise unless asked for detail. For longer answers use readable Markdown: blank lines between paragraphs, ## or ### section headings, bullet lists with "- ", avoid dumping everything in one line.`;
 
 function buildAiSystemPrompt(nickname, webSearchBlock, factsBlock) {
   const base = (process.env.OLLAMA_SYSTEM_PROMPT || "").trim() || DEFAULT_OLLAMA_SYSTEM_PROMPT;

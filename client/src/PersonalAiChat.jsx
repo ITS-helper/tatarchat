@@ -1,23 +1,140 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
 
 const LS_AI_WEB = "tatarchat_ai_web_search";
 const LS_AI_MODEL = "tatarchat_ai_model";
 
+/** Модель часто лепит ### к предыдущему абзацу без \\n — ломает Markdown */
+function normalizeAssistantMarkdown(text) {
+  let s = String(text ?? "").replace(/\r\n/g, "\n");
+  if (!s.trim()) return s;
+  // Заголовок сразу после знака препинания / скобки
+  s = s.replace(/([.!?:)])(\s*)(#{1,4}\s)/g, "$1\n\n$3");
+  // ### или ## внутри строки (не для URL-служебных #)
+  s = s.replace(/([^\n#\s])(#{2,4}\s+)/g, "$1\n\n$2");
+  // Горизонтальная линия перед источниками
+  s = s.replace(/([^\n])\n(---+\s*)$/gm, "$1\n\n$2");
+  // Маркированный список после текста в одной строке: «…текст- пункт» редкий кейс
+  s = s.replace(/([а-яА-Яa-zA-Z0-9])(-\s+[А-Яа-яA-Za-z])/g, "$1\n$2");
+  return s.trim();
+}
+
+function trimUrl(u) {
+  return String(u || "").replace(/[.,;)\]]+$/, "");
+}
+
 function parseSourcesBlock(content) {
   const raw = String(content ?? "");
-  const marker = "\n\nИсточники:\n";
-  const idx = raw.lastIndexOf(marker);
-  if (idx === -1) return { body: raw, sources: [] };
-  const body = raw.slice(0, idx).trimEnd();
-  const block = raw.slice(idx + marker.length).trim();
+  const candidates = [];
+  const collect = (re) => {
+    let m;
+    const rg = new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`);
+    while ((m = rg.exec(raw)) !== null) {
+      candidates.push({ index: m.index, len: m[0].length });
+    }
+  };
+  collect(/\n---+\s*\n\s*(?:\*\*)?Источники(?:\*\*)?:?\s*\n/i);
+  collect(/\n\nИсточники:\s*\n/i);
+  collect(/\n\*\*Источники\*\*:?\s*\n/i);
+  const classic = "\n\nИсточники:\n";
+  let pos = raw.indexOf(classic);
+  while (pos !== -1) {
+    candidates.push({ index: pos, len: classic.length });
+    pos = raw.indexOf(classic, pos + 1);
+  }
+  if (!candidates.length) return { body: raw, sources: [] };
+  const { index: splitIdx, len: skipLen } = candidates.reduce((a, b) => (a.index >= b.index ? a : b));
+  const body = raw.slice(0, splitIdx).trimEnd();
+  const block = raw.slice(splitIdx + skipLen).trim();
   const lines = block.split("\n").map((s) => s.trim()).filter(Boolean);
   const sources = [];
   for (const line of lines) {
-    const m = /^-\s*(.*?)\s+—\s+(https?:\/\/\S+)\s*$/.exec(line);
-    if (!m) continue;
-    sources.push({ title: m[1].trim() || m[2].trim(), url: m[2].trim() });
+    const mDash = /^[-*]\s*(.*?)\s+—\s+(https?:\/\/\S+)/.exec(line);
+    if (mDash) {
+      sources.push({ title: mDash[1].trim() || trimUrl(mDash[2]), url: trimUrl(mDash[2]) });
+      continue;
+    }
+    const mMd = /\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/.exec(line);
+    if (mMd) {
+      sources.push({ title: mMd[1].trim() || trimUrl(mMd[2]), url: trimUrl(mMd[2]) });
+      continue;
+    }
+    const mNum = /^\d+\.\s*(.+)$/.exec(line);
+    if (mNum) {
+      const rest = mNum[1].trim();
+      const urlMatch = /(https?:\/\/[^\s)\]]+)/.exec(rest);
+      if (urlMatch) {
+        const url = trimUrl(urlMatch[1]);
+        const title = rest.replace(urlMatch[0], "").replace(/^[.\s—-]+|[.\s—-]+$/g, "").trim() || url;
+        sources.push({ title, url });
+      }
+      continue;
+    }
+    const urlPlain = /(https?:\/\/[^\s)\]]+)/.exec(line);
+    if (urlPlain) {
+      const url = trimUrl(urlPlain[1]);
+      const title = line.replace(urlPlain[0], "").replace(/^[-*\d.\s]+/, "").trim() || url;
+      sources.push({ title, url });
+    }
   }
   return { body, sources };
+}
+
+const assistantMdComponents = {
+  h1: ({ children }) => (
+    <h1 className="mb-2 mt-4 border-b border-tc-border/40 pb-1 text-lg font-bold text-tc-text first:mt-0">{children}</h1>
+  ),
+  h2: ({ children }) => (
+    <h2 className="mb-1.5 mt-3 text-base font-bold text-tc-text first:mt-0">{children}</h2>
+  ),
+  h3: ({ children }) => (
+    <h3 className="mb-1.5 mt-3 text-[15px] font-semibold text-tc-accent first:mt-0">{children}</h3>
+  ),
+  h4: ({ children }) => <h4 className="mb-1 mt-2 text-sm font-semibold text-tc-text">{children}</h4>,
+  p: ({ children }) => <p className="mb-2.5 last:mb-0 leading-relaxed">{children}</p>,
+  ul: ({ children }) => <ul className="mb-2.5 ml-0 list-disc space-y-1.5 py-0.5 pl-5">{children}</ul>,
+  ol: ({ children }) => <ol className="mb-2.5 ml-0 list-decimal space-y-1.5 py-0.5 pl-5">{children}</ol>,
+  li: ({ children }) => <li className="leading-relaxed marker:text-tc-accent">{children}</li>,
+  strong: ({ children }) => <strong className="font-semibold text-tc-text">{children}</strong>,
+  em: ({ children }) => <em className="italic text-tc-text-sec">{children}</em>,
+  a: ({ href, children }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="break-words text-tc-link underline decoration-tc-border underline-offset-2 hover:text-tc-accent"
+    >
+      {children}
+    </a>
+  ),
+  hr: () => <hr className="my-4 border-t border-tc-border/50" />,
+  blockquote: ({ children }) => (
+    <blockquote className="my-2 border-l-[3px] border-tc-accent/40 pl-3 text-sm text-tc-text-sec">{children}</blockquote>
+  ),
+  code: ({ className, children }) => {
+    const inline = !className;
+    if (inline) {
+      return <code className="rounded bg-tc-input px-1 py-0.5 font-mono text-[0.85em] text-tc-text">{children}</code>;
+    }
+    return (
+      <pre className="mb-2.5 max-w-full overflow-x-auto rounded-lg border border-tc-border/50 bg-tc-input/60 p-2.5 font-mono text-xs leading-snug">
+        <code>{children}</code>
+      </pre>
+    );
+  },
+};
+
+function AssistantMarkdownBody({ text }) {
+  const md = normalizeAssistantMarkdown(text);
+  if (!md) return null;
+  return (
+    <div className="ai-assistant-md min-w-0 text-sm text-tc-text">
+      <ReactMarkdown remarkPlugins={[remarkBreaks]} components={assistantMdComponents}>
+        {md}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 export default function PersonalAiChat({ getApiBase, token, nickname, onError }) {
@@ -289,8 +406,8 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
               return (
                 <div key={i} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
                   <div
-                    className={`max-w-[min(100%,36rem)] rounded-xl px-3 py-2 text-sm whitespace-pre-wrap break-words ${
-                      mine ? "rounded-br-sm bg-tc-msg-own text-tc-text" : "rounded-bl-sm bg-tc-msg text-tc-text"
+                    className={`max-w-[min(100%,36rem)] break-words rounded-xl px-3 py-2 text-sm ${
+                      mine ? "whitespace-pre-wrap rounded-br-sm bg-tc-msg-own text-tc-text" : "rounded-bl-sm bg-tc-msg text-tc-text"
                     }`}
                   >
                     {!mine ? (
@@ -302,7 +419,11 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
                         {nickname || "Вы"}
                       </p>
                     )}
-                    <div className="whitespace-pre-wrap break-words">{parsed.body}</div>
+                    {mine ? (
+                      <div className="whitespace-pre-wrap break-words">{parsed.body}</div>
+                    ) : (
+                      <AssistantMarkdownBody text={parsed.body} />
+                    )}
                     {!mine && parsed.sources.length ? (
                       <details className="mt-2 rounded-lg border border-tc-border/60 bg-white/5 px-2 py-1.5">
                         <summary className="cursor-pointer select-none text-[11px] font-semibold text-tc-text-sec hover:text-tc-accent">
