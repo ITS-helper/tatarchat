@@ -36,6 +36,7 @@ const OLLAMA_HTTP_TIMEOUT_MS = Math.min(Math.max(Number(process.env.OLLAMA_HTTP_
 /** Tavily Search API (ключ в заголовке Authorization: Bearer) */
 const TAVILY_API_KEY = String(process.env.TAVILY_API_KEY || "").trim();
 const TAVILY_TIMEOUT_MS = Math.min(Math.max(Number(process.env.TAVILY_TIMEOUT_MS) || 25_000, 5000), 120_000);
+const APK_DIR = path.resolve(process.env.APK_DIR || path.join(__dirname, "..", "apk"));
 const MAX_MESSAGE_LEN = 2000;
 const MAX_NICK_LEN = 64;
 const MIN_PASSWORD_LEN = 6;
@@ -2307,6 +2308,43 @@ app.get("/api/health", async (_req, res) => {
     dbErr,
     maxUploadMb: Math.round(MAX_UPLOAD_BYTES / (1024 * 1024)),
   });
+});
+
+async function getLatestApkFile() {
+  const dir = APK_DIR;
+  let names = [];
+  try {
+    names = await fsp.readdir(dir);
+  } catch {
+    return null;
+  }
+  const apks = names.filter((n) => typeof n === "string" && n.toLowerCase().endsWith(".apk"));
+  if (!apks.length) return null;
+  let best = null;
+  for (const name of apks) {
+    const full = path.join(dir, name);
+    try {
+      const st = await fsp.stat(full);
+      if (!st.isFile()) continue;
+      const m = st.mtimeMs || 0;
+      if (!best || m > best.mtimeMs) best = { full, name, mtimeMs: m, size: st.size || 0 };
+    } catch (_) {}
+  }
+  return best;
+}
+
+app.get("/api/apk/latest", async (_req, res) => {
+  try {
+    const f = await getLatestApkFile();
+    if (!f) return res.status(404).send("APK not found");
+    res.setHeader("Content-Type", "application/vnd.android.package-archive");
+    res.setHeader("Content-Disposition", `attachment; filename="${String(f.name).replace(/"/g, "")}"`);
+    res.setHeader("Cache-Control", "no-store");
+    res.sendFile(f.full);
+  } catch (err) {
+    console.error("GET /api/apk/latest", err?.message || err);
+    res.status(500).send("Error");
+  }
 });
 
 app.get("/api/push/web-vapid-key", (req, res) => {

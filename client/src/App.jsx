@@ -2931,6 +2931,19 @@ export default function App() {
               {authScreenMode === "register" ? "Зарегистрироваться" : "Войти"}
             </button>
           </form>
+
+          <div className="mt-5 border-t border-tc-border/60 pt-4">
+            <a
+              href={`${getApiBase()}/api/apk/latest`}
+              className="block w-full rounded-lg border border-tc-border bg-tc-panel/30 px-4 py-3 text-center text-sm font-semibold text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+              download
+            >
+              Скачать Android (APK)
+            </a>
+            <p className="mt-2 text-center text-[11px] leading-snug text-tc-text-muted">
+              Если скачивание не началось — откройте ссылку в браузере и подтвердите загрузку.
+            </p>
+          </div>
         </div>
       </div>
     );
