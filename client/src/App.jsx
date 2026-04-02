@@ -1144,11 +1144,7 @@ export default function App() {
   const stopVoiceRecordRef = useRef(() => {});
   const recordingGestureRef = useRef({
     active: false,
-    kind: null, // 'voice' | 'video'
-    startX: 0,
-    startY: 0,
-    cancelled: false,
-    locked: false,
+    kind: null,
   });
   const avatarFileRef = useRef(null);
   // const channelAvatarFileRef = useRef(null);
@@ -1773,7 +1769,7 @@ export default function App() {
     }
     try {
       setRecordingLocked(false);
-      setRecordingHint("Свайп влево — отмена · вверх — замок");
+      setRecordingHint("");
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true },
       });
@@ -1888,7 +1884,7 @@ export default function App() {
     }
     try {
       setRecordingLocked(false);
-      setRecordingHint("Свайп влево — отмена · вверх — замок");
+      setRecordingHint("");
       const stream = await acquireVideoNoteStream(videoFacingMode);
       videoNoteStreamRef.current = stream;
       videoNoteChunksRef.current = [];
@@ -1939,75 +1935,29 @@ export default function App() {
     } catch (_) {}
   }, [videoNoteRecording, stopVideoNoteRecord, startVideoNoteRecord]);
 
-  const beginRecordingGesture = useCallback(
-    async (kind, e) => {
+  const toggleRecording = useCallback(
+    async (kind) => {
       if (kind !== "voice" && kind !== "video") return;
       if (IS_NATIVE) {
-        // Android WebView: getUserMedia/MediaRecorder permissions are often unreliable.
-        // Use native recorder UI (it also supports switching cameras).
         void captureNativeMedia(kind === "video" ? "video" : "audio");
         return;
       }
-      if (recordingGestureRef.current.active) return;
+      const isActive = kind === "voice" ? voiceRecording : videoNoteRecording;
+      if (isActive) {
+        if (kind === "voice") void stopVoiceRecord({ discard: false });
+        else void stopVideoNoteRecord({ discard: false });
+        recordingGestureRef.current = { active: false, kind: null };
+        setRecordingHint("");
+        return;
+      }
       if (editingId != null || pendingFile != null || videoNoteUploading || voiceUploading) return;
-      if (kind === "voice" && (videoNoteRecording || voiceRecording)) return;
-      if (kind === "video" && (videoNoteRecording || voiceRecording)) return;
-      const pt = e?.changedTouches?.[0] || e;
-      const x = Number(pt?.clientX ?? 0);
-      const y = Number(pt?.clientY ?? 0);
-      recordingGestureRef.current = {
-        active: true,
-        kind,
-        startX: x,
-        startY: y,
-        cancelled: false,
-        locked: false,
-      };
-      setRecordingHint("Свайп влево — отмена · вверх — замок");
+      if (videoNoteRecording || voiceRecording) return;
+      recordingGestureRef.current = { active: true, kind };
+      setRecordingHint("");
       try {
         if (kind === "voice") await startVoiceRecord();
         else await startVideoNoteRecord();
       } catch (_) {}
-      const onMove = (ev) => {
-        const st = recordingGestureRef.current;
-        if (!st.active || st.cancelled || st.locked) return;
-        const p = ev?.changedTouches?.[0] || ev;
-        const dx = Number(p?.clientX ?? 0) - st.startX;
-        const dy = Number(p?.clientY ?? 0) - st.startY;
-        if (dx < -90) {
-          st.cancelled = true;
-          setRecordingHint("Отмена…");
-          if (st.kind === "voice") void stopVoiceRecord({ discard: true });
-          else void stopVideoNoteRecord({ discard: true });
-          return;
-        }
-        if (dy < -90) {
-          st.locked = true;
-          setRecordingLocked(true);
-          setRecordingHint("Запись закреплена (нажмите Stop)");
-        }
-      };
-      const onUp = () => {
-        const st = recordingGestureRef.current;
-        if (!st.active) return;
-        st.active = false;
-        window.removeEventListener("pointermove", onMove, true);
-        window.removeEventListener("pointerup", onUp, true);
-        window.removeEventListener("pointercancel", onUp, true);
-        window.removeEventListener("touchmove", onMove, true);
-        window.removeEventListener("touchend", onUp, true);
-        window.removeEventListener("touchcancel", onUp, true);
-        if (st.cancelled) return;
-        if (st.locked) return; // keep recording until user presses stop
-        if (st.kind === "voice") void stopVoiceRecord({ discard: false });
-        else void stopVideoNoteRecord({ discard: false });
-      };
-      window.addEventListener("pointermove", onMove, true);
-      window.addEventListener("pointerup", onUp, true);
-      window.addEventListener("pointercancel", onUp, true);
-      window.addEventListener("touchmove", onMove, true);
-      window.addEventListener("touchend", onUp, true);
-      window.addEventListener("touchcancel", onUp, true);
     },
     [
       captureNativeMedia,
@@ -4190,13 +4140,10 @@ export default function App() {
             </div>
             <div className="flex-1">
               <div className="flex items-baseline gap-2">
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-red-500" />
                 <p className="text-sm font-medium text-red-400">Запись видео</p>
                 <p className="text-xs font-semibold text-red-300/90">{recordingTimeLabel()}</p>
-                {recordingLocked ? (
-                  <span className="rounded-md bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold text-tc-text-sec">🔒</span>
-                ) : null}
               </div>
-              <p className="text-xs text-tc-text-muted">{recordingHint || "Отпустите, чтобы отправить"}</p>
             </div>
             <button
               type="button"
@@ -4207,15 +4154,20 @@ export default function App() {
             >
               Камера
             </button>
-            {recordingLocked ? (
-              <button
-                type="button"
-                className="shrink-0 rounded-xl bg-red-500/20 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-red-500/25"
-                onClick={() => { void stopVideoNoteRecord({ discard: false }); }}
-              >
-                Стоп
-              </button>
-            ) : null}
+            <button
+              type="button"
+              className="shrink-0 rounded-xl bg-tc-border px-3 py-2 text-xs font-semibold text-tc-text-sec transition hover:bg-tc-hover"
+              onClick={() => { void stopVideoNoteRecord({ discard: true }); recordingGestureRef.current = { active: false, kind: null }; }}
+            >
+              Отмена
+            </button>
+            <button
+              type="button"
+              className="shrink-0 rounded-xl bg-red-500/20 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-red-500/30"
+              onClick={() => { void stopVideoNoteRecord({ discard: false }); recordingGestureRef.current = { active: false, kind: null }; }}
+            >
+              Отправить
+            </button>
           </div>
         ) : null}
         {videoNoteUploading && !videoNoteRecording ? (
@@ -4230,23 +4182,25 @@ export default function App() {
             </div>
             <div className="flex-1">
               <div className="flex items-baseline gap-2">
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-red-500" />
                 <p className="text-sm font-medium text-red-400">Запись голоса</p>
                 <p className="text-xs font-semibold text-red-300/90">{recordingTimeLabel()}</p>
-                {recordingLocked ? (
-                  <span className="rounded-md bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold text-tc-text-sec">🔒</span>
-                ) : null}
               </div>
-              <p className="text-xs text-tc-text-muted">{recordingHint || "Отпустите, чтобы отправить"}</p>
             </div>
-            {recordingLocked ? (
-              <button
-                type="button"
-                className="shrink-0 rounded-xl bg-red-500/20 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-red-500/25"
-                onClick={() => { void stopVoiceRecord({ discard: false }); }}
-              >
-                Стоп
-              </button>
-            ) : null}
+            <button
+              type="button"
+              className="shrink-0 rounded-xl bg-tc-border px-3 py-2 text-xs font-semibold text-tc-text-sec transition hover:bg-tc-hover"
+              onClick={() => { void stopVoiceRecord({ discard: true }); recordingGestureRef.current = { active: false, kind: null }; }}
+            >
+              Отмена
+            </button>
+            <button
+              type="button"
+              className="shrink-0 rounded-xl bg-red-500/20 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-red-500/30"
+              onClick={() => { void stopVoiceRecord({ discard: false }); recordingGestureRef.current = { active: false, kind: null }; }}
+            >
+              Отправить
+            </button>
           </div>
         ) : null}
         {voiceUploading && !voiceRecording ? (
@@ -4383,7 +4337,7 @@ export default function App() {
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  void beginRecordingGesture("video", e);
+                  void toggleRecording("video");
                 }}
               >
                 <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
@@ -4399,7 +4353,7 @@ export default function App() {
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  void beginRecordingGesture("voice", e);
+                  void toggleRecording("voice");
                 }}
               >
                 <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.3 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.77 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>
