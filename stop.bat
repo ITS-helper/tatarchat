@@ -22,4 +22,5 @@ echo Docker остановлен.
 
 echo.
 echo Всё остановлено.
+if "%TC_NO_PAUSE%"=="1" exit /b 0
 pause

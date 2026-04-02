@@ -5,7 +5,8 @@
 param(
     [string] $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
     [string] $Branch = 'main',
-    [switch] $SkipBuild
+    [switch] $SkipBuild,
+    [switch] $FullRestart
 )
 
 $ErrorActionPreference = 'Stop'
@@ -92,6 +93,35 @@ try {
     Append-DeployLog 'DONE'
     Write-Host "=== Done ===" -ForegroundColor Green
     Write-Host "Log: $logFile" -ForegroundColor DarkGray
+
+    if ($FullRestart) {
+        Write-Host "=== Full restart requested (stop.bat + start.bat as admin) ===" -ForegroundColor Yellow
+        $taskName = "TatarChat-FullRestart"
+        $repoRootWin = $RepoRoot
+        $stopBat = Join-Path $repoRootWin "stop.bat"
+        $startBat = Join-Path $repoRootWin "start.bat"
+        if (-not (Test-Path $stopBat) -or -not (Test-Path $startBat)) {
+            throw "stop.bat or start.bat not found in $RepoRoot"
+        }
+
+        # Create on-demand scheduled task with highest privileges.
+        $exists = $false
+        try {
+            schtasks /Query /TN $taskName *> $null
+            if ($LASTEXITCODE -eq 0) { $exists = $true }
+        } catch {}
+
+        if (-not $exists) {
+            $cmd = "cmd.exe /c `"set TC_NO_PAUSE=1 && `"$stopBat`" && timeout /t 2 /nobreak >nul && `"$startBat`"`""
+            # Run as SYSTEM to avoid password prompt; requires admin rights which Task Scheduler provides.
+            schtasks /Create /F /TN $taskName /SC ONDEMAND /RL HIGHEST /RU SYSTEM /TR $cmd | Out-Null
+            Write-Host "  Created scheduled task: $taskName"
+        }
+
+        schtasks /Run /TN $taskName | Out-Null
+        Write-Host "  Triggered scheduled task: $taskName"
+        Append-DeployLog "FULL_RESTART task=$taskName"
+    }
 } catch {
     Append-DeployLog 'FAIL'
     throw
