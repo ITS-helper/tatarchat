@@ -1422,21 +1422,12 @@ async function ensureCorePublicChannelRows() {
   }
   await pool.query(`
     INSERT INTO channels (slug, title, kind)
-    SELECT 'obshaga', 'Общага', 'public'
-    WHERE NOT EXISTS (SELECT 1 FROM channels WHERE slug = 'obshaga')
-  `);
-  await pool.query(`
-    INSERT INTO channels (slug, title, kind)
     SELECT 'lobby', 'Семья', 'public'
     WHERE NOT EXISTS (SELECT 1 FROM channels WHERE slug = 'lobby')
   `);
   await pool.query(
     `UPDATE channels SET title = $1 WHERE slug = 'lobby' AND kind = 'public'`,
     ["Семья"]
-  );
-  await pool.query(
-    `UPDATE channels SET title = $1 WHERE slug = 'obshaga' AND kind = 'public'`,
-    ["Общага"]
   );
   await pool.query(
     `UPDATE channels SET title = $1 WHERE slug = 'dtd_rabota' AND kind = 'public'`,
@@ -1479,9 +1470,6 @@ function mergeMissingCorePublicRows(rows) {
     if (!bySlug.has(slug)) {
       bySlug.set(slug, { slug, title: conf.title, avatar_storage_key: null });
     }
-  }
-  if (!bySlug.has("obshaga")) {
-    bySlug.set("obshaga", { slug: "obshaga", title: "Общага", avatar_storage_key: null });
   }
   if (!bySlug.has("lobby")) {
     bySlug.set("lobby", { slug: "lobby", title: "Семья", avatar_storage_key: null });

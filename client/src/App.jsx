@@ -759,7 +759,7 @@ function ChannelGlyph({ slug, className }) {
       </svg>
     );
   }
-  if (s === "obshaga") {
+  if (s.includes("obshag")) {
     // Handshake
     return (
       <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden>
