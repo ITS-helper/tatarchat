@@ -2713,7 +2713,11 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
       }
       if (String(e?.message || "").startsWith("ollama_http_")) {
         console.error("[ai] Ollama:", e?.detail || e?.message);
-        return res.status(503).json({ error: "Модель недоступна (Ollama). Проверьте сервер." });
+        const detail = String(e?.detail || "").trim().slice(0, 400);
+        return res.status(503).json({
+          error: "Модель недоступна (Ollama).",
+          detail: detail || undefined,
+        });
       }
       throw e;
     }

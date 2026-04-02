@@ -113,7 +113,8 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        onError?.(data.error || `Ошибка ${res.status}`);
+        const d = typeof data.detail === "string" && data.detail.trim() ? ` ${data.detail.trim()}` : "";
+        onError?.((data.error || `Ошибка ${res.status}`) + d);
         return;
       }
       onError?.(null);
@@ -145,7 +146,8 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        onError?.(data.error || "Не удалось очистить");
+        const d = typeof data.detail === "string" && data.detail.trim() ? ` ${data.detail.trim()}` : "";
+        onError?.((data.error || "Не удалось очистить") + d);
         return;
       }
       onError?.(null);
@@ -180,7 +182,8 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        onError?.(data.error || `Ошибка ${res.status}`);
+        const d = typeof data.detail === "string" && data.detail.trim() ? ` ${data.detail.trim()}` : "";
+        onError?.((data.error || `Ошибка ${res.status}`) + d);
         return;
       }
       await reloadFacts();
@@ -200,7 +203,8 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        onError?.(data.error || `Ошибка ${res.status}`);
+        const d = typeof data.detail === "string" && data.detail.trim() ? ` ${data.detail.trim()}` : "";
+        onError?.((data.error || `Ошибка ${res.status}`) + d);
         return;
       }
       await reloadFacts();
@@ -230,7 +234,8 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        onError?.(data.error || `Ошибка ${res.status}`);
+        const d = typeof data.detail === "string" && data.detail.trim() ? ` ${data.detail.trim()}` : "";
+        onError?.((data.error || `Ошибка ${res.status}`) + d);
         return;
       }
       if (data.model) setModel(data.model);
