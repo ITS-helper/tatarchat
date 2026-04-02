@@ -3187,7 +3187,7 @@ export default function App() {
   );
 
   const sendMessage = async (e) => {
-    e.preventDefault();
+    e?.preventDefault?.();
     const text = input.trim();
 
     if (editingId != null) {
@@ -4604,9 +4604,8 @@ export default function App() {
 
         {/* Input area */}
         {activeView === CHANNEL_VIEWS.chat && !personalAiOpen ? (
-        <form
-          id="tc-chat-form"
-          onSubmit={sendMessage}
+        <>
+        <div
           className="relative z-10 tc-composer-bar flex flex-col gap-2 border-t border-tc-border bg-tc-header px-2 py-2 sm:px-3"
         >
           {attachMenuOpen && typeof document !== "undefined" && attachMenuNarrow
@@ -4688,6 +4687,12 @@ export default function App() {
               className="tc-msg-input min-h-[44px] min-w-0 flex-1 border-0 bg-transparent py-2.5 text-base text-tc-text outline-none ring-0 placeholder:text-tc-text-muted focus:ring-0 sm:text-sm"
               value={input}
               onChange={onInputChange}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void sendMessage();
+                }
+              }}
               placeholder={editingId != null ? "Редактирование…" : "Сообщение"}
               maxLength={2000}
               autoComplete="off"
@@ -4696,18 +4701,6 @@ export default function App() {
             />
             <div className="flex shrink-0 items-center gap-0.5">
               <div className="relative isolate shrink-0">
-                <input
-                  ref={fileInputRef}
-                  form="tc-chat-form"
-                  id="tc-chat-attach-file"
-                  type="file"
-                  // Не absolute к форме/viewport — иначе на PWA зона (0,0) пересекается с кнопкой меню.
-                  // Android: program click() через sr-only внутри той же ячейки, что и скрепка.
-                  className="sr-only"
-                  tabIndex={-1}
-                  accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,application/vnd.android.package-archive,.apk,.pdf,.txt,video/*,audio/*"
-                  onChange={onComposerDocumentFileChange}
-                />
                 <button
                   type="button"
                   data-attach-toggle="1"
@@ -4721,15 +4714,6 @@ export default function App() {
                 >
                   <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 015 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 005 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/></svg>
                 </button>
-                <input
-                  ref={mediaInputRef}
-                  id="tc-chat-attach-media"
-                  type="file"
-                  className="sr-only"
-                  tabIndex={-1}
-                  accept="image/*,video/*"
-                  onChange={onComposerMediaFileChange}
-                />
                 {attachMenuOpen && !attachMenuNarrow ? (
                   <div
                     data-attach-menu-root="1"
@@ -4790,7 +4774,7 @@ export default function App() {
                 <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.3 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.77 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>
               </button>
               <button
-                type="submit"
+                type="button"
                 disabled={
                   status === "online" && !roomJoined
                     ? true
@@ -4801,6 +4785,7 @@ export default function App() {
                 className="flex h-10 w-10 shrink-0 touch-manipulation items-center justify-center rounded-full text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent disabled:opacity-40"
                 title="Отправить"
                 aria-label="Отправить"
+                onClick={() => void sendMessage()}
               >
                 <svg viewBox="0 0 24 24" className="h-6 w-6 rotate-90" fill="currentColor">
                   <path d="M10 2h4v4l3 4v11a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V10l3-4V2z"/>
@@ -4810,7 +4795,28 @@ export default function App() {
               </button>
             </div>
           </div>
-        </form>
+        </div>
+        <input
+          ref={fileInputRef}
+          id="tc-chat-attach-file"
+          type="file"
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden
+          accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,application/vnd.android.package-archive,.apk,.pdf,.txt,video/*,audio/*"
+          onChange={onComposerDocumentFileChange}
+        />
+        <input
+          ref={mediaInputRef}
+          id="tc-chat-attach-media"
+          type="file"
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden
+          accept="image/*,video/*"
+          onChange={onComposerMediaFileChange}
+        />
+        </>
         ) : null}
           </>
         )}
