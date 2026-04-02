@@ -2752,30 +2752,17 @@ export default function App() {
     return () => document.removeEventListener("pointerdown", onDocDown);
   }, [attachMenuOpen]);
 
-  const pickAttachMedia = useCallback((e) => {
-    e.stopPropagation();
-    const el = mediaInputRef.current;
-    if (el) el.value = "";
-    try {
-      el?.showPicker?.();
-    } catch (_) {}
-    try {
-      el?.click?.();
-    } catch (_) {}
-    setTimeout(() => setAttachMenuOpen(false), 0);
+  /** iOS Safari/PWA: надёжнее label+htmlFor, чем input.click(); меню закрываем после выбора, не до */
+  const onComposerMediaFileChange = useCallback((e) => {
+    const f = e.target.files?.[0] ?? null;
+    setPendingFile(f);
+    if (f) setAttachMenuOpen(false);
   }, []);
 
-  const pickAttachDocument = useCallback((e) => {
-    e.stopPropagation();
-    const el = fileInputRef.current;
-    if (el) el.value = "";
-    try {
-      el?.showPicker?.();
-    } catch (_) {}
-    try {
-      el?.click?.();
-    } catch (_) {}
-    setTimeout(() => setAttachMenuOpen(false), 0);
+  const onComposerDocumentFileChange = useCallback((e) => {
+    const f = e.target.files?.[0] ?? null;
+    setPendingFile(f);
+    if (f) setAttachMenuOpen(false);
   }, []);
 
   const flushReaction = useCallback(
@@ -4272,27 +4259,27 @@ export default function App() {
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <button
-                      type="button"
-                      className="flex w-full min-h-[52px] items-center gap-4 px-5 py-4 text-left text-base font-medium text-tc-text-sec transition active:bg-tc-hover hover:bg-tc-hover hover:text-tc-accent"
-                      onClick={pickAttachMedia}
+                    <label
+                      htmlFor="tc-chat-attach-media"
+                      className="flex w-full min-h-[52px] cursor-pointer items-center gap-4 px-5 py-4 text-left text-base font-medium text-tc-text-sec transition active:bg-tc-hover hover:bg-tc-hover hover:text-tc-accent"
+                      onPointerDown={(ev) => ev.stopPropagation()}
                     >
-                      <svg viewBox="0 0 24 24" className="h-7 w-7 shrink-0" fill="currentColor">
+                      <svg viewBox="0 0 24 24" className="h-7 w-7 shrink-0" fill="currentColor" aria-hidden>
                         <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" />
                       </svg>
                       Фото или видео
-                    </button>
+                    </label>
                     <div className="mx-4 border-t border-tc-border/50" />
-                    <button
-                      type="button"
-                      className="flex w-full min-h-[52px] items-center gap-4 px-5 py-4 text-left text-base font-medium text-tc-text-sec transition active:bg-tc-hover hover:bg-tc-hover hover:text-tc-accent"
-                      onClick={pickAttachDocument}
+                    <label
+                      htmlFor="tc-chat-attach-file"
+                      className="flex w-full min-h-[52px] cursor-pointer items-center gap-4 px-5 py-4 text-left text-base font-medium text-tc-text-sec transition active:bg-tc-hover hover:bg-tc-hover hover:text-tc-accent"
+                      onPointerDown={(ev) => ev.stopPropagation()}
                     >
-                      <svg viewBox="0 0 24 24" className="h-7 w-7 shrink-0" fill="currentColor">
+                      <svg viewBox="0 0 24 24" className="h-7 w-7 shrink-0" fill="currentColor" aria-hidden>
                         <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11zM8 15.01l1.41 1.41L11 14.84V19h2v-4.16l1.59 1.59L16 15.01 12.01 11 8 15.01z" />
                       </svg>
                       Документ
-                    </button>
+                    </label>
                   </div>
                 </>,
                 document.body
@@ -4333,7 +4320,7 @@ export default function App() {
                   className="sr-only"
                   tabIndex={-1}
                   accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,application/vnd.android.package-archive,.apk,.pdf,.txt,video/*,audio/*"
-                  onChange={(e) => { setPendingFile(e.target.files?.[0] || null); }}
+                  onChange={onComposerDocumentFileChange}
                 />
                 <button
                   type="button"
@@ -4350,11 +4337,12 @@ export default function App() {
                 </button>
                 <input
                   ref={mediaInputRef}
+                  id="tc-chat-attach-media"
                   type="file"
                   className="sr-only"
                   tabIndex={-1}
                   accept="image/*,video/*"
-                  onChange={(e) => { setPendingFile(e.target.files?.[0] || null); }}
+                  onChange={onComposerMediaFileChange}
                 />
                 {attachMenuOpen && !attachMenuNarrow ? (
                   <div
@@ -4363,23 +4351,23 @@ export default function App() {
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <button
-                      type="button"
-                      className="flex w-full items-center gap-3 px-4 py-3.5 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
-                      onClick={pickAttachMedia}
+                    <label
+                      htmlFor="tc-chat-attach-media"
+                      className="flex w-full cursor-pointer items-center gap-3 px-4 py-3.5 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+                      onPointerDown={(ev) => ev.stopPropagation()}
                     >
-                      <svg viewBox="0 0 24 24" className="h-6 w-6 shrink-0" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                      <svg viewBox="0 0 24 24" className="h-6 w-6 shrink-0" fill="currentColor" aria-hidden><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
                       Фото или видео
-                    </button>
+                    </label>
                     <div className="mx-3 border-t border-tc-border/50" />
-                    <button
-                      type="button"
-                      className="flex w-full items-center gap-3 px-4 py-3.5 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
-                      onClick={pickAttachDocument}
+                    <label
+                      htmlFor="tc-chat-attach-file"
+                      className="flex w-full cursor-pointer items-center gap-3 px-4 py-3.5 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+                      onPointerDown={(ev) => ev.stopPropagation()}
                     >
-                      <svg viewBox="0 0 24 24" className="h-6 w-6 shrink-0" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11zM8 15.01l1.41 1.41L11 14.84V19h2v-4.16l1.59 1.59L16 15.01 12.01 11 8 15.01z"/></svg>
+                      <svg viewBox="0 0 24 24" className="h-6 w-6 shrink-0" fill="currentColor" aria-hidden><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11zM8 15.01l1.41 1.41L11 14.84V19h2v-4.16l1.59 1.59L16 15.01 12.01 11 8 15.01z"/></svg>
                       Документ
-                    </button>
+                    </label>
                   </div>
                 ) : null}
               </div>
