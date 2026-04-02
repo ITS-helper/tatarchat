@@ -47,6 +47,12 @@ TatarChat — удалённый git pull / деплой без физическ
 
   ssh USER@100.x.x.x powershell -ExecutionPolicy Bypass -File C:\tatarchat\scripts\deploy-pull.ps1
 
+Пример (ваш сервер): pull + пересборка клиента (npm run build) + перезапуск Node + stop/start (Caddy, Docker, Node):
+
+  ssh Tatarfamily@100.123.209.16 powershell -ExecutionPolicy Bypass -File C:\tatarchat\scripts\deploy-pull.ps1 -FullRestart
+
+Отдельно указывать пересборку в команде SSH не нужно: скрипт сам делает git pull, затем npm run build в client\ (шаг [2/3]), затем перезапуск. Ключ -SkipBuild отключает только сборку клиента.
+
 Если в cmd текст «кракозябрами» — это кодировка консоли, скрипт всё равно мог отработать.
 Проверка: на сервере пишется ASCII-лог. С ноута:
 
@@ -56,13 +62,14 @@ TatarChat — удалённый git pull / деплой без физическ
 Удобнее открыть PowerShell на ноуте и перед ssh выполнить:  chcp 65001
 
 
-Скрипт делает: git pull origin main → npm run build в client → перезапуск только
-Node на порту 3001. Docker и Caddy не останавливаются.
+Скрипт делает: git pull origin main → пересборка клиента (npm run build в client,
+артефакт client\dist) → перезапуск только Node на порту 3001. Docker и Caddy не
+останавливаются (если не указан -FullRestart).
 Node поднимается через Win32_Process.Create (не через Start-Process), чтобы процесс
 не завершался при закрытии SSH-сессии.
 
-Полный перезапуск (stop.bat + start.bat от администратора) после pull/build:
-  ... deploy-pull.ps1 -FullRestart
+Полный перезапуск (stop.bat + start.bat от администратора) после pull и пересборки клиента:
+  ssh Tatarfamily@100.123.209.16 powershell -ExecutionPolicy Bypass -File C:\tatarchat\scripts\deploy-pull.ps1 -FullRestart
 
 Технически это делается через Scheduled Task "TatarChat-FullRestart" с RunLevel Highest,
 чтобы обойти UAC в SSH-сессии. stop.bat при этом запускается с TC_NO_PAUSE=1 (без pause).

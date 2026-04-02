@@ -1,6 +1,8 @@
-# TatarChat remote deploy: git pull, client build, restart Node on port 3001 only.
+# TatarChat remote deploy: git pull, client build (npm run build in client -> dist), restart Node on port 3001.
 # Docker and Caddy are left running. Run as the same Windows user that can git pull.
 # Example: ssh user@100.x.x.x powershell -ExecutionPolicy Bypass -File C:\tatarchat\scripts\deploy-pull.ps1
+# Full stack (includes same client rebuild + scheduled stop.bat/start.bat):
+#   ssh Tatarfamily@100.123.209.16 powershell -ExecutionPolicy Bypass -File C:\tatarchat\scripts\deploy-pull.ps1 -FullRestart
 
 param(
     [string] $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
@@ -33,7 +35,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "git pull failed exit=$LASTEXITCODE" }
 
     if (-not $SkipBuild) {
-        Write-Host "[2/3] npm run build (client) ..."
+        Write-Host "[2/3] client: npm run build (Vite -> client\dist for Caddy) ..."
         Push-Location (Join-Path $RepoRoot 'client')
         try {
             npm run build
@@ -41,8 +43,9 @@ try {
         } finally {
             Pop-Location
         }
+        Write-Host "  client dist ready: $(Join-Path $RepoRoot 'client\dist')" -ForegroundColor DarkGray
     } else {
-        Write-Host "[2/3] skip build (-SkipBuild)"
+        Write-Host "[2/3] skip client build (-SkipBuild)"
     }
 
     Write-Host "[3/3] restart Node on port 3001 ..."
