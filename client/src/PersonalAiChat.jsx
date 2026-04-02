@@ -394,7 +394,7 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
           </div>
         ) : messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-2 text-center">
-            <p className="text-sm text-tc-text-muted">Личный чат с моделью на сервере (Ollama).</p>
+            <p className="text-sm text-tc-text-muted">Личный чат с ассистентом на сервере.</p>
             {model ? <p className="text-xs text-tc-text-muted/90">Модель: {modelLabel(model)}</p> : null}
           </div>
         ) : (

@@ -41,15 +41,15 @@ alwaysApply: true
 - API: **`https://api.open-meteo.com/v1/forecast`** (без ключа), `current=temperature_2m,weather_code,wind_speed_10m`, `timezone=auto`; погодный код → эмодзи **`wmoWeatherEmoji`**.
 - Обновление: при монтировании, кнопка **↻**, интервал **30 минут**; ссылка «Open‑Meteo» внизу блока.
 
-## Личный ассистент Ollama (server + client)
+## Личный ассистент (LLM на сервере, server + client)
 
 - В сайдбаре **Личное** → после **Избранного** пункт **«Ассистент»** (`personalAiOpen`): отдельный UI **`client/src/PersonalAiChat.jsx`**, не Socket-комната.
 - **Сервер** `server/server.js`:
-  - История: таблица **`user_ollama_chats`** (per **`user_id`**: JSONB **`messages`**, своя история у каждого пользователя). **`GET /api/ai/chat`**, **`POST /api/ai/chat`** (`message` или `clear: true`).
-  - Модель (пер‑пользователя): таблица **`user_ollama_prefs`** + `POST /api/ai/chat { setModel }`, `GET /api/ai/chat` отдаёт `model` и `availableModels` (из env **`OLLAMA_MODELS`**).
-  - Память фактов: таблица **`user_ai_facts`** + API **`GET/POST/DELETE /api/ai/facts`**; факты подмешиваются в **system** промпт перед каждым ответом (не зависят от длины истории).
-  - Прокси в **Ollama** `POST /api/chat`, без выставления Ollama наружу. Env: **`OLLAMA_BASE_URL`**, **`OLLAMA_MODEL`**, **`OLLAMA_MODELS`**, **`OLLAMA_HTTP_TIMEOUT_MS`**, **`MAX_AI_USER_MESSAGE_CHARS`**, опционально **`OLLAMA_SYSTEM_PROMPT`** (база вместо встроенной).
-- **Поиск в интернете (опционально):** в **`POST /api/ai/chat`** флаг **`search: true`** — перед Ollama вызывается [Tavily Search API](https://docs.tavily.com/) (`POST https://api.tavily.com/search`, **`Authorization: Bearer TAVILY_API_KEY`**). Выдержки подмешиваются в **system**; в истории БД только user/assistant. Env: **`TAVILY_API_KEY`**, опционально **`TAVILY_SEARCH_DEPTH`** (`basic`|`fast`|`ultra-fast`|`advanced`), **`TAVILY_MAX_RESULTS`** (1–20), **`TAVILY_TIMEOUT_MS`**.
+  - История: таблица **`user_ollama_chats`** (per **`user_id`**: JSONB **`messages`**). **`GET /api/ai/chat`**, **`POST /api/ai/chat`** (`message` или `clear: true`).
+  - Модель (пер‑пользователя): таблица **`user_ollama_prefs`** + `POST /api/ai/chat { setModel }`, `GET /api/ai/chat` отдаёт `model` и `availableModels`.
+  - Память фактов: таблица **`user_ai_facts`** + API **`GET/POST/DELETE /api/ai/facts`**; факты подмешиваются в **system** перед каждым ответом.
+  - HTTP к локальному API модели: `POST …/api/chat` (URL, таймаут, список моделей и лимиты — константы/`process.env` в начале **`server/server.js`**, наружу не прокидывать). Свой базовый промпт: опционально **`AI_SYSTEM_PROMPT`** (полностью подменяет встроенный; в коде читается и прежний одноимённый ключ из env для обратной совместимости).
+- **Поиск в интернете (опционально):** в **`POST /api/ai/chat`** флаг **`search: true`** — сначала [Tavily Search API](https://docs.tavily.com/) (`POST https://api.tavily.com/search`, **`Authorization: Bearer TAVILY_API_KEY`**), выдержки в **system** (в БД только user/assistant). При ответе по выдержкам в промпте учитывается контекст **России**. Env: **`TAVILY_API_KEY`**, опционально **`TAVILY_SEARCH_DEPTH`**, **`TAVILY_MAX_RESULTS`**, **`TAVILY_TIMEOUT_MS`**.
   - UI: чекбокс «Искать в интернете» (localStorage **`tatarchat_ai_web_search`**), индикатор **«Думаю… / Ищу и думаю…»**.
   - Картинки: запрос Tavily с `include_images`; сервер фильтрует битые URL, клиент показывает сетку **«Картинки по теме поиска»** и открывает их в **превью‑лайтбоксе** внутри чата.
   - Источники: в ответе ассистента не должно быть `[1]` внутри текста — ссылки оформляются кратко в конце блоком **«Источники»**.

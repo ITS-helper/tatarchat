@@ -1372,7 +1372,7 @@ export default function App() {
   const [activeView, setActiveView] = useState(() => sessionStorage.getItem("tatarchat_active_view") || CHANNEL_VIEWS.chat);
   const [channelMenuRoom, setChannelMenuRoom] = useState(null);
   const [personalOpen, setPersonalOpen] = useState(false);
-  /** Личный чат с локальной LLM (Ollama), отдельно от комнат */
+  /** Личный ИИ-чат (отдельно от комнат) */
   const [personalAiOpen, setPersonalAiOpen] = useState(false);
   const personalAiOpenRef = useRef(false);
   const [adminUsers, setAdminUsers] = useState([]);
@@ -3542,7 +3542,7 @@ export default function App() {
               </div>
               <div className="min-w-0 flex-1 text-left">
                 <span className={`truncate text-sm font-medium ${personalAiOpen ? "text-tc-accent" : "text-tc-text"}`}>Ассистент</span>
-                <p className="truncate text-xs text-tc-text-muted">Личный чат (Ollama)</p>
+                <p className="truncate text-xs text-tc-text-muted">Спросить у бота</p>
               </div>
             </button>
 
@@ -4136,7 +4136,7 @@ export default function App() {
           </button>
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-base font-semibold text-tc-text">
-              {personalAiOpen ? "Ассистент · Ollama" : headerTitleForRoom({ roomTitle, activeRoom, activeView })}
+              {personalAiOpen ? "Ассистент" : headerTitleForRoom({ roomTitle, activeRoom, activeView })}
             </h2>
             <div className="flex items-center gap-2 text-xs text-tc-text-muted">
               <span className={`inline-block h-2 w-2 rounded-full ${status === "online" ? "bg-tc-online" : "bg-tc-text-muted"}`} />

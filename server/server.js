@@ -21,7 +21,7 @@ const webpush = require("web-push");
 const { createHash } = require("crypto");
 
 const PORT = Number(process.env.PORT) || 3001;
-/** Локальный Ollama (не открывать наружу). */
+/** Бэкенд LLM по HTTP на сервере (не прокидывать наружу). */
 const OLLAMA_BASE_URL = String(process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\/$/, "");
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "deepseek-r1:8b";
 const OLLAMA_MODELS = Array.from(
@@ -726,7 +726,7 @@ function normalizeTavilySearchDepth() {
   return "basic";
 }
 
-/** Выдержки Tavily для одного запроса к Ollama (не сохраняются в БД отдельно). */
+/** Выдержки Tavily для одного запроса к модели (не сохраняются в БД отдельно). */
 async function runTavilySearch(searchQuery) {
   const q = String(searchQuery ?? "")
     .trim()
@@ -765,7 +765,7 @@ async function runTavilySearch(searchQuery) {
       return {
         ok: true,
         block:
-          "По этому запросу Tavily не вернул результатов. Сообщи пользователю и ответь из своих знаний, если уместно.",
+          "По этому запросу поиск не вернул результатов. Сообщи пользователю и ответь из своих знаний, если уместно.",
         images: [],
       };
     }
@@ -798,10 +798,10 @@ async function runTavilySearch(searchQuery) {
       }
     }
     let block =
-      "Ниже выдержки из веб-поиска (Tavily). Не вставляй ссылки вида [1] прямо по тексту. В конце ответа добавь короткий блок «Источники» с 2–5 ссылками (название + URL). Не выдумывай URL и факты вне текста.\n\n";
+      "Ниже выдержки из веб-поиска. Не вставляй ссылки вида [1] прямо по тексту. В конце ответа добавь короткий блок «Источники» с 2–5 ссылками (название + URL). Не выдумывай URL и факты вне текста.\n\n";
     const ans = data.answer;
     if (typeof ans === "string" && ans.trim()) {
-      block += `Краткий конспект Tavily: ${ans.trim().replace(/\s+/g, " ")}\n\n`;
+      block += `Краткий конспект поиска: ${ans.trim().replace(/\s+/g, " ")}\n\n`;
     }
     const parts = results.map((it, i) => {
       const title = String(it.title || "").replace(/\s+/g, " ").trim();
@@ -821,8 +821,8 @@ async function runTavilySearch(searchQuery) {
       .slice(0, 8);
     return { ok: true, block: `${block}${parts.join("\n\n")}`.trim(), images, sources };
   } catch (e) {
-    if (e?.name === "AbortError") return { ok: false, error: "Таймаут Tavily" };
-    return { ok: false, error: e?.message || "Ошибка Tavily" };
+    if (e?.name === "AbortError") return { ok: false, error: "Таймаут поиска" };
+    return { ok: false, error: e?.message || "Ошибка поиска" };
   } finally {
     clearTimeout(to);
   }
@@ -925,15 +925,20 @@ async function filterWorkingImageUrls(images, limit = 8) {
   }
 }
 
-const DEFAULT_OLLAMA_SYSTEM_PROMPT = `You are a helpful assistant in the TatarChat messenger. The conversation history is in the following messages — use it, including the user's name and facts they already stated. Reply in Russian unless the user writes in another language. Be concise unless asked for detail. For longer answers use readable Markdown: blank lines between paragraphs, ## or ### section headings, bullet lists with "- ", avoid dumping everything in one line.`;
+const DEFAULT_AI_SYSTEM_PROMPT = `Ты ассистент в мессенджере TatarChat. Общайся по-русски простым разговорным языком, без официоза и канцелярита — как «быдло» с района: коротко, по делу, можно жаргон и обороты «как на улице», не занудствуй и не извиняйся по три раза. Историю диалога и факты, что уже сказал пользователь, помни и используй. Если он пишет не по-русски — отвечай на его языке.
+На развёрнутые ответы оформляй Markdown: пустая строка между абзацами, заголовки ## или ###, списки с "- ", не лепи всё в одну простыню.`;
 
 function buildAiSystemPrompt(nickname, webSearchBlock, factsBlock) {
-  const base = (process.env.OLLAMA_SYSTEM_PROMPT || "").trim() || DEFAULT_OLLAMA_SYSTEM_PROMPT;
+  const base =
+    (process.env.AI_SYSTEM_PROMPT || process.env.OLLAMA_SYSTEM_PROMPT || "").trim() || DEFAULT_AI_SYSTEM_PROMPT;
   let s = base;
   const nick = String(nickname || "").trim();
   if (nick) s += `\n\nПользователь в приложении подписан как: ${nick}.`;
   if (factsBlock) s += `\n\n${factsBlock}`;
-  if (webSearchBlock) s += `\n\n${webSearchBlock}`;
+  if (webSearchBlock) {
+    s += `\n\n${webSearchBlock}`;
+    s += `\n\nНиже есть выдержки из поиска — используй их, но ответ строй так, будто вы с пользователем в России: по умолчанию цены в рублях где уместно, города/магазины/сервисы — про РФ, время и новости — с поправкой на российский контекст, пока он явно не просит про другую страну.`;
+  }
   return s.slice(0, 120_000);
 }
 
@@ -960,7 +965,7 @@ async function callOllamaChat(model, messages) {
       data = {};
     }
     if (!res.ok) {
-      const err = new Error(`ollama_http_${res.status}`);
+      const err = new Error(`llm_http_${res.status}`);
       err.detail = (txt || "").slice(0, 800);
       throw err;
     }
@@ -982,7 +987,7 @@ async function callOllamaChatWithFallback({ userId, preferredModel, messages }) 
   try {
     return { ok: true, model: preferredModel, reply: await callOllamaChat(preferredModel, messages) };
   } catch (e) {
-    if (String(e?.message || "").startsWith("ollama_http_") && isOllamaModelNotFoundDetail(e?.detail)) {
+    if (String(e?.message || "").startsWith("llm_http_") && isOllamaModelNotFoundDetail(e?.detail)) {
       const fallback = normalizeOllamaModelName(OLLAMA_MODEL);
       if (fallback && fallback !== preferredModel) {
         try {
@@ -2835,7 +2840,7 @@ app.post("/api/ai/chat/send-with-image", requireAuth, uploadAiImage.single("imag
       const sr = await runTavilySearch(prompt || "image query");
       if (!sr.ok) {
         console.warn("[ai] Tavily:", sr.error);
-        return res.status(502).json({ error: sr.error || "Поиск Tavily недоступен" });
+        return res.status(502).json({ error: sr.error || "Поиск в интернете недоступен" });
       }
       webBlock = sr.block;
       webSources = Array.isArray(sr.sources) ? sr.sources : [];
@@ -2865,10 +2870,10 @@ app.post("/api/ai/chat/send-with-image", requireAuth, uploadAiImage.single("imag
       reply = rr.reply;
     } catch (e) {
       if (e?.name === "AbortError") return res.status(504).json({ error: "Модель отвечает слишком долго" });
-      if (String(e?.message || "").startsWith("ollama_http_")) {
-        console.error("[ai] Ollama:", e?.detail || e?.message);
+      if (String(e?.message || "").startsWith("llm_http_")) {
+        console.error("[ai] LLM:", e?.detail || e?.message);
         const detail = String(e?.detail || "").trim().slice(0, 400);
-        return res.status(503).json({ error: "Модель недоступна (Ollama).", detail: detail || undefined });
+        return res.status(503).json({ error: "Ассистент сейчас недоступен.", detail: detail || undefined });
       }
       throw e;
     }
@@ -2942,7 +2947,7 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
       const sr = await runTavilySearch(text);
       if (!sr.ok) {
         console.warn("[ai] Tavily:", sr.error);
-        return res.status(502).json({ error: sr.error || "Поиск Tavily недоступен" });
+        return res.status(502).json({ error: sr.error || "Поиск в интернете недоступен" });
       }
       webBlock = sr.block;
       webSources = Array.isArray(sr.sources) ? sr.sources : [];
@@ -2974,11 +2979,11 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
       if (e?.name === "AbortError") {
         return res.status(504).json({ error: "Модель отвечает слишком долго" });
       }
-      if (String(e?.message || "").startsWith("ollama_http_")) {
-        console.error("[ai] Ollama:", e?.detail || e?.message);
+      if (String(e?.message || "").startsWith("llm_http_")) {
+        console.error("[ai] LLM:", e?.detail || e?.message);
         const detail = String(e?.detail || "").trim().slice(0, 400);
         return res.status(503).json({
-          error: "Модель недоступна (Ollama).",
+          error: "Ассистент сейчас недоступен.",
           detail: detail || undefined,
         });
       }
