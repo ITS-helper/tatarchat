@@ -103,6 +103,13 @@ function isAdmin(nickname) {
   return ADMIN_NICKNAMES.includes(String(nickname || "").trim().toLowerCase());
 }
 
+// Only the owner can manage channels (create/rename/delete).
+const OWNER_NICKNAMES = (process.env.OWNER_NICKNAMES || "Макс").split(",").map((s) => s.trim().toLowerCase());
+
+function isOwner(nickname) {
+  return OWNER_NICKNAMES.includes(String(nickname || "").trim().toLowerCase());
+}
+
 /** Виртуальная «комната» в сайдбаре — не чат, только клиент + отдельный UI */
 const GALLERY_ROOM_SLUG = "__gallery";
 
@@ -2256,6 +2263,13 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+function requireChannelOwner(req, res, next) {
+  if (!req.user?.nickname || !isOwner(req.user.nickname)) {
+    return res.status(403).json({ error: "Только Макс может управлять каналами" });
+  }
+  next();
+}
+
 function parseGalleryParentQuery(val) {
   if (val == null || val === "") return { ok: true, id: null };
   const n = parseInt(val, 10);
@@ -2567,9 +2581,26 @@ app.get("/api/rooms", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/api/rooms", requireAuth, async (req, res) => {
+app.get("/api/admin/rooms", requireAuth, requireChannelOwner, async (_req, res) => {
   try {
-    if (!req.user.isAdmin) return res.status(403).json({ error: "Только для админов" });
+    await ensureCorePublicChannelRows();
+    const { rows } = await pool.query(`SELECT slug, title FROM channels WHERE kind = 'public' ORDER BY slug`);
+    const rooms = rows
+      .filter((r) => r.slug !== "dtd-rabota")
+      .map((r) => ({
+        slug: r.slug,
+        title: r.title || GROUP_ROOMS[r.slug]?.title || r.slug,
+        requiresPassword: !!(GROUP_ROOMS[r.slug]?.roomPassword != null),
+      }));
+    res.json({ rooms });
+  } catch (err) {
+    console.error("GET /api/admin/rooms", err);
+    res.status(500).json({ error: "Не удалось загрузить каналы" });
+  }
+});
+
+app.post("/api/rooms", requireAuth, requireChannelOwner, async (req, res) => {
+  try {
     const slug = sanitizeNickname(req.body?.slug);
     const title = String(req.body?.title || "").trim().slice(0, 64);
     if (!slug || !title) return res.status(400).json({ error: "slug и title обязательны" });
@@ -2591,9 +2622,8 @@ app.post("/api/rooms", requireAuth, async (req, res) => {
   }
 });
 
-app.put("/api/rooms/:slug", requireAuth, async (req, res) => {
+app.put("/api/rooms/:slug", requireAuth, requireChannelOwner, async (req, res) => {
   try {
-    if (!req.user.isAdmin) return res.status(403).json({ error: "Только для админов" });
     const slug = req.params.slug;
     const title = String(req.body?.title || "").trim().slice(0, 64);
     if (!title) return res.status(400).json({ error: "title обязателен" });
@@ -2605,9 +2635,8 @@ app.put("/api/rooms/:slug", requireAuth, async (req, res) => {
   }
 });
 
-app.delete("/api/rooms/:slug", requireAuth, async (req, res) => {
+app.delete("/api/rooms/:slug", requireAuth, requireChannelOwner, async (req, res) => {
   try {
-    if (!req.user.isAdmin) return res.status(403).json({ error: "Только для админов" });
     const slug = req.params.slug;
     if (slug === "lobby") return res.status(400).json({ error: "Нельзя удалить комнату «Семья»" });
     if (/^saved-\d+$/i.test(slug)) return res.status(400).json({ error: "Нельзя удалить избранное" });

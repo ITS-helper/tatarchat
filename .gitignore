@@ -22,3 +22,4 @@ apk/
 /Запуск от имени
 # Лог последнего удалённого деплоя (ASCII, только на сервере)
 scripts/last-deploy.log
+.commitmsg

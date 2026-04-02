@@ -850,6 +850,10 @@ export default function App() {
   const [input, setInput] = useState("");
   const [myUserId, setMyUserId] = useState(() => readUserId());
   const [imAdmin, setImAdmin] = useState(() => localStorage.getItem("tatarchat_admin") === "1");
+  const isOwner = (() => {
+    const n = String(nickname || "").trim().toLowerCase();
+    return n === "макс" || n === "max" || n === "maks";
+  })();
   const [replyTo, setReplyTo] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [selectedMsgId, setSelectedMsgId] = useState(null);
@@ -1089,6 +1093,7 @@ export default function App() {
   const [changePwBusy, setChangePwBusy] = useState(false);
   const [changePwOk, setChangePwOk] = useState("");
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
+  const [channelsPanelOpen, setChannelsPanelOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [themeLight, setThemeLight] = useState(() => localStorage.getItem("tatarchat_theme") === "light");
   const [activePattern, setActivePattern] = useState(() => localStorage.getItem("tatarchat_pattern") || "beer");
@@ -1102,6 +1107,9 @@ export default function App() {
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminSaving, setAdminSaving] = useState(null);
   const adminPanelOpenRef = useRef(false);
+  const [adminRooms, setAdminRooms] = useState([]);
+  const [adminRoomsLoading, setAdminRoomsLoading] = useState(false);
+  const [adminRoomsSaving, setAdminRoomsSaving] = useState(null); // slug | "__create" | "__delete:<slug>" | null
   const [chatImageLightbox, setChatImageLightbox] = useState(null);
   /** Счётчик упоминаний @ник по slug комнаты (как бейдж в Telegram). */
   const [mentionBadges, setMentionBadges] = useState({});
@@ -2471,6 +2479,110 @@ export default function App() {
     await refetchAdminUsers();
   };
 
+  const refetchAdminRooms = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!silent) setAdminRoomsLoading(true);
+      try {
+        const base = getApiBase();
+        const res = await fetch(`${base}/api/admin/rooms`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) setAdminRooms(data.rooms || []);
+        else if (!silent) setBanner(data.error || "Не удалось загрузить каналы");
+      } catch {
+        if (!silent) setBanner("Сеть: ошибка загрузки каналов");
+      } finally {
+        if (!silent) setAdminRoomsLoading(false);
+      }
+    },
+    [token]
+  );
+
+  const openChannelsPanel = async () => {
+    setChannelsPanelOpen(true);
+    await refetchAdminRooms();
+  };
+
+  const createRoomAdmin = async (slug, title) => {
+    const s = String(slug || "").trim();
+    const t = String(title || "").trim();
+    if (!s || !t) return;
+    setAdminRoomsSaving("__create");
+    try {
+      const base = getApiBase();
+      const res = await fetch(`${base}/api/rooms`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: s, title: t }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBanner(data.error || "Ошибка");
+        return;
+      }
+      setRoomModalSlug("");
+      setRoomModalTitle("");
+      await refetchAdminRooms({ silent: true });
+      refreshChannels();
+    } catch {
+      setBanner("Не удалось создать комнату");
+    } finally {
+      setAdminRoomsSaving(null);
+    }
+  };
+
+  const renameRoom = async (slug, title) => {
+    const t = String(title || "").trim().slice(0, 64);
+    if (!t) {
+      setBanner("Название обязательно");
+      return;
+    }
+    setAdminRoomsSaving(slug);
+    try {
+      const base = getApiBase();
+      const res = await fetch(`${base}/api/rooms/${encodeURIComponent(slug)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ title: t }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBanner(data.error || "Ошибка сохранения");
+        return;
+      }
+      await refetchAdminRooms({ silent: true });
+      refreshChannels();
+    } catch {
+      setBanner("Сеть: ошибка сохранения");
+    } finally {
+      setAdminRoomsSaving(null);
+    }
+  };
+
+  const deleteRoom = async (slug) => {
+    if (!slug) return;
+    setAdminRoomsSaving(`__delete:${slug}`);
+    try {
+      const base = getApiBase();
+      const res = await fetch(`${base}/api/rooms/${encodeURIComponent(slug)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBanner(data.error || "Ошибка удаления");
+        return;
+      }
+      await refetchAdminRooms({ silent: true });
+      refreshChannels();
+    } catch {
+      setBanner("Сеть: ошибка удаления");
+    } finally {
+      setAdminRoomsSaving(null);
+    }
+  };
+
   const toggleUserPerm = async (userId, field, value) => {
     setAdminSaving(userId);
     try {
@@ -3051,16 +3163,6 @@ export default function App() {
             <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 text-tc-text-muted" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
           </button>
           <div className="flex items-center gap-1">
-            {imAdmin && (
-              <button
-                type="button"
-                onClick={() => setRoomModalOpen(true)}
-                className="rounded-full p-1.5 text-tc-text-sec transition hover:bg-tc-hover"
-                title="Создать комнату"
-              >
-                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-              </button>
-            )}
             <button
               type="button"
               onClick={() => openDmModal()}
@@ -3513,6 +3615,18 @@ export default function App() {
                 </button>
               )}
 
+              {/* Channels admin (owner only) */}
+              {isOwner && (
+                <button
+                  type="button"
+                  onClick={() => { openChannelsPanel(); setProfileModalOpen(false); }}
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" fill="currentColor"><path d="M10 3H3v7h7V3zm11 0h-7v7h7V3zM10 14H3v7h7v-7zm11 0h-7v7h7v-7z"/></svg>
+                  Управление каналами
+                </button>
+              )}
+
               <div className="my-1 border-t border-tc-border"/>
 
               {/* Logout */}
@@ -3652,6 +3766,121 @@ export default function App() {
               </div>
               <div className="border-t border-tc-border px-6 py-3 text-xs text-tc-text-muted">
                 Доступ к каналу (Семья, DTD, Работа) даёт и чат, и галерею, и календарь для этой комнаты. Переключатели сохраняются сразу.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Channels admin modal (owner) */}
+        {channelsPanelOpen && (
+          <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setChannelsPanelOpen(false)}>
+            <div className="w-full max-w-4xl max-h-[85vh] flex flex-col rounded-xl bg-tc-panel shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between border-b border-tc-border px-6 py-4">
+                <h2 className="text-base font-semibold text-tc-text">Управление каналами</h2>
+                <button type="button" onClick={() => setChannelsPanelOpen(false)} className="rounded-lg p-1.5 text-tc-text-sec hover:bg-tc-hover" aria-label="Закрыть">
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+              </div>
+
+              <div className="overflow-y-auto flex-1">
+                <div className="border-b border-tc-border/60 px-6 py-4">
+                  <h3 className="mb-2 text-sm font-semibold text-tc-text">Добавить канал</h3>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void createRoomAdmin(roomModalSlug, roomModalTitle);
+                    }}
+                    className="flex flex-col gap-2 sm:flex-row"
+                  >
+                    <input
+                      type="text"
+                      placeholder="slug (eng, без пробелов)"
+                      value={roomModalSlug}
+                      onChange={(e) => setRoomModalSlug(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""))}
+                      className="w-full rounded-lg bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted focus:ring-1 focus:ring-tc-accent"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Название"
+                      value={roomModalTitle}
+                      onChange={(e) => setRoomModalTitle(e.target.value)}
+                      className="w-full rounded-lg bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted focus:ring-1 focus:ring-tc-accent"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!roomModalSlug.trim() || !roomModalTitle.trim() || adminRoomsSaving === "__create"}
+                      className="rounded-lg bg-tc-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-tc-accent-hover disabled:opacity-40"
+                    >
+                      Добавить
+                    </button>
+                  </form>
+                  <p className="mt-2 text-xs text-tc-text-muted">
+                    Каналы по умолчанию публичные для всех. Доступ к закрытым комнатам регулируется паролем комнаты.
+                  </p>
+                </div>
+
+                {adminRoomsLoading ? (
+                  <p className="p-8 text-center text-sm text-tc-text-muted">Загрузка…</p>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-tc-border text-left text-xs text-tc-text-muted uppercase">
+                        <th className="px-6 py-3 font-medium">slug</th>
+                        <th className="px-3 py-3 font-medium">Название</th>
+                        <th className="px-3 py-3 text-center font-medium">Пароль</th>
+                        <th className="px-6 py-3 text-right font-medium">Действия</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(adminRooms || []).map((r) => {
+                        const saving = adminRoomsSaving === r.slug;
+                        const deleting = adminRoomsSaving === `__delete:${r.slug}`;
+                        const locked = r.slug === "lobby" || /^saved-\\d+$/i.test(r.slug);
+                        return (
+                          <tr key={r.slug} className="border-b border-tc-border/50 hover:bg-tc-hover/30">
+                            <td className="px-6 py-3 font-mono text-xs text-tc-text-sec">{r.slug}</td>
+                            <td className="px-3 py-3">
+                              <input
+                                type="text"
+                                defaultValue={r.title || r.slug}
+                                disabled={saving || deleting}
+                                className="w-full rounded-lg bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted focus:ring-1 focus:ring-tc-accent disabled:opacity-60"
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    void renameRoom(r.slug, e.currentTarget.value);
+                                  }
+                                }}
+                                onBlur={(e) => {
+                                  const v = e.currentTarget.value;
+                                  if (String(v || "").trim() !== String(r.title || r.slug).trim()) void renameRoom(r.slug, v);
+                                }}
+                              />
+                            </td>
+                            <td className="px-3 py-3 text-center text-xs text-tc-text-muted">
+                              {r.requiresPassword ? "🔒" : "—"}
+                            </td>
+                            <td className="px-6 py-3 text-right">
+                              <button
+                                type="button"
+                                disabled={locked || saving || deleting}
+                                onClick={() => void deleteRoom(r.slug)}
+                                className="rounded-lg px-3 py-2 text-xs font-semibold text-tc-danger transition hover:bg-tc-danger/10 disabled:opacity-40"
+                                title={locked ? "Нельзя удалить" : "Удалить"}
+                              >
+                                Удалить
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div className="border-t border-tc-border px-6 py-3 text-xs text-tc-text-muted">
+                Доступ к каналу даёт и чат, и галерею, и календарь.
               </div>
             </div>
           </div>
