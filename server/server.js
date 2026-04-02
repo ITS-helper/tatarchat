@@ -2347,6 +2347,28 @@ app.get("/api/apk/latest", async (_req, res) => {
   }
 });
 
+app.get("/api/apk/latest-info", async (_req, res) => {
+  try {
+    const f = await getLatestApkFile();
+    if (!f) return res.status(404).json({ ok: false, error: "APK not found" });
+    const m = String(f.name || "");
+    const parsed = /TatarChat-debug-v([^\(]+)\((\d+)\)-/.exec(m);
+    const versionName = parsed?.[1] || null;
+    const versionCode = parsed?.[2] || null;
+    res.json({
+      ok: true,
+      name: f.name,
+      sizeBytes: f.size || 0,
+      modifiedAt: new Date(f.mtimeMs || Date.now()).toISOString(),
+      versionName,
+      versionCode,
+    });
+  } catch (err) {
+    console.error("GET /api/apk/latest-info", err?.message || err);
+    res.status(500).json({ ok: false, error: "Error" });
+  }
+});
+
 app.get("/api/push/web-vapid-key", (req, res) => {
   try {
     const publicKey = process.env.VAPID_PUBLIC_KEY;

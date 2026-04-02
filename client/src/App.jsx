@@ -2421,6 +2421,23 @@ export default function App() {
     }
   };
 
+  const [apkInfo, setApkInfo] = useState(null);
+  useEffect(() => {
+    if (token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const base = getApiBase();
+        const res = await fetch(`${base}/api/apk/latest-info`, { cache: "no-store" });
+        const data = await res.json().catch(() => null);
+        if (!cancelled && data && data.ok) setApkInfo(data);
+      } catch (_) {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
   const openAdminPanel = async () => {
     setAdminPanelOpen(true);
     await refetchAdminUsers();
@@ -2940,6 +2957,13 @@ export default function App() {
             >
               Скачать Android (APK)
             </a>
+            {apkInfo?.name ? (
+              <p className="mt-2 text-center text-[11px] leading-snug text-tc-text-muted">
+                APK: {apkInfo.versionName ? `v${apkInfo.versionName}` : "v?"}
+                {apkInfo.versionCode ? ` (${apkInfo.versionCode})` : ""} ·{" "}
+                {apkInfo.modifiedAt ? new Date(apkInfo.modifiedAt).toLocaleString() : ""}
+              </p>
+            ) : null}
             <p className="mt-2 text-center text-[11px] leading-snug text-tc-text-muted">
               Если скачивание не началось — откройте ссылку в браузере и подтвердите загрузку.
             </p>
