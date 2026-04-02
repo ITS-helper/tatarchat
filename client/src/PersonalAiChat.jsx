@@ -3,6 +3,23 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 const LS_AI_WEB = "tatarchat_ai_web_search";
 const LS_AI_MODEL = "tatarchat_ai_model";
 
+function parseSourcesBlock(content) {
+  const raw = String(content ?? "");
+  const marker = "\n\nИсточники:\n";
+  const idx = raw.lastIndexOf(marker);
+  if (idx === -1) return { body: raw, sources: [] };
+  const body = raw.slice(0, idx).trimEnd();
+  const block = raw.slice(idx + marker.length).trim();
+  const lines = block.split("\n").map((s) => s.trim()).filter(Boolean);
+  const sources = [];
+  for (const line of lines) {
+    const m = /^-\s*(.*?)\s+—\s+(https?:\/\/\S+)\s*$/.exec(line);
+    if (!m) continue;
+    sources.push({ title: m[1].trim() || m[2].trim(), url: m[2].trim() });
+  }
+  return { body, sources };
+}
+
 export default function PersonalAiChat({ getApiBase, token, nickname, onError }) {
   const [messages, setMessages] = useState([]);
   const [model, setModel] = useState("");
@@ -245,6 +262,7 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
             {model ? <p className="text-center text-[10px] text-tc-text-muted">Модель: {modelLabel(model)}</p> : null}
             {messages.map((m, i) => {
               const mine = m.role === "user";
+              const parsed = !mine ? parseSourcesBlock(m.content) : { body: m.content, sources: [] };
               return (
                 <div key={i} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
                   <div
@@ -261,7 +279,29 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
                         {nickname || "Вы"}
                       </p>
                     )}
-                    {m.content}
+                    <div className="whitespace-pre-wrap break-words">{parsed.body}</div>
+                    {!mine && parsed.sources.length ? (
+                      <details className="mt-2 rounded-lg border border-tc-border/60 bg-white/5 px-2 py-1.5">
+                        <summary className="cursor-pointer select-none text-[11px] font-semibold text-tc-text-sec hover:text-tc-accent">
+                          Источники ({parsed.sources.length})
+                        </summary>
+                        <ul className="mt-1 space-y-1 text-[11px] text-tc-text-muted">
+                          {parsed.sources.map((s, si) => (
+                            <li key={si} className="leading-snug">
+                              <a
+                                href={s.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="underline decoration-tc-border underline-offset-2 hover:text-tc-accent"
+                                title={s.url}
+                              >
+                                {s.title}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    ) : null}
                   </div>
                 </div>
               );
