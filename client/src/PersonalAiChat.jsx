@@ -32,6 +32,8 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
   const [factInput, setFactInput] = useState("");
   const [factsOpen, setFactsOpen] = useState(false);
   const [input, setInput] = useState("");
+  const [pendingImage, setPendingImage] = useState(null);
+  const fileRef = useRef(null);
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const listRef = useRef(null);
@@ -99,18 +101,31 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
   const send = async (e) => {
     e?.preventDefault?.();
     const t = input.trim();
-    if (!t || sending || !token) return;
+    if ((!t && !pendingImage) || sending || !token) return;
     setInput("");
     setSending(true);
     setSearching(webSearchOn && webSearchAvailable);
     setWebImages([]);
     onError?.(null);
     try {
-      const res = await fetch(`${base}/api/ai/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ message: t, search: webSearchOn && webSearchAvailable }),
-      });
+      let res;
+      if (pendingImage) {
+        const fd = new FormData();
+        fd.append("message", t);
+        fd.append("search", webSearchOn && webSearchAvailable ? "true" : "false");
+        fd.append("image", pendingImage);
+        res = await fetch(`${base}/api/ai/chat/send-with-image`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: fd,
+        });
+      } else {
+        res = await fetch(`${base}/api/ai/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ message: t, search: webSearchOn && webSearchAvailable }),
+        });
+      }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         const d = typeof data.detail === "string" && data.detail.trim() ? ` ${data.detail.trim()}` : "";
@@ -123,6 +138,8 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
       const imgs = data?.web?.images;
       if (Array.isArray(imgs)) setWebImages(imgs.slice(0, 8));
       if (Array.isArray(data.facts)) setFacts(data.facts);
+      setPendingImage(null);
+      if (fileRef.current) fileRef.current.value = "";
     } catch (err) {
       console.error(err);
       onError?.("Сеть: не удалось отправить");
@@ -517,6 +534,28 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
         ) : null}
 
         <form onSubmit={send} className="flex min-h-[44px] min-w-0 items-center gap-0.5 rounded-xl bg-tc-input pl-3 pr-1 sm:pl-4">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp,image/*"
+            className="sr-only"
+            onChange={(e) => {
+              const f = e.target.files?.[0] || null;
+              if (!f) return;
+              setPendingImage(f);
+            }}
+          />
+          <button
+            type="button"
+            disabled={sending || loading}
+            onClick={() => fileRef.current?.click()}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent disabled:opacity-40"
+            title="Прикрепить картинку"
+          >
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor" aria-hidden>
+              <path d="M21 19V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2zM8.5 11.5A2.5 2.5 0 1111 9a2.5 2.5 0 01-2.5 2.5zM6 19l4.5-6 3.5 4.5 2.5-3L19 19H6z" />
+            </svg>
+          </button>
           <textarea
             className="tc-msg-input min-h-[44px] max-h-40 min-w-0 flex-1 resize-y border-0 bg-transparent py-2.5 text-base text-tc-text outline-none ring-0 placeholder:text-tc-text-muted focus:ring-0 sm:text-sm"
             value={input}
@@ -535,12 +574,25 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
           />
           <button
             type="submit"
-            disabled={sending || loading || !input.trim()}
+            disabled={sending || loading || (!input.trim() && !pendingImage)}
             className="flex h-10 min-w-[2.5rem] shrink-0 items-center justify-center rounded-full bg-tc-accent px-3 text-sm font-semibold text-white transition hover:opacity-95 disabled:opacity-40"
           >
             {sending ? "…" : "→"}
           </button>
         </form>
+        {pendingImage ? (
+          <div className="flex items-center gap-2 rounded-lg bg-tc-input px-3 py-2 text-xs text-tc-text-sec">
+            <span className="truncate">🖼️ {pendingImage.name}</span>
+            <button
+              type="button"
+              className="shrink-0 text-tc-danger hover:underline"
+              onClick={() => { setPendingImage(null); if (fileRef.current) fileRef.current.value = ""; }}
+              title="Убрать"
+            >
+              ✕
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -67,6 +67,8 @@ const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp
 const VIDEO_NOTE_MIMES = new Set(["video/webm", "video/mp4"]);
 const VOICE_MIMES = new Set(["audio/webm", "audio/ogg", "audio/mpeg", "audio/mp4"]);
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
+const MAX_AI_IMAGE_BYTES = Math.min(Math.max(Number(process.env.MAX_AI_IMAGE_MB) || 6, 1), 20) * 1024 * 1024;
+const AI_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
 /** Браузеры шлют multipart с codecs: "video/webm;codecs=vp8,opus" — без нормализации multer отклоняет. */
 function normalizeContentTypeMime(m) {
@@ -1646,6 +1648,16 @@ const upload = multer({
   },
 });
 
+const uploadAiImage = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_AI_IMAGE_BYTES },
+  fileFilter(_req, file, cb) {
+    const mime = normalizeContentTypeMime(file.mimetype || "");
+    if (AI_IMAGE_MIMES.has(mime)) return cb(null, true);
+    cb(new Error("AI_IMAGE_TYPE"));
+  },
+});
+
 const uploadAvatar = multer({
   storage: multer.diskStorage({
     destination(_req, _file, cb) {
@@ -2683,6 +2695,103 @@ app.delete("/api/ai/facts/:id", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("DELETE /api/ai/facts/:id", err);
     res.status(500).json({ error: "Ошибка" });
+  }
+});
+
+app.post("/api/ai/chat/send-with-image", requireAuth, uploadAiImage.single("image"), async (req, res) => {
+  try {
+    await ensureUserOllamaChatSchema();
+    const userId = req.user.userId;
+
+    const wantSearch = req.body?.search === "true" || req.body?.search === true || req.body?.webSearch === "true";
+    if (wantSearch && !isTavilyConfigured()) {
+      return res.status(501).json({
+        error: "Поиск не настроен: задайте TAVILY_API_KEY в .env на сервере.",
+      });
+    }
+
+    const prompt = sanitizeAiUserMessage(req.body?.message || "");
+    const file = req.file;
+    if (!file?.buffer || !file?.buffer?.length) {
+      return res.status(400).json({ error: "Нет картинки" });
+    }
+    const mime = normalizeContentTypeMime(file.mimetype || "");
+    if (!AI_IMAGE_MIMES.has(mime)) return res.status(400).json({ error: "Некорректный тип файла" });
+
+    let webBlock = null;
+    let webImages = [];
+    let webSources = [];
+    if (wantSearch) {
+      const sr = await runTavilySearch(prompt || "image query");
+      if (!sr.ok) {
+        console.warn("[ai] Tavily:", sr.error);
+        return res.status(502).json({ error: sr.error || "Поиск Tavily недоступен" });
+      }
+      webBlock = sr.block;
+      webSources = Array.isArray(sr.sources) ? sr.sources : [];
+      const rawImages = Array.isArray(sr.images) ? sr.images : [];
+      webImages = await filterWorkingImageUrls(rawImages, 8);
+    }
+
+    const { rows } = await pool.query(`SELECT messages FROM user_ollama_chats WHERE user_id = $1`, [userId]);
+    let list = rows[0] ? normalizeStoredAiMessages(rows[0].messages) : [];
+
+    const userText = `${prompt ? prompt : "Опиши, что на картинке."}`.trim();
+    list.push({ role: "user", content: `🖼️ ${userText}` });
+
+    const historyForModel = trimMessagesForOllama(list).map(({ role, content }) => ({ role, content }));
+    const facts = await getUserAiFacts(userId);
+    const factsBlock = factsToPromptBlock(facts);
+    const systemPrompt = buildAiSystemPrompt(req.user.nickname, webBlock, factsBlock);
+
+    const imageBase64 = Buffer.from(file.buffer).toString("base64");
+    const userMsgForOllama = { role: "user", content: userText, images: [imageBase64] };
+    const ollamaMessages = [{ role: "system", content: systemPrompt }, ...historyForModel, userMsgForOllama];
+
+    const preferred = await getUserAiModel(userId);
+    let reply;
+    try {
+      const rr = await callOllamaChatWithFallback({ userId, preferredModel: preferred, messages: ollamaMessages });
+      reply = rr.reply;
+    } catch (e) {
+      if (e?.name === "AbortError") return res.status(504).json({ error: "Модель отвечает слишком долго" });
+      if (String(e?.message || "").startsWith("ollama_http_")) {
+        console.error("[ai] Ollama:", e?.detail || e?.message);
+        const detail = String(e?.detail || "").trim().slice(0, 400);
+        return res.status(503).json({ error: "Модель недоступна (Ollama).", detail: detail || undefined });
+      }
+      throw e;
+    }
+
+    if (!reply) reply = "(пустой ответ модели)";
+    let finalReply = stripAssistantNoise(reply);
+    if (wantSearch) {
+      finalReply = stripInlineBracketCitations(finalReply);
+      finalReply = normalizeMarkdownLinks(finalReply);
+      finalReply = collapseDuplicateUrls(finalReply);
+      finalReply = appendSourcesBlock(finalReply, webSources);
+    }
+
+    list.push({ role: "assistant", content: finalReply.slice(0, 200000) });
+    await pool.query(
+      `INSERT INTO user_ollama_chats (user_id, messages, updated_at) VALUES ($1, $2::jsonb, NOW())
+       ON CONFLICT (user_id) DO UPDATE SET messages = $2::jsonb, updated_at = NOW()`,
+      [userId, JSON.stringify(list)]
+    );
+
+    const effectiveModel = await getUserAiModel(userId);
+    res.json({
+      messages: list,
+      model: effectiveModel,
+      web: wantSearch ? { images: webImages, sources: webSources.slice(0, 8) } : undefined,
+      facts,
+    });
+  } catch (err) {
+    if (err?.message === "AI_IMAGE_TYPE") {
+      return res.status(400).json({ error: "Только картинки (jpg/png/gif/webp)" });
+    }
+    console.error("POST /api/ai/chat/send-with-image", err);
+    res.status(500).json({ error: "Ошибка ассистента" });
   }
 });
 
