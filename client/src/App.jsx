@@ -68,6 +68,30 @@ function MentionCountBadge({ count }) {
   );
 }
 
+/** 1 — отправлено, 2 — доставлено в чат, 3 — прочитано (ЛС). */
+function MessageDeliveryTicks({ level }) {
+  const title = level >= 3 ? "Прочитано" : level >= 2 ? "Доставлено" : "Отправлено";
+  if (level >= 3) {
+    return (
+      <span className="text-sky-500 dark:text-sky-400" title={title} aria-label={title}>
+        ✓✓
+      </span>
+    );
+  }
+  if (level >= 2) {
+    return (
+      <span className="text-tc-text/50" title={title} aria-label={title}>
+        ✓✓
+      </span>
+    );
+  }
+  return (
+    <span className="text-tc-text/40" title={title} aria-label={title}>
+      ✓
+    </span>
+  );
+}
+
 function viewLabel(view, { isWorkGallery = false } = {}) {
   if (view === CHANNEL_VIEWS.gallery) return isWorkGallery ? "файлопомойка" : "галерея";
   if (view === CHANNEL_VIEWS.calendar) return "календарь";
@@ -1107,6 +1131,10 @@ export default function App() {
   const [editingId, setEditingId] = useState(null);
   const [selectedMsgId, setSelectedMsgId] = useState(null);
   const [typingPeers, setTypingPeers] = useState([]);
+  /** messageId → 1 отправлено (ack), 2 доставлено (эхо в комнату). История без записи = UI как «доставлено». */
+  const [msgDelivery, setMsgDelivery] = useState({});
+  /** В ЛС: собеседник прочитал до этого id (сервер). */
+  const [dmPeerReadUpTo, setDmPeerReadUpTo] = useState(0);
   const [pendingFile, setPendingFile] = useState(null);
   const [videoNoteRecording, setVideoNoteRecording] = useState(false);
   const [videoNoteUploading, setVideoNoteUploading] = useState(false);
@@ -1422,10 +1450,15 @@ export default function App() {
   // const channelAvatarFileRef = useRef(null);
   const replyToRef = useRef(null);
   const nicknameRef = useRef(nickname);
+  const myUserIdRef = useRef(myUserId);
 
   useEffect(() => {
     nicknameRef.current = nickname;
   }, [nickname]);
+
+  useEffect(() => {
+    myUserIdRef.current = myUserId;
+  }, [myUserId]);
 
   useEffect(() => {
     personalAiOpenRef.current = personalAiOpen;
@@ -1562,12 +1595,27 @@ export default function App() {
     setReplyTo(null);
     setEditingId(null);
     setTypingPeers([]);
+    setMsgDelivery({});
+    setDmPeerReadUpTo(0);
     setPendingFile(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (mediaInputRef.current) mediaInputRef.current.value = "";
     setSearchInput("");
     setSearchResults([]);
   }, [activeRoom]);
+
+  const getMessageDeliveryLevel = useCallback(
+    (m, mine) => {
+      if (!mine || m.deleted || m.id == null) return 0;
+      let base = msgDelivery[m.id];
+      if (base == null) base = 2;
+      if (String(activeRoom || "").startsWith("dm-") && dmPeerReadUpTo > 0 && m.id <= dmPeerReadUpTo) {
+        return Math.max(base, 3);
+      }
+      return base;
+    },
+    [msgDelivery, dmPeerReadUpTo, activeRoom]
+  );
 
   const buildRoomHeaders = useCallback(() => {
     const headers = {};
@@ -2421,7 +2469,17 @@ export default function App() {
     socket.on("message", (msg) => {
       if (activeView !== CHANNEL_VIEWS.chat) return;
       if (msg.room && msg.room !== activeRoomRef.current) return;
+      if (msg.id != null && msg.user_id === myUserIdRef.current) {
+        setMsgDelivery((prev) => ({ ...prev, [msg.id]: Math.max(prev[msg.id] || 0, 2) }));
+      }
       setMessages((prev) => upsertMessageList(prev, msg));
+    });
+
+    socket.on("dm-read-receipt", (payload) => {
+      if (payload?.room !== activeRoomRef.current) return;
+      const u = parseInt(payload?.upToMessageId, 10);
+      if (!Number.isInteger(u) || u < 1) return;
+      setDmPeerReadUpTo((prev) => Math.max(prev, u));
     });
 
     socket.on("message-edited", (msg) => {
@@ -2562,6 +2620,20 @@ export default function App() {
     }
     emitJoinRoom(s);
   }, [activeRoom, token, emitJoinRoom, personalAiOpen]);
+
+  useEffect(() => {
+    const s = socketRef.current;
+    if (!s?.connected || !roomJoined) return;
+    if (activeView !== CHANNEL_VIEWS.chat) return;
+    if (!String(activeRoom || "").startsWith("dm-")) return;
+    const ids = messages.map((m) => m.id).filter((x) => x != null);
+    if (!ids.length) return;
+    const upTo = Math.max(...ids);
+    const t = window.setTimeout(() => {
+      s.emit("read-up-to", { messageId: upTo });
+    }, 700);
+    return () => window.clearTimeout(t);
+  }, [messages, activeRoom, activeView, roomJoined]);
 
   function applyAuthPayload(data, fallbackName) {
     if (!data?.token) {
@@ -2918,6 +2990,8 @@ export default function App() {
     setReplyTo(null);
     setEditingId(null);
     setTypingPeers([]);
+    setMsgDelivery({});
+    setDmPeerReadUpTo(0);
     setPendingFile(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (mediaInputRef.current) mediaInputRef.current.value = "";
@@ -3175,7 +3249,12 @@ export default function App() {
           setBanner(data.error || "Не удалось отправить файл");
           return;
         }
-        if (data.message) setMessages((prev) => upsertMessageList(prev, data.message));
+        if (data.message) {
+          setMessages((prev) => upsertMessageList(prev, data.message));
+          if (data.message.id != null) {
+            setMsgDelivery((prev) => ({ ...prev, [data.message.id]: Math.max(prev[data.message.id] || 0, 2) }));
+          }
+        }
         setInput("");
         setPendingFile(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
@@ -3198,6 +3277,10 @@ export default function App() {
       if (replyTo?.id != null) payload.replyToId = replyTo.id;
       socket.emit("message", payload, (ack) => {
         if (ack && !ack.ok && ack.error) setBanner(ack.error);
+        if (ack?.ok && ack.message?.id != null) {
+          const id = ack.message.id;
+          setMsgDelivery((prev) => ({ ...prev, [id]: Math.max(prev[id] || 0, 1) }));
+        }
       });
       setInput("");
       setReplyTo(null);
@@ -3225,7 +3308,12 @@ export default function App() {
       }
       setInput("");
       setReplyTo(null);
-      if (data.message) setMessages((prev) => upsertMessageList(prev, data.message));
+      if (data.message) {
+        setMessages((prev) => upsertMessageList(prev, data.message));
+        if (data.message.id != null) {
+          setMsgDelivery((prev) => ({ ...prev, [data.message.id]: Math.max(prev[data.message.id] || 0, 2) }));
+        }
+      }
     } catch (err) {
       console.error(err);
       setBanner("Не удалось отправить сообщение");
@@ -4187,6 +4275,13 @@ export default function App() {
         {/* Messages + parallax pattern (фон медленнее ленты) */}
         <div className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden">
           <div className="chat-bg-parallax pointer-events-none z-0" aria-hidden />
+          {typingPeers.length > 0 && !String(activeRoom).startsWith("dm-") && (
+            <div className="relative z-10 shrink-0 border-b border-tc-border/60 bg-tc-header/90 px-4 py-1.5 text-xs text-tc-accent backdrop-blur-sm">
+              {typingPeers.length === 1
+                ? `${typingPeers[0]} печатает…`
+                : `${typingPeers.slice(0, 4).join(", ")} печатают…`}
+            </div>
+          )}
           <div
             ref={listRef}
             className="messages-scroll relative z-10 w-full min-w-0 flex-1 overflow-y-auto bg-transparent px-4 py-3"
@@ -4282,6 +4377,11 @@ export default function App() {
                         </>
                       )}
                       <div className="mt-1 flex items-center justify-end gap-1">
+                        {mine && !deleted && (
+                          <span className="select-none text-[11px] leading-none opacity-90">
+                            <MessageDeliveryTicks level={getMessageDeliveryLevel(m, mine)} />
+                          </span>
+                        )}
                         <span className="text-[10px] text-white/40">
                           {formatTime(m.time)}
                           {m.edited_at ? " · изм." : ""}
@@ -4408,8 +4508,8 @@ export default function App() {
           </div>
         )}
 
-        {/* Typing indicator */}
-        {typingPeers.length > 0 && (
+        {/* Индикатор печати у композера — только ЛС; в каналах — сверху над лентой */}
+        {typingPeers.length > 0 && String(activeRoom).startsWith("dm-") && (
           <div className="border-t border-tc-border px-4 py-1.5 text-xs text-tc-accent">
             {typingPeers.length === 1
               ? `${typingPeers[0]} печатает…`

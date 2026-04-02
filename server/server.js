@@ -353,6 +353,17 @@ function canonicalizeChannelSlug(input) {
   return s;
 }
 
+/** Собеседник в ЛС slug `dm-a-b` для пользователя `userId` (a < b). */
+function dmPeerUserId(slug, userId) {
+  const m = /^dm-(\d+)-(\d+)$/i.exec(String(slug || ""));
+  if (!m) return null;
+  const a = parseInt(m[1], 10);
+  const b = parseInt(m[2], 10);
+  if (a === userId) return b;
+  if (b === userId) return a;
+  return null;
+}
+
 async function ensureDmChannelRow(slug, low, high) {
   await pool.query(
     `INSERT INTO channels (slug, title, kind, user_low_id, user_high_id)
@@ -1472,6 +1483,26 @@ async function ensurePhase3Schema() {
     await ensureCorePublicChannelRows();
   } catch (err) {
     console.error("[schema] phase3:", err?.message || err);
+    throw err;
+  }
+}
+
+async function ensureDmReadReceiptSchema() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS room_message_reads (
+        room VARCHAR(128) NOT NULL,
+        user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+        last_read_message_id INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (room, user_id)
+      )
+    `);
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_room_message_reads_room ON room_message_reads (room)`
+    );
+  } catch (err) {
+    console.error("[schema] dm read receipts:", err?.message || err);
     throw err;
   }
 }
@@ -4189,6 +4220,21 @@ async function processJoinRoom(socket, payload, ack) {
       slug === GALLERY_ROOM_SLUG ? "Галерея" : await getChannelTitleForUser(slug, uid);
     socket.emit("room-changed", { room: slug, title });
     socket.emit("history", { room: slug, messages: history });
+    if (slug.startsWith("dm-")) {
+      const peer = dmPeerUserId(slug, uid);
+      if (peer != null) {
+        try {
+          const { rows: readRows } = await pool.query(
+            `SELECT COALESCE(last_read_message_id, 0) AS u FROM room_message_reads WHERE room = $1 AND user_id = $2`,
+            [slug, peer]
+          );
+          const up = parseInt(readRows[0]?.u, 10) || 0;
+          if (up > 0) socket.emit("dm-read-receipt", { room: slug, upToMessageId: up });
+        } catch (bootErr) {
+          console.warn("join-room: dm read bootstrap", bootErr?.message || bootErr);
+        }
+      }
+    }
     if (typeof ack === "function") {
       ack({ ok: true, room: slug });
     }
@@ -4271,8 +4317,10 @@ io.on("connection", (socket) => {
         io.to(slug).emit("message", formatted);
         void dispatchMentionNotifications(io, { room: slug, formatted, senderUserId: uid, text: body });
         void dispatchNewMessagePush({ room: slug, formatted, senderUserId: uid, text: body });
+        if (typeof ack === "function") ack({ ok: true, message: formatted });
+      } else if (typeof ack === "function") {
+        ack({ ok: false, error: "Не удалось сохранить сообщение" });
       }
-      if (typeof ack === "function") ack({ ok: true });
     } catch (err) {
       console.error("message", err);
       const e = { ok: false, error: "Не удалось отправить сообщение" };
@@ -4412,6 +4460,32 @@ io.on("connection", (socket) => {
     });
   });
 
+  socket.on("read-up-to", async (payload) => {
+    try {
+      const uid = socket.data.userId;
+      const slug = socket.data.currentRoom;
+      if (!uid || !slug || !String(slug).startsWith("dm-")) return;
+      const upTo = parseInt(payload?.messageId, 10);
+      if (!Number.isInteger(upTo) || upTo < 1) return;
+      const peer = dmPeerUserId(slug, uid);
+      if (peer == null) return;
+      await pool.query(
+        `INSERT INTO room_message_reads (room, user_id, last_read_message_id, updated_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (room, user_id) DO UPDATE SET
+           last_read_message_id = GREATEST(room_message_reads.last_read_message_id, EXCLUDED.last_read_message_id),
+           updated_at = CASE
+             WHEN room_message_reads.last_read_message_id < EXCLUDED.last_read_message_id THEN NOW()
+             ELSE room_message_reads.updated_at
+           END`,
+        [slug, uid, upTo]
+      );
+      io.to(`user:${peer}`).emit("dm-read-receipt", { room: slug, upToMessageId: upTo });
+    } catch (err) {
+      console.error("read-up-to", err);
+    }
+  });
+
   socket.on("leave", async () => {
     try {
       const uid = socket.data.userId;
@@ -4450,6 +4524,7 @@ async function start() {
   await ensurePhase1Schema();
   await ensurePhase2Schema();
   await ensurePhase3Schema();
+  await ensureDmReadReceiptSchema();
   await ensureAvatarSchema();
   await ensureGallerySchema();
   await ensureCalendarSchema();
