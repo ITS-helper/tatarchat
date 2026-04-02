@@ -813,6 +813,35 @@ function stripInlineBracketCitations(text) {
   return String(text ?? "").replace(/\s*\[(\d{1,3})\]\s*/g, " ").replace(/\s{2,}/g, " ").trim();
 }
 
+function normalizeMarkdownLinks(text) {
+  let s = String(text ?? "");
+  // [url](url) -> url
+  s = s.replace(/\[(https?:\/\/[^\]\s]+)\]\(\1\)/gi, "$1");
+  // [title](url) -> title — url (avoid markdown clutter)
+  s = s.replace(/\[([^\]]{1,120})\]\((https?:\/\/[^)\s]+)\)/gi, (_m, title, url) => {
+    const t = String(title || "").replace(/\s+/g, " ").trim();
+    const u = String(url || "").trim();
+    if (!u) return t;
+    if (!t || t.toLowerCase() === u.toLowerCase()) return u;
+    return `${t} — ${u}`;
+  });
+  return s;
+}
+
+function collapseDuplicateUrls(text) {
+  // If the same URL repeats multiple times, keep the first occurrence.
+  // Conservative: only de-dupe exact URL tokens.
+  const s = String(text ?? "");
+  const re = /(https?:\/\/[^\s)<>"']+)/gi;
+  const seen = new Set();
+  return s.replace(re, (u) => {
+    const key = String(u).toLowerCase();
+    if (seen.has(key)) return "";
+    seen.add(key);
+    return u;
+  }).replace(/\s{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function appendSourcesBlock(text, sources) {
   const list = Array.isArray(sources) ? sources : [];
   const uniq = [];
@@ -2693,6 +2722,8 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
     let finalReply = stripAssistantNoise(reply);
     if (wantSearch) {
       finalReply = stripInlineBracketCitations(finalReply);
+      finalReply = normalizeMarkdownLinks(finalReply);
+      finalReply = collapseDuplicateUrls(finalReply);
       finalReply = appendSourcesBlock(finalReply, webSources);
     }
     list.push({ role: "assistant", content: finalReply.slice(0, 200000) });
