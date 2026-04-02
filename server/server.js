@@ -598,6 +598,68 @@ async function setUserAiModel(userId, model) {
   return { ok: true, model: m };
 }
 
+async function ensureUserAiFactsSchema() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_ai_facts (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        fact TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_user_ai_facts_user_id ON user_ai_facts (user_id)`);
+  } catch (err) {
+    console.error("[schema] user_ai_facts:", err?.message || err);
+    throw err;
+  }
+}
+
+function sanitizeAiFact(input) {
+  return String(input ?? "")
+    .replace(/[\u0000-\u001F\u007F]/g, "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 280);
+}
+
+async function getUserAiFacts(userId) {
+  await ensureUserAiFactsSchema();
+  const { rows } = await pool.query(
+    `SELECT id, fact, created_at, updated_at
+     FROM user_ai_facts
+     WHERE user_id = $1
+     ORDER BY updated_at DESC, id DESC
+     LIMIT 50`,
+    [userId]
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    fact: String(r.fact || ""),
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+  }));
+}
+
+function factsToPromptBlock(facts) {
+  const list = Array.isArray(facts) ? facts : [];
+  if (!list.length) return "";
+  const lines = list
+    .map((f, i) => {
+      const t = sanitizeAiFact(f?.fact);
+      if (!t) return null;
+      return `${i + 1}. ${t}`;
+    })
+    .filter(Boolean);
+  if (!lines.length) return "";
+  return (
+    "Постоянные факты о пользователе (это заметки, их нужно учитывать во всех ответах):\n" +
+    lines.join("\n")
+  );
+}
+
 function sanitizeAiUserMessage(input) {
   return String(input ?? "")
     .replace(/[\u0000-\u001F\u007F]/g, "")
@@ -741,11 +803,12 @@ async function runTavilySearch(searchQuery) {
 
 const DEFAULT_OLLAMA_SYSTEM_PROMPT = `You are a helpful assistant in the TatarChat messenger. The conversation history is in the following messages — use it, including the user's name and facts they already stated. Reply in Russian unless the user writes in another language. Be concise unless asked for detail.`;
 
-function buildAiSystemPrompt(nickname, webSearchBlock) {
+function buildAiSystemPrompt(nickname, webSearchBlock, factsBlock) {
   const base = (process.env.OLLAMA_SYSTEM_PROMPT || "").trim() || DEFAULT_OLLAMA_SYSTEM_PROMPT;
   let s = base;
   const nick = String(nickname || "").trim();
   if (nick) s += `\n\nПользователь в приложении подписан как: ${nick}.`;
+  if (factsBlock) s += `\n\n${factsBlock}`;
   if (webSearchBlock) s += `\n\n${webSearchBlock}`;
   return s.slice(0, 120_000);
 }
@@ -2423,14 +2486,60 @@ app.get("/api/ai/chat", requireAuth, async (req, res) => {
       req.user.userId,
     ]);
     const list = rows[0] ? normalizeStoredAiMessages(rows[0].messages) : [];
+    const facts = await getUserAiFacts(req.user.userId);
     res.json({
       messages: list,
       model: await getUserAiModel(req.user.userId),
       availableModels: OLLAMA_MODELS,
       webSearchAvailable: isTavilyConfigured(),
+      facts,
     });
   } catch (err) {
     console.error("GET /api/ai/chat", err);
+    res.status(500).json({ error: "Ошибка" });
+  }
+});
+
+app.get("/api/ai/facts", requireAuth, async (req, res) => {
+  try {
+    const facts = await getUserAiFacts(req.user.userId);
+    res.json({ facts });
+  } catch (err) {
+    console.error("GET /api/ai/facts", err);
+    res.status(500).json({ error: "Ошибка" });
+  }
+});
+
+app.post("/api/ai/facts", requireAuth, async (req, res) => {
+  try {
+    const fact = sanitizeAiFact(req.body?.fact);
+    if (!fact) return res.status(400).json({ error: "Пустой факт" });
+    await ensureUserAiFactsSchema();
+    const { rows } = await pool.query(
+      `INSERT INTO user_ai_facts (user_id, fact, updated_at) VALUES ($1, $2, NOW())
+       RETURNING id, fact, created_at, updated_at`,
+      [req.user.userId, fact]
+    );
+    res.status(201).json({ fact: rows[0] });
+  } catch (err) {
+    console.error("POST /api/ai/facts", err);
+    res.status(500).json({ error: "Ошибка" });
+  }
+});
+
+app.delete("/api/ai/facts/:id", requireAuth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Некорректный id" });
+    await ensureUserAiFactsSchema();
+    const { rows } = await pool.query(
+      `DELETE FROM user_ai_facts WHERE id = $1 AND user_id = $2 RETURNING id`,
+      [id, req.user.userId]
+    );
+    if (!rows.length) return res.status(404).json({ error: "Не найдено" });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("DELETE /api/ai/facts/:id", err);
     res.status(500).json({ error: "Ошибка" });
   }
 });
@@ -2482,7 +2591,9 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
     list.push({ role: "user", content: text });
 
     const historyForModel = trimMessagesForOllama(list).map(({ role, content }) => ({ role, content }));
-    const systemPrompt = buildAiSystemPrompt(req.user.nickname, webBlock);
+    const facts = await getUserAiFacts(userId);
+    const factsBlock = factsToPromptBlock(facts);
+    const systemPrompt = buildAiSystemPrompt(req.user.nickname, webBlock, factsBlock);
     const ollamaMessages = [{ role: "system", content: systemPrompt }, ...historyForModel];
     const selectedModel = await getUserAiModel(userId);
 
@@ -2509,7 +2620,12 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
       [userId, JSON.stringify(list)]
     );
 
-    res.json({ messages: list, model: selectedModel, web: wantSearch ? { images: webImages } : undefined });
+    res.json({
+      messages: list,
+      model: selectedModel,
+      web: wantSearch ? { images: webImages } : undefined,
+      facts,
+    });
   } catch (err) {
     console.error("POST /api/ai/chat", err);
     res.status(500).json({ error: "Ошибка ассистента" });
@@ -3954,6 +4070,7 @@ async function start() {
   await ensurePushSchema();
   await ensureUserOllamaChatSchema();
   await ensureUserOllamaPrefsSchema();
+  await ensureUserAiFactsSchema();
   initFcmIfPossible();
   ensureUploadDirs();
   server.listen(PORT, () => {

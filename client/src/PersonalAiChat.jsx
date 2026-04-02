@@ -11,6 +11,9 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
   const [webSearchOn, setWebSearchOn] = useState(() => localStorage.getItem(LS_AI_WEB) === "1");
   const [webImages, setWebImages] = useState([]);
   const [searching, setSearching] = useState(false);
+  const [facts, setFacts] = useState([]);
+  const [factInput, setFactInput] = useState("");
+  const [factsOpen, setFactsOpen] = useState(false);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -47,6 +50,7 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
           if (data.model) setModel(data.model);
           if (Array.isArray(data.availableModels)) setAvailableModels(data.availableModels);
           if (typeof data.webSearchAvailable === "boolean") setWebSearchAvailable(data.webSearchAvailable);
+          if (Array.isArray(data.facts)) setFacts(data.facts);
           const savedModel = localStorage.getItem(LS_AI_MODEL);
           if (savedModel && Array.isArray(data.availableModels) && data.availableModels.includes(savedModel) && savedModel !== data.model) {
             // best effort: sync UI preference back to server
@@ -99,6 +103,7 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
       if (Array.isArray(data.messages)) setMessages(data.messages);
       const imgs = data?.web?.images;
       if (Array.isArray(imgs)) setWebImages(imgs.slice(0, 8));
+      if (Array.isArray(data.facts)) setFacts(data.facts);
     } catch (err) {
       console.error(err);
       onError?.("Сеть: не удалось отправить");
@@ -132,6 +137,58 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
       onError?.("Сеть");
     } finally {
       setSending(false);
+    }
+  };
+
+  const reloadFacts = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${base}/api/ai/facts`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(data.facts)) setFacts(data.facts);
+    } catch (_) {}
+  };
+
+  const addFact = async () => {
+    const f = factInput.trim();
+    if (!f || !token) return;
+    setFactInput("");
+    onError?.(null);
+    try {
+      const res = await fetch(`${base}/api/ai/facts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ fact: f }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        onError?.(data.error || `Ошибка ${res.status}`);
+        return;
+      }
+      await reloadFacts();
+    } catch (e) {
+      console.error(e);
+      onError?.("Сеть: факт");
+    }
+  };
+
+  const deleteFact = async (id) => {
+    if (!token) return;
+    onError?.(null);
+    try {
+      const res = await fetch(`${base}/api/ai/facts/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        onError?.(data.error || `Ошибка ${res.status}`);
+        return;
+      }
+      await reloadFacts();
+    } catch (e) {
+      console.error(e);
+      onError?.("Сеть: факт");
     }
   };
 
@@ -267,6 +324,15 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
             </label>
             <button
               type="button"
+              onClick={() => { setFactsOpen((v) => !v); void reloadFacts(); }}
+              disabled={sending || loading}
+              className="text-xs text-tc-text-sec underline decoration-tc-border underline-offset-2 hover:text-tc-accent disabled:opacity-40"
+              title="Память фактов (учитывается в ответах)"
+            >
+              Факты ({facts.length})
+            </button>
+            <button
+              type="button"
               disabled={sending || loading}
               onClick={clearChat}
               className="text-xs text-tc-text-muted underline decoration-tc-border underline-offset-2 hover:text-tc-accent disabled:opacity-40"
@@ -297,6 +363,66 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
             )}
           </div>
         </div>
+
+        {factsOpen ? (
+          <div className="rounded-xl border border-tc-border/60 bg-tc-panel/20 p-3">
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-tc-text-sec">Память фактов</p>
+                <button
+                  type="button"
+                  className="text-xs text-tc-text-muted hover:text-tc-accent"
+                  onClick={() => setFactsOpen(false)}
+                >
+                  Закрыть
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  className="tc-msg-input flex-1 rounded-lg border border-tc-border bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted focus:ring-2 focus:ring-tc-accent/50"
+                  value={factInput}
+                  onChange={(e) => setFactInput(e.target.value)}
+                  placeholder="Добавить факт (например: Люблю кофе без сахара)"
+                  maxLength={280}
+                  disabled={sending || loading}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void addFact();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => void addFact()}
+                  disabled={sending || loading || !factInput.trim()}
+                  className="rounded-lg bg-tc-accent px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
+                >
+                  Запомнить
+                </button>
+              </div>
+              {facts.length ? (
+                <div className="max-h-40 overflow-y-auto rounded-lg border border-tc-border/50">
+                  {facts.map((f) => (
+                    <div key={f.id} className="flex items-start gap-2 border-b border-tc-border/50 px-3 py-2 last:border-b-0">
+                      <p className="flex-1 text-sm text-tc-text">{f.fact}</p>
+                      <button
+                        type="button"
+                        className="shrink-0 text-xs text-tc-danger hover:underline"
+                        onClick={() => { if (window.confirm("Удалить факт?")) void deleteFact(f.id); }}
+                      >
+                        Удалить
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-tc-text-muted">Пока нет фактов. Добавь пару заметок — ассистент будет учитывать их в ответах.</p>
+              )}
+            </div>
+          </div>
+        ) : null}
+
         <form onSubmit={send} className="flex min-h-[44px] min-w-0 items-center gap-0.5 rounded-xl bg-tc-input pl-3 pr-1 sm:pl-4">
           <textarea
             className="tc-msg-input min-h-[44px] max-h-40 min-w-0 flex-1 resize-y border-0 bg-transparent py-2.5 text-base text-tc-text outline-none ring-0 placeholder:text-tc-text-muted focus:ring-0 sm:text-sm"
