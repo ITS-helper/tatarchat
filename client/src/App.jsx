@@ -759,6 +759,34 @@ function ChannelGlyph({ slug, className }) {
       </svg>
     );
   }
+  if (s === "obshaga") {
+    // Handshake
+    return (
+      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden>
+        <path
+          d="M4.8 14.2l2.7-2.7c.7-.7 1.8-.7 2.5 0l1.1 1.1c.6.6 1.6.6 2.2 0l1.1-1.1c.7-.7 1.8-.7 2.5 0l2.7 2.7"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        <path
+          d="M7.5 11.5L5 9m11.5 2.5L19 9"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          opacity=".5"
+        />
+        <path
+          d="M9.3 16.8l.9.9c1 .9 2.6.9 3.6 0l.9-.9"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          opacity=".85"
+        />
+      </svg>
+    );
+  }
   if (s === "dreamteamdauns") {
     // Beer mug
     return (
@@ -1063,7 +1091,7 @@ export default function App() {
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [themeLight, setThemeLight] = useState(() => localStorage.getItem("tatarchat_theme") === "light");
-  const [activePattern, setActivePattern] = useState(() => localStorage.getItem("tatarchat_pattern") || "bottles");
+  const [activePattern, setActivePattern] = useState(() => localStorage.getItem("tatarchat_pattern") || "beer");
   const [activeView, setActiveView] = useState(() => sessionStorage.getItem("tatarchat_active_view") || CHANNEL_VIEWS.chat);
   const [channelMenuRoom, setChannelMenuRoom] = useState(null);
   const [personalOpen, setPersonalOpen] = useState(false);
@@ -2869,17 +2897,21 @@ export default function App() {
   if (!token) {
     return (
       <div className="flex min-h-full items-center justify-center bg-tc-bg p-4">
-        <div className="w-full max-w-sm rounded-xl bg-tc-panel p-8 shadow-xl">
-          <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-tc-accent/20">
-            <svg viewBox="0 0 24 24" className="h-10 w-10 text-tc-accent" fill="currentColor">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+        <div className="w-full max-w-sm animate-fade-in rounded-xl bg-tc-panel p-8 shadow-xl">
+          <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-tc-accent/20 animate-glow-pulse">
+            <svg viewBox="0 0 24 24" className="h-10 w-10 text-tc-accent" fill="none">
+              <path d="M5 7h10v10a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7z" stroke="currentColor" strokeWidth="1.6" />
+              <path d="M15 9h2.5a2.5 2.5 0 0 1 0 5H15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              <path d="M5 7c0-2 1.8-3.2 3.5-2.4.8-1.4 2.8-1.7 3.9-.6 1-1.2 2.9-1 3.6.5 1-.4 1.8.5 1.8 1.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="currentColor" fillOpacity=".15" />
+              <path d="M7 11v5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity=".45" />
+              <path d="M10 11v5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity=".45" />
             </svg>
           </div>
           <h1 className="mb-1 text-center text-2xl font-bold text-tc-text">TatarChat</h1>
           <p className="mb-4 text-center text-sm text-tc-text-sec">
             {authScreenMode === "register"
               ? "Создайте имя и пароль (от 6 символов)."
-              : "Вход по имени и паролю."}
+              : "Заходи, наливай."}
           </p>
           <div className="mb-4 flex rounded-lg border border-tc-border p-0.5 text-sm">
             <button
@@ -2943,7 +2975,7 @@ export default function App() {
             )}
             <button
               type="submit"
-              className="w-full rounded-lg bg-tc-accent py-3 text-sm font-semibold text-white transition hover:bg-tc-accent/85 active:scale-[0.98]"
+              className="w-full rounded-lg bg-tc-accent py-3 text-sm font-semibold text-white transition-all duration-200 hover:bg-tc-accent-hover hover:shadow-[0_0_18px_rgba(255,185,50,0.4)] active:scale-[0.97]"
             >
               {authScreenMode === "register" ? "Зарегистрироваться" : "Войти"}
             </button>
@@ -2955,6 +2987,7 @@ export default function App() {
               className="block w-full rounded-lg border border-tc-border bg-tc-panel/30 px-4 py-3 text-center text-sm font-semibold text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
               download
             >
+              <svg viewBox="0 0 24 24" className="mr-2 inline-block h-4 w-4" fill="currentColor"><path d="M6 18c0 .55.45 1 1 1h1v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h2v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h1c.55 0 1-.45 1-1V8H6v10zM3.5 8C2.67 8 2 8.67 2 9.5v7c0 .83.67 1.5 1.5 1.5S5 17.33 5 16.5v-7C5 8.67 4.33 8 3.5 8zm17 0c-.83 0-1.5.67-1.5 1.5v7c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-7c0-.83-.67-1.5-1.5-1.5zm-4.97-5.84l1.3-1.3c.2-.2.2-.51 0-.71-.2-.2-.51-.2-.71 0l-1.48 1.48A5.84 5.84 0 0 0 12 1c-.96 0-1.86.23-2.66.63L7.85.15c-.2-.2-.51-.2-.71 0-.2.2-.2.51 0 .71l1.31 1.31A5.983 5.983 0 0 0 6 7h12c0-2.16-1.14-4.06-2.97-4.84zM10 5H9V4h1v1zm5 0h-1V4h1v1z"/></svg>
               Скачать Android (APK)
             </a>
             {apkInfo?.name ? (
@@ -2997,7 +3030,7 @@ export default function App() {
       {/* Sidebar: на iOS fixed внутри flex резервирует ~w-72 — обёртка max-md:w-0 + absolute панель */}
       <div className="relative z-40 max-md:w-0 max-md:min-w-0 max-md:flex-none max-md:overflow-visible md:min-h-0 md:w-72 md:shrink-0">
         <aside
-          className={`absolute inset-y-0 left-0 z-40 flex h-full min-h-0 w-72 flex-col bg-tc-sidebar transition-transform duration-200 md:relative md:z-auto md:translate-x-0 ${
+          className={`absolute inset-y-0 left-0 z-40 flex h-full min-h-0 w-72 flex-col bg-tc-sidebar transition-transform duration-300 ease-out md:relative md:z-auto md:translate-x-0 ${
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
@@ -3127,7 +3160,7 @@ export default function App() {
             <svg viewBox="0 0 24 24" className={`h-4 w-4 transition-transform ${personalOpen ? "rotate-180" : ""}`} fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
           </button>
 
-          <div className={`overflow-hidden px-3 transition-all duration-200 ${personalOpen ? "max-h-[620px] opacity-100 pb-2" : "max-h-0 opacity-0"}`}>
+          <div className={`overflow-hidden px-3 transition-all duration-300 ease-out ${personalOpen ? "max-h-[620px] opacity-100 pb-2" : "max-h-0 opacity-0"}`}>
             {savedChannel ? (
               <button
                 type="button"
@@ -3258,7 +3291,7 @@ export default function App() {
                     </div>
                   </button>
                   <div
-                    className={`overflow-hidden px-4 transition-all duration-200 ${
+                    className={`overflow-hidden px-4 transition-all duration-300 ease-out ${
                       channelMenuRoom === r.slug ? "max-h-64 opacity-100 pb-2" : "max-h-0 opacity-0"
                     }`}
                   >
@@ -3706,7 +3739,7 @@ export default function App() {
                   <div
                     key={key}
                     data-message-id={m.id != null ? m.id : undefined}
-                    className={`flex ${mine ? "justify-end" : "justify-start"}`}
+                    className={`flex ${mine ? "justify-end" : "justify-start"}${i === messages.length - 1 ? " animate-slide-up" : ""}`}
                   >
                     <div
                       className={`flex max-w-[92%] items-end gap-2 sm:max-w-[80%] ${mine ? "flex-row-reverse" : "flex-row"}`}

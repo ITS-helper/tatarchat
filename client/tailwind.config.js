@@ -28,6 +28,25 @@ export default {
           "asphalt-dark":  "rgb(var(--tc-asphalt-dark) / <alpha-value>)",
         },
       },
+      animation: {
+        'fade-in': 'tc-fade-in 0.4s ease-out both',
+        'glow-pulse': 'tc-glow-pulse 2.5s ease-in-out infinite',
+        'slide-up': 'tc-slide-up 0.3s ease-out both',
+      },
+      keyframes: {
+        'tc-fade-in': {
+          '0%': { opacity: '0', transform: 'translateY(8px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        'tc-glow-pulse': {
+          '0%, 100%': { boxShadow: '0 0 12px rgba(255,185,50,0.25)' },
+          '50%': { boxShadow: '0 0 28px rgba(255,185,50,0.55)' },
+        },
+        'tc-slide-up': {
+          '0%': { opacity: '0', transform: 'translateY(12px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
       fontFamily: {
         sans: [
           "Inter",

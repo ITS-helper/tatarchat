@@ -2,73 +2,83 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Dark theme (default) ── */
+/* ── Dark theme (default) — warm amber/bar vibe ── */
 :root {
   --tc-bg:             13 14 20;
-  --tc-sidebar:        9 9 14;
-  --tc-panel:          18 19 27;
-  --tc-input:          26 27 37;
-  --tc-header:         15 16 24;
-  --tc-msg:            23 24 32;
-  --tc-msg-own:        23 24 32;
-  --tc-accent:         0 245 255;
-  --tc-accent-hover:   0 216 229;
-  --tc-link:           0 255 170;
+  --tc-sidebar:        12 11 16;
+  --tc-panel:          20 18 26;
+  --tc-input:          28 26 36;
+  --tc-header:         16 15 22;
+  --tc-msg:            24 22 30;
+  --tc-msg-own:        30 26 20;
+  --tc-accent:         255 185 50;
+  --tc-accent-hover:   230 165 30;
+  --tc-link:           80 220 140;
   --tc-green:          57 255 20;
-  --tc-text:           232 236 241;
-  --tc-text-sec:       122 138 154;
-  --tc-text-muted:     74 86 104;
-  --tc-border:         30 31 44;
-  --tc-hover:          26 27 37;
+  --tc-text:           232 228 218;
+  --tc-text-sec:       148 138 120;
+  --tc-text-muted:     90 82 70;
+  --tc-border:         36 32 28;
+  --tc-hover:          32 28 24;
   --tc-danger:         255 49 49;
   --tc-online:         57 255 20;
-  --tc-asphalt:        34 35 46;
-  --tc-asphalt-light:  44 45 60;
-  --tc-asphalt-dark:   26 27 38;
+  --tc-asphalt:        38 34 30;
+  --tc-asphalt-light:  48 44 38;
+  --tc-asphalt-dark:   28 25 22;
   /* Chat background patterns (theme-aware). Active pattern is set by App.jsx */
-  --bg-pattern-dark:   url("/city-pattern.svg");
-  --bg-pattern-light:  url("/city-pattern-light.svg");
+  --bg-pattern-dark:   url("/pattern-beer.svg");
+  --bg-pattern-light:  url("/pattern-beer-light.svg");
 }
 
-/* ── Light theme ── */
+/* ── Light theme — warm amber ── */
 .theme-light {
-  --tc-bg:             242 242 250;
-  --tc-sidebar:        232 232 244;
-  --tc-panel:          250 250 255;
-  --tc-input:          255 255 255;
-  --tc-header:         238 238 250;
-  --tc-msg:            255 255 255;
-  --tc-msg-own:        255 255 255;
-  /* Light theme: лёгкий голубой «неон», но без кислотности */
-  --tc-accent:         0 170 200;
-  --tc-accent-hover:   0 150 180;
-  --tc-link:           0 140 175;
+  --tc-bg:             248 245 238;
+  --tc-sidebar:        240 236 226;
+  --tc-panel:          255 252 245;
+  --tc-input:          255 255 250;
+  --tc-header:         244 240 232;
+  --tc-msg:            255 253 248;
+  --tc-msg-own:        255 248 230;
+  --tc-accent:         195 130 20;
+  --tc-accent-hover:   170 110 10;
+  --tc-link:           40 150 100;
   --tc-green:          20 145 0;
-  --tc-text:           20 20 42;
-  --tc-text-sec:       72 82 112;
-  --tc-text-muted:     138 145 170;
-  --tc-border:         208 210 230;
-  --tc-hover:          228 228 245;
+  --tc-text:           30 26 18;
+  --tc-text-sec:       90 80 60;
+  --tc-text-muted:     155 145 125;
+  --tc-border:         218 210 195;
+  --tc-hover:          235 230 218;
   --tc-danger:         195 20 40;
   --tc-online:         20 145 0;
-  --tc-asphalt:        210 212 228;
-  --tc-asphalt-light:  220 222 238;
-  --tc-asphalt-dark:   198 200 220;
+  --tc-asphalt:        222 216 202;
+  --tc-asphalt-light:  232 226 212;
+  --tc-asphalt-dark:   210 204 190;
 }
 
-/* Light theme: лёгкое свечение на акцентных элементах */
+/* Light theme: тёплое свечение на акцентных элементах */
 .theme-light .bg-tc-accent {
   box-shadow:
-    0 0 0 1px rgba(0, 170, 200, 0.18),
-    0 8px 20px rgba(0, 170, 200, 0.16);
+    0 0 0 1px rgba(195, 130, 20, 0.2),
+    0 8px 20px rgba(195, 130, 20, 0.18);
 }
 
 .theme-light .text-tc-accent {
-  text-shadow: 0 0 14px rgba(0, 170, 200, 0.22);
+  text-shadow: 0 0 14px rgba(195, 130, 20, 0.25);
 }
 
 .theme-light .border-tc-accent {
-  box-shadow: 0 0 0 3px rgba(0, 170, 200, 0.10);
+  box-shadow: 0 0 0 3px rgba(195, 130, 20, 0.12);
+}
+
+/* Dark theme: amber glow on accent elements */
+:root:not(.theme-light) .bg-tc-accent {
+  box-shadow:
+    0 0 0 1px rgba(255, 185, 50, 0.15),
+    0 6px 18px rgba(255, 185, 50, 0.2);
+}
+
+:root:not(.theme-light) .text-tc-accent {
+  text-shadow: 0 0 10px rgba(255, 185, 50, 0.18);
 }
 
 @layer base {
@@ -147,7 +157,7 @@
   overflow-anchor: none;
 }
 
-/* Scrollbar */
+/* Scrollbar — warm amber tint */
 .messages-scroll::-webkit-scrollbar {
   width: 6px;
 }
@@ -155,11 +165,11 @@
   background: transparent;
 }
 .messages-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 185, 50, 0.12);
   border-radius: 3px;
 }
 .messages-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 185, 50, 0.25);
 }
 
 .sidebar-scroll::-webkit-scrollbar {
@@ -169,7 +179,7 @@
   background: transparent;
 }
 .sidebar-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 185, 50, 0.08);
   border-radius: 3px;
 }
 
@@ -178,6 +188,20 @@
   height: 20px;
   display: inline-block;
   vertical-align: middle;
+}
+
+/* ── Global animations ── */
+@keyframes tc-fade-in {
+  0%   { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes tc-glow-pulse {
+  0%, 100% { box-shadow: 0 0 12px rgba(255, 185, 50, 0.25); }
+  50%      { box-shadow: 0 0 28px rgba(255, 185, 50, 0.55); }
+}
+@keyframes tc-slide-up {
+  0%   { opacity: 0; transform: translateY(12px); }
+  100% { opacity: 1; transform: translateY(0); }
 }
 
 /* Календарь: бегущая строка ближайших событий */
