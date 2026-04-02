@@ -1009,34 +1009,39 @@ function ChannelGlyph({ slug, className }) {
     );
   }
   if (s.includes("obshag")) {
-    // Общага: бутылка (чуть крупнее), VODKA крупнее, вертикально у правого края
+    // Общага: бутылка слева; VODKA — столбик крупных букв (читаемо в 20px)
+    const vx = 23.35;
+    const vodkaYs = [4.05, 8.2, 12.35, 16.5, 20.65];
+    const letters = ["V", "O", "D", "K", "A"];
     return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden>
-        <g transform="translate(-4.25 0)">
-          <g transform="translate(7.75 10.75) scale(1.09) translate(-7.75 -10.75)">
-            <rect x="10.2" y="1" width="3.6" height="2.35" rx="0.5" stroke="currentColor" strokeWidth="1.2" />
+      <svg viewBox="0 0 30 24" className={className} fill="none" aria-hidden preserveAspectRatio="xMidYMid meet">
+        <g transform="translate(-4.6 0.15)">
+          <g transform="translate(7.75 10.75) scale(1.05) translate(-7.75 -10.75)">
+            <rect x="10.2" y="1" width="3.6" height="2.35" rx="0.5" stroke="currentColor" strokeWidth="1.15" />
             <path
               d="M10.2 3.35h3.6l1.4 2.25V18.9q-3 2.55-6 0V5.6l1.4-2.25z"
               stroke="currentColor"
-              strokeWidth="1.2"
+              strokeWidth="1.15"
               strokeLinejoin="round"
             />
           </g>
         </g>
-        <text
-          x="18.35"
-          y="12.5"
-          textAnchor="middle"
-          dominantBaseline="middle"
-          fill="currentColor"
-          fontSize="5.35"
-          fontWeight="800"
-          fontFamily="system-ui, -apple-system, Segoe UI, sans-serif"
-          letterSpacing="0.1em"
-          transform="rotate(-90, 18.35, 12.5)"
-        >
-          VODKA
-        </text>
+        <g fontFamily="system-ui, -apple-system, 'Segoe UI', sans-serif" fontWeight="900" fontSize="6.55" textAnchor="middle">
+          {letters.map((ch, i) => (
+            <text
+              key={ch + i}
+              x={vx}
+              y={vodkaYs[i]}
+              dominantBaseline="central"
+              fill="currentColor"
+              stroke="currentColor"
+              strokeWidth="0.45"
+              paintOrder="stroke fill"
+            >
+              {ch}
+            </text>
+          ))}
+        </g>
       </svg>
     );
   }
