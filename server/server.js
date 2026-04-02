@@ -25,11 +25,9 @@ const OLLAMA_BASE_URL = String(process.env.OLLAMA_BASE_URL || "http://127.0.0.1:
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "deepseek-r1:8b";
 const MAX_AI_USER_MESSAGE_CHARS = Math.min(Math.max(Number(process.env.MAX_AI_USER_MESSAGE_CHARS) || 6000, 500), 32000);
 const OLLAMA_HTTP_TIMEOUT_MS = Math.min(Math.max(Number(process.env.OLLAMA_HTTP_TIMEOUT_MS) || 300000, 10000), 600000);
-/** Google Programmable Search (Custom Search JSON API): ключ + id поисковой системы.cse.cx */
-const GOOGLE_CSE_API_KEY = String(process.env.GOOGLE_CSE_API_KEY || "").trim();
-const GOOGLE_CSE_CX = String(process.env.GOOGLE_CSE_CX || "").trim();
-const GOOGLE_CSE_NUM = Math.min(Math.max(Number(process.env.GOOGLE_CSE_NUM_RESULTS) || 5, 1), 10);
-const GOOGLE_CSE_TIMEOUT_MS = Math.min(Math.max(Number(process.env.GOOGLE_CSE_TIMEOUT_MS) || 12_000, 3000), 60_000);
+/** Tavily Search API (ключ в заголовке Authorization: Bearer) */
+const TAVILY_API_KEY = String(process.env.TAVILY_API_KEY || "").trim();
+const TAVILY_TIMEOUT_MS = Math.min(Math.max(Number(process.env.TAVILY_TIMEOUT_MS) || 25_000, 5000), 120_000);
 const MAX_MESSAGE_LEN = 2000;
 const MAX_NICK_LEN = 64;
 const MIN_PASSWORD_LEN = 6;
@@ -593,56 +591,75 @@ function trimMessagesForOllama(list, maxPairs = 28) {
   return list.slice(list.length - n);
 }
 
-function isGoogleCseConfigured() {
-  return Boolean(GOOGLE_CSE_API_KEY && GOOGLE_CSE_CX);
+function isTavilyConfigured() {
+  return Boolean(TAVILY_API_KEY);
 }
 
-/** Сниппеты Google для одного запроса к Ollama (не сохраняются в БД отдельно). */
-async function runGoogleCse(searchQuery) {
+function normalizeTavilySearchDepth() {
+  const d = String(process.env.TAVILY_SEARCH_DEPTH || "basic").toLowerCase();
+  if (d === "advanced" || d === "basic" || d === "fast" || d === "ultra-fast") return d;
+  return "basic";
+}
+
+/** Выдержки Tavily для одного запроса к Ollama (не сохраняются в БД отдельно). */
+async function runTavilySearch(searchQuery) {
   const q = String(searchQuery ?? "")
     .trim()
     .replace(/[\u0000-\u001F\u007F]/g, " ")
-    .slice(0, 200);
+    .slice(0, 400);
   if (!q) return { ok: false, error: "Пустой поисковый запрос" };
-  const url = new URL("https://www.googleapis.com/customsearch/v1");
-  url.searchParams.set("key", GOOGLE_CSE_API_KEY);
-  url.searchParams.set("cx", GOOGLE_CSE_CX);
-  url.searchParams.set("q", q);
-  url.searchParams.set("num", String(GOOGLE_CSE_NUM));
 
+  const maxResults = Math.min(Math.max(Number(process.env.TAVILY_MAX_RESULTS) || 5, 1), 20);
   const ac = new AbortController();
-  const to = setTimeout(() => ac.abort(), GOOGLE_CSE_TIMEOUT_MS);
+  const to = setTimeout(() => ac.abort(), TAVILY_TIMEOUT_MS);
   try {
-    const res = await fetch(url.toString(), { signal: ac.signal });
+    const res = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TAVILY_API_KEY}`,
+      },
+      body: JSON.stringify({
+        query: q,
+        search_depth: normalizeTavilySearchDepth(),
+        max_results: maxResults,
+        topic: "general",
+      }),
+      signal: ac.signal,
+    });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const msg = data?.error?.message || `HTTP ${res.status}`;
-      return { ok: false, error: msg };
+      const msg =
+        data?.detail?.error || data?.error || data?.message || `HTTP ${res.status}`;
+      return { ok: false, error: typeof msg === "string" ? msg : JSON.stringify(msg) };
     }
-    const items = Array.isArray(data.items) ? data.items : [];
-    if (!items.length) {
+    const results = Array.isArray(data.results) ? data.results : [];
+    if (!results.length) {
       return {
         ok: true,
-        block: "По этому запросу поиск Google не вернул результатов. Сообщи пользователю и ответь из своих знаний, если уместно.",
+        block:
+          "По этому запросу Tavily не вернул результатов. Сообщи пользователю и ответь из своих знаний, если уместно.",
       };
     }
-    const lines = items.map((it, i) => {
+    let block =
+      "Ниже выдержки из веб-поиска (Tavily). Опирайся на них; укажи номер источника [1], [2]. Не выдумывай URL и факты вне текста.\n\n";
+    const ans = data.answer;
+    if (typeof ans === "string" && ans.trim()) {
+      block += `Краткий конспект Tavily: ${ans.trim().replace(/\s+/g, " ")}\n\n`;
+    }
+    const parts = results.map((it, i) => {
       const title = String(it.title || "").replace(/\s+/g, " ").trim();
-      const link = String(it.link || "").trim();
-      const snippet = String(it.snippet || "")
+      const url = String(it.url || "").trim();
+      const content = String(it.content || "")
         .replace(/\s+/g, " ")
-        .trim();
-      return `[${i + 1}] ${title}\nURL: ${link}\n${snippet}`;
+        .trim()
+        .slice(0, 4000);
+      return `[${i + 1}] ${title}\nURL: ${url}\n${content}`;
     });
-    return {
-      ok: true,
-      block:
-        "Ниже сжатые результаты поиска Google по текущему вопросу. Опирайся на них; для спорных фактов укажи номер источника [1], [2]. Не выдумывай URL и цитаты, которых нет в сниппетах.\n\n" +
-        lines.join("\n\n"),
-    };
+    return { ok: true, block: `${block}${parts.join("\n\n")}`.trim() };
   } catch (e) {
-    if (e?.name === "AbortError") return { ok: false, error: "Таймаут поиска Google" };
-    return { ok: false, error: e?.message || "Ошибка поиска" };
+    if (e?.name === "AbortError") return { ok: false, error: "Таймаут Tavily" };
+    return { ok: false, error: e?.message || "Ошибка Tavily" };
   } finally {
     clearTimeout(to);
   }
@@ -2335,7 +2352,7 @@ app.get("/api/ai/chat", requireAuth, async (req, res) => {
     res.json({
       messages: list,
       model: OLLAMA_MODEL,
-      webSearchAvailable: isGoogleCseConfigured(),
+      webSearchAvailable: isTavilyConfigured(),
     });
   } catch (err) {
     console.error("GET /api/ai/chat", err);
@@ -2361,18 +2378,18 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
     if (!text) return res.status(400).json({ error: "Пустое сообщение" });
 
     const wantSearch = req.body?.search === true || req.body?.webSearch === true;
-    if (wantSearch && !isGoogleCseConfigured()) {
+    if (wantSearch && !isTavilyConfigured()) {
       return res.status(501).json({
-        error: "Поиск не настроен: задайте GOOGLE_CSE_API_KEY и GOOGLE_CSE_CX в .env на сервере.",
+        error: "Поиск не настроен: задайте TAVILY_API_KEY в .env на сервере.",
       });
     }
 
     let webBlock = null;
     if (wantSearch) {
-      const sr = await runGoogleCse(text);
+      const sr = await runTavilySearch(text);
       if (!sr.ok) {
-        console.warn("[ai] Google CSE:", sr.error);
-        return res.status(502).json({ error: sr.error || "Поиск Google недоступен" });
+        console.warn("[ai] Tavily:", sr.error);
+        return res.status(502).json({ error: sr.error || "Поиск Tavily недоступен" });
       }
       webBlock = sr.block;
     }

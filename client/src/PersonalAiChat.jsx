@@ -179,12 +179,12 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
                     localStorage.setItem(LS_AI_WEB, v ? "1" : "0");
                   }}
                 />
-                <span title="Перед ответом модели запрос к Google (Programmable Search). Расходует квоту API.">
+                <span title="Перед ответом модели — поиск через Tavily (расход API-кредитов по тарифу).">
                   Искать в интернете
                 </span>
               </label>
             ) : (
-              <span className="text-[10px] text-tc-text-muted" title="На сервере не заданы GOOGLE_CSE_API_KEY и GOOGLE_CSE_CX">
+              <span className="text-[10px] text-tc-text-muted" title="На сервере не задан TAVILY_API_KEY">
                 Поиск: не настроен
               </span>
             )}
