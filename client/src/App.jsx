@@ -2961,7 +2961,9 @@ export default function App() {
               <p className="mt-2 text-center text-[11px] leading-snug text-tc-text-muted">
                 APK: {apkInfo.versionName ? `v${apkInfo.versionName}` : "v?"}
                 {apkInfo.versionCode ? ` (${apkInfo.versionCode})` : ""} ·{" "}
-                {apkInfo.modifiedAt ? new Date(apkInfo.modifiedAt).toLocaleString() : ""}
+                {apkInfo.buildAt
+                  ? new Date(apkInfo.buildAt).toLocaleString()
+                  : (apkInfo.modifiedAt ? new Date(apkInfo.modifiedAt).toLocaleString() : "")}
               </p>
             ) : null}
             <p className="mt-2 text-center text-[11px] leading-snug text-tc-text-muted">

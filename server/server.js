@@ -2326,8 +2326,19 @@ async function getLatestApkFile() {
     try {
       const st = await fsp.stat(full);
       if (!st.isFile()) continue;
-      const m = st.mtimeMs || 0;
-      if (!best || m > best.mtimeMs) best = { full, name, mtimeMs: m, size: st.size || 0 };
+      const mtimeMs = st.mtimeMs || 0;
+      // Prefer timestamp embedded in filename: ...-YYYY-MM-DD_HH-mm-ss.apk
+      let buildMs = 0;
+      const mm = /-(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})\.apk$/i.exec(name);
+      if (mm) {
+        const iso = `${mm[1]}-${mm[2]}-${mm[3]}T${mm[4]}:${mm[5]}:${mm[6]}Z`;
+        const t = Date.parse(iso);
+        if (Number.isFinite(t)) buildMs = t;
+      }
+      const sortMs = buildMs || mtimeMs;
+      if (!best || sortMs > best.sortMs) {
+        best = { full, name, mtimeMs, buildMs, sortMs, size: st.size || 0 };
+      }
     } catch (_) {}
   }
   return best;
@@ -2360,6 +2371,7 @@ app.get("/api/apk/latest-info", async (_req, res) => {
       name: f.name,
       sizeBytes: f.size || 0,
       modifiedAt: new Date(f.mtimeMs || Date.now()).toISOString(),
+      buildAt: f.buildMs ? new Date(f.buildMs).toISOString() : null,
       versionName,
       versionCode,
     });
