@@ -68,25 +68,13 @@ function MentionCountBadge({ count }) {
   );
 }
 
-/** 1 — отправлено, 2 — доставлено в чат, 3 — прочитано (ЛС). */
-function MessageDeliveryTicks({ level }) {
+/** Одна галочка: 1 — отправлено, 2 — доставлено, 3 — прочитано (ЛС); только цвет. */
+function MessageDeliveryTick({ level }) {
   const title = level >= 3 ? "Прочитано" : level >= 2 ? "Доставлено" : "Отправлено";
-  if (level >= 3) {
-    return (
-      <span className="text-sky-500 dark:text-sky-400" title={title} aria-label={title}>
-        ✓✓
-      </span>
-    );
-  }
-  if (level >= 2) {
-    return (
-      <span className="text-tc-text/50" title={title} aria-label={title}>
-        ✓✓
-      </span>
-    );
-  }
+  const cls =
+    level >= 3 ? "text-sky-500 dark:text-sky-400" : level >= 2 ? "text-tc-text/50" : "text-tc-text/40";
   return (
-    <span className="text-tc-text/40" title={title} aria-label={title}>
+    <span className={`text-[13px] leading-none ${cls}`} title={title} aria-label={title}>
       ✓
     </span>
   );
@@ -4341,6 +4329,11 @@ export default function App() {
                           className="h-12 w-12 rounded-xl object-cover"
                         />
                       </button>
+                      {mine && !deleted && (
+                        <span className="pointer-events-none flex shrink-0 select-none items-end pb-1">
+                          <MessageDeliveryTick level={getMessageDeliveryLevel(m, mine)} />
+                        </span>
+                      )}
                       <div
                         className={`relative min-w-0 max-w-full flex-1 cursor-pointer rounded-xl px-3 py-2 transition-colors ${
                           mine
@@ -4395,11 +4388,6 @@ export default function App() {
                         </>
                       )}
                       <div className="mt-1 flex items-center justify-end gap-1">
-                        {mine && !deleted && (
-                          <span className="select-none text-[11px] leading-none opacity-90">
-                            <MessageDeliveryTicks level={getMessageDeliveryLevel(m, mine)} />
-                          </span>
-                        )}
                         <span className="text-[10px] text-white/40">
                           {formatTime(m.time)}
                           {m.edited_at ? " · изм." : ""}
