@@ -23,6 +23,14 @@ const PORT = Number(process.env.PORT) || 3001;
 /** Локальный Ollama (не открывать наружу). */
 const OLLAMA_BASE_URL = String(process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\/$/, "");
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "deepseek-r1:8b";
+const OLLAMA_MODELS = Array.from(
+  new Set(
+    String(process.env.OLLAMA_MODELS || OLLAMA_MODEL)
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  )
+);
 const MAX_AI_USER_MESSAGE_CHARS = Math.min(Math.max(Number(process.env.MAX_AI_USER_MESSAGE_CHARS) || 6000, 500), 32000);
 const OLLAMA_HTTP_TIMEOUT_MS = Math.min(Math.max(Number(process.env.OLLAMA_HTTP_TIMEOUT_MS) || 300000, 10000), 600000);
 /** Tavily Search API (ключ в заголовке Authorization: Bearer) */
@@ -555,6 +563,41 @@ async function ensureUserOllamaChatSchema() {
   }
 }
 
+async function ensureUserOllamaPrefsSchema() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_ollama_prefs (
+        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        model TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+  } catch (err) {
+    console.error("[schema] user_ollama_prefs:", err?.message || err);
+    throw err;
+  }
+}
+
+async function getUserAiModel(userId) {
+  await ensureUserOllamaPrefsSchema();
+  const { rows } = await pool.query(`SELECT model FROM user_ollama_prefs WHERE user_id = $1`, [userId]);
+  const m = String(rows[0]?.model || "").trim();
+  if (m && OLLAMA_MODELS.includes(m)) return m;
+  return OLLAMA_MODEL;
+}
+
+async function setUserAiModel(userId, model) {
+  await ensureUserOllamaPrefsSchema();
+  const m = String(model || "").trim();
+  if (!m || !OLLAMA_MODELS.includes(m)) return { ok: false, error: "Недоступная модель" };
+  await pool.query(
+    `INSERT INTO user_ollama_prefs (user_id, model, updated_at) VALUES ($1, $2, NOW())
+     ON CONFLICT (user_id) DO UPDATE SET model = $2, updated_at = NOW()`,
+    [userId, m]
+  );
+  return { ok: true, model: m };
+}
+
 function sanitizeAiUserMessage(input) {
   return String(input ?? "")
     .replace(/[\u0000-\u001F\u007F]/g, "")
@@ -624,6 +667,8 @@ async function runTavilySearch(searchQuery) {
         search_depth: normalizeTavilySearchDepth(),
         max_results: maxResults,
         topic: "general",
+        include_images: true,
+        include_image_descriptions: true,
       }),
       signal: ac.signal,
     });
@@ -639,7 +684,36 @@ async function runTavilySearch(searchQuery) {
         ok: true,
         block:
           "По этому запросу Tavily не вернул результатов. Сообщи пользователю и ответь из своих знаний, если уместно.",
+        images: [],
       };
+    }
+    const images = [];
+    const topImages = Array.isArray(data.images) ? data.images : [];
+    for (const it of topImages) {
+      if (images.length >= 10) break;
+      if (typeof it === "string" && it.trim()) {
+        images.push({ url: it.trim(), description: "" });
+      } else if (it && typeof it === "object") {
+        const url = String(it.url || "").trim();
+        const description = String(it.description || "").trim();
+        if (url) images.push({ url, description });
+      }
+    }
+    if (images.length < 10) {
+      for (const r of results) {
+        if (images.length >= 10) break;
+        const ri = Array.isArray(r?.images) ? r.images : [];
+        for (const it of ri) {
+          if (images.length >= 10) break;
+          if (typeof it === "string" && it.trim()) {
+            images.push({ url: it.trim(), description: "" });
+          } else if (it && typeof it === "object") {
+            const url = String(it.url || "").trim();
+            const description = String(it.description || "").trim();
+            if (url) images.push({ url, description });
+          }
+        }
+      }
     }
     let block =
       "Ниже выдержки из веб-поиска (Tavily). Опирайся на них; укажи номер источника [1], [2]. Не выдумывай URL и факты вне текста.\n\n";
@@ -656,7 +730,7 @@ async function runTavilySearch(searchQuery) {
         .slice(0, 4000);
       return `[${i + 1}] ${title}\nURL: ${url}\n${content}`;
     });
-    return { ok: true, block: `${block}${parts.join("\n\n")}`.trim() };
+    return { ok: true, block: `${block}${parts.join("\n\n")}`.trim(), images };
   } catch (e) {
     if (e?.name === "AbortError") return { ok: false, error: "Таймаут Tavily" };
     return { ok: false, error: e?.message || "Ошибка Tavily" };
@@ -676,7 +750,7 @@ function buildAiSystemPrompt(nickname, webSearchBlock) {
   return s.slice(0, 120_000);
 }
 
-async function callOllamaChat(messages) {
+async function callOllamaChat(model, messages) {
   const ac = new AbortController();
   const to = setTimeout(() => ac.abort(), OLLAMA_HTTP_TIMEOUT_MS);
   try {
@@ -684,7 +758,7 @@ async function callOllamaChat(messages) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: OLLAMA_MODEL,
+        model: model || OLLAMA_MODEL,
         messages,
         stream: false,
       }),
@@ -2351,7 +2425,8 @@ app.get("/api/ai/chat", requireAuth, async (req, res) => {
     const list = rows[0] ? normalizeStoredAiMessages(rows[0].messages) : [];
     res.json({
       messages: list,
-      model: OLLAMA_MODEL,
+      model: await getUserAiModel(req.user.userId),
+      availableModels: OLLAMA_MODELS,
       webSearchAvailable: isTavilyConfigured(),
     });
   } catch (err) {
@@ -2364,6 +2439,12 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
   try {
     await ensureUserOllamaChatSchema();
     const userId = req.user.userId;
+
+    if (req.body?.setModel) {
+      const r = await setUserAiModel(userId, req.body.setModel);
+      if (!r.ok) return res.status(400).json({ error: r.error || "Ошибка модели" });
+      return res.json({ ok: true, model: r.model, availableModels: OLLAMA_MODELS });
+    }
 
     if (req.body?.clear === true) {
       await pool.query(
@@ -2385,6 +2466,7 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
     }
 
     let webBlock = null;
+    let webImages = [];
     if (wantSearch) {
       const sr = await runTavilySearch(text);
       if (!sr.ok) {
@@ -2392,6 +2474,7 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
         return res.status(502).json({ error: sr.error || "Поиск Tavily недоступен" });
       }
       webBlock = sr.block;
+      webImages = Array.isArray(sr.images) ? sr.images.slice(0, 8) : [];
     }
 
     const { rows } = await pool.query(`SELECT messages FROM user_ollama_chats WHERE user_id = $1`, [userId]);
@@ -2401,10 +2484,11 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
     const historyForModel = trimMessagesForOllama(list).map(({ role, content }) => ({ role, content }));
     const systemPrompt = buildAiSystemPrompt(req.user.nickname, webBlock);
     const ollamaMessages = [{ role: "system", content: systemPrompt }, ...historyForModel];
+    const selectedModel = await getUserAiModel(userId);
 
     let reply;
     try {
-      reply = await callOllamaChat(ollamaMessages);
+      reply = await callOllamaChat(selectedModel, ollamaMessages);
     } catch (e) {
       if (e?.name === "AbortError") {
         return res.status(504).json({ error: "Модель отвечает слишком долго" });
@@ -2425,7 +2509,7 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
       [userId, JSON.stringify(list)]
     );
 
-    res.json({ messages: list });
+    res.json({ messages: list, model: selectedModel, web: wantSearch ? { images: webImages } : undefined });
   } catch (err) {
     console.error("POST /api/ai/chat", err);
     res.status(500).json({ error: "Ошибка ассистента" });
@@ -3869,6 +3953,7 @@ async function start() {
   await ensureUserPermissionsSchema();
   await ensurePushSchema();
   await ensureUserOllamaChatSchema();
+  await ensureUserOllamaPrefsSchema();
   initFcmIfPossible();
   ensureUploadDirs();
   server.listen(PORT, () => {

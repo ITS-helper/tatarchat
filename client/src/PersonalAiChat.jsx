@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 const LS_AI_WEB = "tatarchat_ai_web_search";
+const LS_AI_MODEL = "tatarchat_ai_model";
 
 export default function PersonalAiChat({ getApiBase, token, nickname, onError }) {
   const [messages, setMessages] = useState([]);
   const [model, setModel] = useState("");
+  const [availableModels, setAvailableModels] = useState([]);
   const [webSearchAvailable, setWebSearchAvailable] = useState(false);
   const [webSearchOn, setWebSearchOn] = useState(() => localStorage.getItem(LS_AI_WEB) === "1");
+  const [webImages, setWebImages] = useState([]);
+  const [searching, setSearching] = useState(false);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -41,7 +45,22 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
         if (!cancelled) {
           setMessages(Array.isArray(data.messages) ? data.messages : []);
           if (data.model) setModel(data.model);
+          if (Array.isArray(data.availableModels)) setAvailableModels(data.availableModels);
           if (typeof data.webSearchAvailable === "boolean") setWebSearchAvailable(data.webSearchAvailable);
+          const savedModel = localStorage.getItem(LS_AI_MODEL);
+          if (savedModel && Array.isArray(data.availableModels) && data.availableModels.includes(savedModel) && savedModel !== data.model) {
+            // best effort: sync UI preference back to server
+            fetch(`${base}/api/ai/chat`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ setModel: savedModel }),
+            })
+              .then((r) => r.json().catch(() => ({})))
+              .then((d) => {
+                if (d?.model) setModel(d.model);
+              })
+              .catch(() => {});
+          }
         }
       } catch (e) {
         console.error(e);
@@ -61,6 +80,8 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
     if (!t || sending || !token) return;
     setInput("");
     setSending(true);
+    setSearching(webSearchOn && webSearchAvailable);
+    setWebImages([]);
     onError?.(null);
     try {
       const res = await fetch(`${base}/api/ai/chat`, {
@@ -74,12 +95,16 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
         return;
       }
       onError?.(null);
+      if (data.model) setModel(data.model);
       if (Array.isArray(data.messages)) setMessages(data.messages);
+      const imgs = data?.web?.images;
+      if (Array.isArray(imgs)) setWebImages(imgs.slice(0, 8));
     } catch (err) {
       console.error(err);
       onError?.("Сеть: не удалось отправить");
     } finally {
       setSending(false);
+      setSearching(false);
     }
   };
 
@@ -88,6 +113,7 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
     if (!window.confirm("Очистить историю с ассистентом?")) return;
     onError?.(null);
     setSending(true);
+    setWebImages([]);
     try {
       const res = await fetch(`${base}/api/ai/chat`, {
         method: "POST",
@@ -109,6 +135,37 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
     }
   };
 
+  const modelLabel = (m) => {
+    if (m === "qwen3-vl:8b") return "qwen3-vl:8b · картинки";
+    if (m === "qwen3:5.4b") return "qwen3:5.4b · текст";
+    return m;
+  };
+
+  const switchModel = async (next) => {
+    const m = String(next || "").trim();
+    if (!m || !token) return;
+    localStorage.setItem(LS_AI_MODEL, m);
+    setModel(m);
+    onError?.(null);
+    try {
+      const res = await fetch(`${base}/api/ai/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ setModel: m }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        onError?.(data.error || `Ошибка ${res.status}`);
+        return;
+      }
+      if (data.model) setModel(data.model);
+      if (Array.isArray(data.availableModels)) setAvailableModels(data.availableModels);
+    } catch (e) {
+      console.error(e);
+      onError?.("Сеть: модель");
+    }
+  };
+
   return (
     <div className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden">
       <div className="chat-bg-parallax pointer-events-none z-0" aria-hidden />
@@ -123,11 +180,11 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
         ) : messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-2 text-center">
             <p className="text-sm text-tc-text-muted">Личный чат с моделью на сервере (Ollama).</p>
-            {model ? <p className="text-xs text-tc-text-muted/90">Модель: {model}</p> : null}
+            {model ? <p className="text-xs text-tc-text-muted/90">Модель: {modelLabel(model)}</p> : null}
           </div>
         ) : (
           <div className="space-y-3">
-            {model ? <p className="text-center text-[10px] text-tc-text-muted">Модель: {model}</p> : null}
+            {model ? <p className="text-center text-[10px] text-tc-text-muted">Модель: {modelLabel(model)}</p> : null}
             {messages.map((m, i) => {
               const mine = m.role === "user";
               return (
@@ -151,6 +208,41 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
                 </div>
               );
             })}
+            {sending ? (
+              <div className="flex justify-start">
+                <div className="max-w-[min(100%,36rem)] rounded-xl rounded-bl-sm bg-tc-msg px-3 py-2 text-sm text-tc-text">
+                  <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-tc-accent/90">Ассистент</p>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-tc-border border-t-tc-accent" aria-hidden />
+                    <span className="text-tc-text-sec">{searching ? "Ищу и думаю…" : "Думаю…"}</span>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+            {webImages.length ? (
+              <div className="mt-1">
+                <p className="mb-2 text-center text-[10px] text-tc-text-muted">Картинки по теме поиска</p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {webImages.map((it, idx) => {
+                    const url = typeof it === "string" ? it : it?.url;
+                    const desc = typeof it === "object" ? it?.description : "";
+                    if (!url) return null;
+                    return (
+                      <a
+                        key={idx}
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block overflow-hidden rounded-lg border border-tc-border/60 bg-tc-panel/30 hover:opacity-95"
+                        title={desc || "Открыть картинку"}
+                      >
+                        <img src={url} alt={desc || "image"} className="h-24 w-full object-cover" loading="lazy" />
+                      </a>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
       </div>
@@ -158,6 +250,21 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
       <div className="tc-composer-bar relative z-10 flex flex-col gap-2 border-t border-tc-border bg-tc-header px-2 py-2 sm:px-3">
         <div className="flex flex-wrap items-center justify-between gap-2 px-1">
           <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-xs text-tc-text-sec">
+              <span className="text-tc-text-muted">Модель</span>
+              <select
+                value={model}
+                disabled={sending || loading}
+                onChange={(e) => switchModel(e.target.value)}
+                className="rounded-lg border border-tc-border bg-tc-panel/40 px-2 py-1 text-xs text-tc-text outline-none focus:ring-2 focus:ring-tc-accent/50 disabled:opacity-40"
+              >
+                {(availableModels.length ? availableModels : ["qwen3:5.4b", "qwen3-vl:8b"]).map((m) => (
+                  <option key={m} value={m}>
+                    {modelLabel(m)}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button
               type="button"
               disabled={sending || loading}
@@ -195,7 +302,7 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
             className="tc-msg-input min-h-[44px] max-h-40 min-w-0 flex-1 resize-y border-0 bg-transparent py-2.5 text-base text-tc-text outline-none ring-0 placeholder:text-tc-text-muted focus:ring-0 sm:text-sm"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={sending ? "Ответ…" : "Сообщение ассистенту"}
+            placeholder={sending ? (searching ? "Ищу и думаю…" : "Думаю…") : "Сообщение ассистенту"}
             disabled={sending || loading}
             rows={1}
             maxLength={8000}
