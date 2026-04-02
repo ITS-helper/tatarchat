@@ -20,6 +20,11 @@ const admin = require("firebase-admin");
 const webpush = require("web-push");
 
 const PORT = Number(process.env.PORT) || 3001;
+/** Локальный Ollama (не открывать наружу). */
+const OLLAMA_BASE_URL = String(process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\/$/, "");
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "deepseek-r1:8b";
+const MAX_AI_USER_MESSAGE_CHARS = Math.min(Math.max(Number(process.env.MAX_AI_USER_MESSAGE_CHARS) || 6000, 500), 32000);
+const OLLAMA_HTTP_TIMEOUT_MS = Math.min(Math.max(Number(process.env.OLLAMA_HTTP_TIMEOUT_MS) || 300000, 10000), 600000);
 const MAX_MESSAGE_LEN = 2000;
 const MAX_NICK_LEN = 64;
 const MIN_PASSWORD_LEN = 6;
@@ -530,6 +535,92 @@ function defaultPushModeForRoom(room) {
   if (slug.startsWith("dm-")) return "all";
   if (slug === "lobby") return "all";
   return "off";
+}
+
+async function ensureUserOllamaChatSchema() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_ollama_chats (
+        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        messages JSONB NOT NULL DEFAULT '[]'::jsonb,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+  } catch (err) {
+    console.error("[schema] user_ollama_chats:", err?.message || err);
+    throw err;
+  }
+}
+
+function sanitizeAiUserMessage(input) {
+  return String(input ?? "")
+    .replace(/[\u0000-\u001F\u007F]/g, "")
+    .replace(/<[^>]*>/g, "")
+    .trim()
+    .slice(0, MAX_AI_USER_MESSAGE_CHARS);
+}
+
+function stripAssistantNoise(text) {
+  let s = String(text ?? "");
+  s = s.replace(/<redacted_thinking>[\s\S]*?<\/redacted_thinking>/gi, "");
+  s = s.replace(/<think>[\s\S]*?<\/redacted_thinking>/gi, "");
+  return s.trim();
+}
+
+function normalizeStoredAiMessages(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const m of raw) {
+    if (!m || typeof m !== "object") continue;
+    const role = m.role === "assistant" ? "assistant" : m.role === "user" ? "user" : null;
+    if (!role) continue;
+    let content = typeof m.content === "string" ? m.content : m.content != null ? String(m.content) : "";
+    content = content.replace(/[\u0000-\u001F\u007F]/g, "").slice(0, 200000);
+    if (!content) continue;
+    out.push({ role, content });
+  }
+  return out;
+}
+
+function trimMessagesForOllama(list, maxPairs = 28) {
+  const n = maxPairs * 2;
+  if (list.length <= n) return list;
+  return list.slice(list.length - n);
+}
+
+async function callOllamaChat(messages) {
+  const ac = new AbortController();
+  const to = setTimeout(() => ac.abort(), OLLAMA_HTTP_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        messages,
+        stream: false,
+      }),
+      signal: ac.signal,
+    });
+    const txt = await res.text();
+    let data = {};
+    try {
+      data = txt ? JSON.parse(txt) : {};
+    } catch {
+      data = {};
+    }
+    if (!res.ok) {
+      const err = new Error(`ollama_http_${res.status}`);
+      err.detail = (txt || "").slice(0, 800);
+      throw err;
+    }
+    let reply = data?.message?.content;
+    if (typeof reply !== "string") reply = "";
+    reply = stripAssistantNoise(reply);
+    return reply;
+  } finally {
+    clearTimeout(to);
+  }
 }
 
 async function ensurePushSchema() {
@@ -2163,6 +2254,73 @@ app.get("/api/me", requireAuth, async (req, res) => {
   }
 });
 
+app.get("/api/ai/chat", requireAuth, async (req, res) => {
+  try {
+    await ensureUserOllamaChatSchema();
+    const { rows } = await pool.query(`SELECT messages FROM user_ollama_chats WHERE user_id = $1`, [
+      req.user.userId,
+    ]);
+    const list = rows[0] ? normalizeStoredAiMessages(rows[0].messages) : [];
+    res.json({ messages: list, model: OLLAMA_MODEL });
+  } catch (err) {
+    console.error("GET /api/ai/chat", err);
+    res.status(500).json({ error: "Ошибка" });
+  }
+});
+
+app.post("/api/ai/chat", requireAuth, async (req, res) => {
+  try {
+    await ensureUserOllamaChatSchema();
+    const userId = req.user.userId;
+
+    if (req.body?.clear === true) {
+      await pool.query(
+        `INSERT INTO user_ollama_chats (user_id, messages, updated_at) VALUES ($1, '[]'::jsonb, NOW())
+         ON CONFLICT (user_id) DO UPDATE SET messages = '[]'::jsonb, updated_at = NOW()`,
+        [userId]
+      );
+      return res.json({ messages: [] });
+    }
+
+    const text = sanitizeAiUserMessage(req.body?.message);
+    if (!text) return res.status(400).json({ error: "Пустое сообщение" });
+
+    const { rows } = await pool.query(`SELECT messages FROM user_ollama_chats WHERE user_id = $1`, [userId]);
+    let list = rows[0] ? normalizeStoredAiMessages(rows[0].messages) : [];
+    list.push({ role: "user", content: text });
+
+    const ollamaMessages = trimMessagesForOllama(list).map(({ role, content }) => ({ role, content }));
+
+    let reply;
+    try {
+      reply = await callOllamaChat(ollamaMessages);
+    } catch (e) {
+      if (e?.name === "AbortError") {
+        return res.status(504).json({ error: "Модель отвечает слишком долго" });
+      }
+      if (String(e?.message || "").startsWith("ollama_http_")) {
+        console.error("[ai] Ollama:", e?.detail || e?.message);
+        return res.status(503).json({ error: "Модель недоступна (Ollama). Проверьте сервер." });
+      }
+      throw e;
+    }
+
+    if (!reply) reply = "(пустой ответ модели)";
+    list.push({ role: "assistant", content: reply.slice(0, 200000) });
+
+    await pool.query(
+      `INSERT INTO user_ollama_chats (user_id, messages, updated_at) VALUES ($1, $2::jsonb, NOW())
+       ON CONFLICT (user_id) DO UPDATE SET messages = $2::jsonb, updated_at = NOW()`,
+      [userId, JSON.stringify(list)]
+    );
+
+    res.json({ messages: list });
+  } catch (err) {
+    console.error("POST /api/ai/chat", err);
+    res.status(500).json({ error: "Ошибка ассистента" });
+  }
+});
+
 app.get("/api/gallery/folders", requireAuth, requireGalleryRoom, async (req, res) => {
   try {
     const parsed = parseGalleryParentQuery(req.query.parentId);
@@ -3599,6 +3757,7 @@ async function start() {
   await ensureCalendarSchema();
   await ensureUserPermissionsSchema();
   await ensurePushSchema();
+  await ensureUserOllamaChatSchema();
   initFcmIfPossible();
   ensureUploadDirs();
   server.listen(PORT, () => {

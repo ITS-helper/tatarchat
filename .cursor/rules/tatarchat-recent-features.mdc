@@ -41,6 +41,11 @@ alwaysApply: true
 - API: **`https://api.open-meteo.com/v1/forecast`** (без ключа), `current=temperature_2m,weather_code,wind_speed_10m`, `timezone=auto`; погодный код → эмодзи **`wmoWeatherEmoji`**.
 - Обновление: при монтировании, кнопка **↻**, интервал **30 минут**; ссылка «Open‑Meteo» внизу блока.
 
+## Личный ассистент Ollama (server + client)
+
+- В сайдбаре **Личное** → после **Избранного** пункт **«Ассистент»** (`personalAiOpen`): отдельный UI **`client/src/PersonalAiChat.jsx`**, не Socket-комната.
+- **Сервер** `server/server.js`: таблица **`user_ollama_chats`** (per **`user_id`**: JSONB **`messages`**, своя история у каждого пользователя). **`GET /api/ai/chat`**, **`POST /api/ai/chat`** (`message` или `clear: true`). Прокси в **Ollama** `POST /api/chat`, без выставления Ollama наружу. Env: **`OLLAMA_BASE_URL`** (по умолчанию `http://127.0.0.1:11434`), **`OLLAMA_MODEL`** (по умолчанию `deepseek-r1:8b`), при необходимости **`OLLAMA_HTTP_TIMEOUT_MS`**, **`MAX_AI_USER_MESSAGE_CHARS`**.
+
 ## Push / уведомления (server + client)
 
 - **Сервер** `server/server.js`: доставка через **`sendPushToUser`** — **FCM** для нативного клиента (`push_tokens` с `platform !== 'web'`), **Web Push (VAPID)** для браузера/PWA (`platform === 'web'`, колонки `web_auth`, `web_p256dh`). Режим комнаты **`getPushMode`** + глобальный **`push_settings.enabled`**. Для **`kind: "message"`** пуш шлётся только при **`mode === 'all'`**; для **`kind: "mention"`** — при **`mode !== 'off'`**. Web Push для упоминаний не дублируется, если у пользователя есть активный сокет (**`userSocketPresenceCount`**). Регистрация: **`POST /api/push/register`** (в т.ч. `platform: "web"`, `subscription`), **`GET /api/push/web-vapid-key`**.

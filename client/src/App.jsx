@@ -6,6 +6,7 @@ import { PushNotifications } from "@capacitor/push-notifications";
 import { io } from "socket.io-client";
 import GalleryView from "./GalleryView.jsx";
 import CalendarView from "./CalendarView.jsx";
+import PersonalAiChat from "./PersonalAiChat.jsx";
 
 const LS_TOKEN = "tatarchat_token";
 const LS_NICKNAME = "tatarchat_nickname";
@@ -1066,6 +1067,9 @@ export default function App() {
   const [activeView, setActiveView] = useState(() => sessionStorage.getItem("tatarchat_active_view") || CHANNEL_VIEWS.chat);
   const [channelMenuRoom, setChannelMenuRoom] = useState(null);
   const [personalOpen, setPersonalOpen] = useState(false);
+  /** Личный чат с локальной LLM (Ollama), отдельно от комнат */
+  const [personalAiOpen, setPersonalAiOpen] = useState(false);
+  const personalAiOpenRef = useRef(false);
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminSaving, setAdminSaving] = useState(null);
@@ -1117,6 +1121,10 @@ export default function App() {
   useEffect(() => {
     nicknameRef.current = nickname;
   }, [nickname]);
+
+  useEffect(() => {
+    personalAiOpenRef.current = personalAiOpen;
+  }, [personalAiOpen]);
 
   useEffect(() => {
     if (themeLight) document.documentElement.classList.add("theme-light");
@@ -2048,6 +2056,11 @@ export default function App() {
 
   useEffect(() => {
     if (!token) return;
+    if (personalAiOpen) {
+      setMessages([]);
+      setBanner(null);
+      return;
+    }
     localStorage.setItem(LS_LAST_ROOM, activeRoom);
     if (activeView === CHANNEL_VIEWS.chat) {
       loadHistoryForRoom(activeRoom);
@@ -2055,7 +2068,7 @@ export default function App() {
       setMessages([]);
       setBanner(null);
     }
-  }, [token, activeRoom, loadHistoryForRoom, activeView]);
+  }, [token, activeRoom, loadHistoryForRoom, activeView, personalAiOpen]);
 
   const emitJoinRoom = useCallback((socket) => {
     const r = activeRoomRef.current;
@@ -2096,7 +2109,13 @@ export default function App() {
     socket.on("connect", () => {
       setStatus("online");
       setBanner(null);
-      emitJoinRoom(socket);
+      if (personalAiOpenRef.current) {
+        socket.emit("leave");
+        setRoomJoined(false);
+        roomJoinedRef.current = false;
+      } else {
+        emitJoinRoom(socket);
+      }
     });
 
     socket.on("disconnect", () => {
@@ -2275,8 +2294,14 @@ export default function App() {
   useEffect(() => {
     const s = socketRef.current;
     if (!token || !s?.connected) return;
+    if (personalAiOpen) {
+      s.emit("leave");
+      setRoomJoined(false);
+      roomJoinedRef.current = false;
+      return;
+    }
     emitJoinRoom(s);
-  }, [activeRoom, token, emitJoinRoom]);
+  }, [activeRoom, token, emitJoinRoom, personalAiOpen]);
 
   function applyAuthPayload(data, fallbackName) {
     if (!data?.token) {
@@ -2524,6 +2549,7 @@ export default function App() {
     setStatus("offline");
     setRoomJoined(false);
     roomJoinedRef.current = false;
+    setPersonalAiOpen(false);
     setChangePwOpen(false);
     setChangePwCurrent("");
     setChangePwNew("");
@@ -2533,6 +2559,7 @@ export default function App() {
   };
 
   const goToChatRoom = useCallback((slug) => {
+    setPersonalAiOpen(false);
     setBanner(null);
     setActiveRoom(slug);
     setActiveView(CHANNEL_VIEWS.chat);
@@ -2583,6 +2610,7 @@ export default function App() {
   };
 
   const chooseChannelView = (view) => {
+    setPersonalAiOpen(false);
     setActiveView(view);
     if (channelMenuRoom) setActiveRoom(channelMenuRoom);
     setChannelMenuRoom(null);
@@ -3054,20 +3082,20 @@ export default function App() {
             <svg viewBox="0 0 24 24" className={`h-4 w-4 transition-transform ${personalOpen ? "rotate-180" : ""}`} fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
           </button>
 
-          <div className={`overflow-hidden px-3 transition-all duration-200 ${personalOpen ? "max-h-[520px] opacity-100 pb-2" : "max-h-0 opacity-0"}`}>
+          <div className={`overflow-hidden px-3 transition-all duration-200 ${personalOpen ? "max-h-[620px] opacity-100 pb-2" : "max-h-0 opacity-0"}`}>
             {savedChannel ? (
               <button
                 type="button"
                 onClick={() => { selectChannel(savedChannel.slug); setSidebarOpen(false); }}
                 className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 transition-colors duration-200 ${
-                  activeRoom === savedChannel.slug ? "bg-tc-accent/20" : "hover:bg-tc-hover"
+                  activeRoom === savedChannel.slug && !personalAiOpen ? "bg-tc-accent/20" : "hover:bg-tc-hover"
                 }`}
               >
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/20 text-amber-500" aria-hidden>
                   <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
                 </div>
                 <div className="min-w-0 flex-1 text-left">
-                  <span className={`flex items-center truncate text-sm font-medium ${activeRoom === savedChannel.slug ? "text-tc-accent" : "text-tc-text"}`}>
+                  <span className={`flex items-center truncate text-sm font-medium ${activeRoom === savedChannel.slug && !personalAiOpen ? "text-tc-accent" : "text-tc-text"}`}>
                     Избранное
                     <MentionCountBadge count={mentionBadges[savedChannel.slug]} />
                   </span>
@@ -3075,6 +3103,29 @@ export default function App() {
                 </div>
               </button>
             ) : null}
+
+            <button
+              type="button"
+              onClick={() => {
+                setPersonalAiOpen(true);
+                setActiveView(CHANNEL_VIEWS.chat);
+                setChannelMenuRoom(null);
+                setSidebarOpen(false);
+              }}
+              className={`${savedChannel ? "mt-2" : ""} flex w-full items-center gap-3 rounded-xl px-3 py-2.5 transition-colors duration-200 ${
+                personalAiOpen ? "bg-tc-accent/20" : "hover:bg-tc-hover"
+              }`}
+            >
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/20 text-violet-400" aria-hidden>
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
+                  <path d="M9.5 2c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1zM6 7.5C4.62 7.5 3.5 8.62 3.5 10S4.62 12.5 6 12.5 8.5 11.38 8.5 10 7.38 7.5 6 7.5zm12 0c-1.38 0-2.5 1.12-2.5 2.5s1.12 2.5 2.5 2.5 2.5-1.12 2.5-2.5S19.38 7.5 18 7.5zm-6 1c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1zm1 5.5c-2.49 0-4.5 2.01-4.5 4.5 0 .55.45 1 1 1h7c.55 0 1-.45 1-1 0-2.49-2.01-4.5-4.5-4.5zm7.5-6c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1z" />
+                </svg>
+              </div>
+              <div className="min-w-0 flex-1 text-left">
+                <span className={`truncate text-sm font-medium ${personalAiOpen ? "text-tc-accent" : "text-tc-text"}`}>Ассистент</span>
+                <p className="truncate text-xs text-tc-text-muted">Личный чат (Ollama)</p>
+              </div>
+            </button>
 
             {directChannels.length ? (
               <div className="mt-2 rounded-xl border border-tc-border/60 bg-tc-panel/20">
@@ -3084,11 +3135,11 @@ export default function App() {
                     type="button"
                     onClick={() => { selectChannel(r.slug); setSidebarOpen(false); }}
                     className={`flex w-full items-center gap-3 px-3 py-2.5 transition-colors duration-200 ${
-                      activeRoom === r.slug ? "bg-tc-accent/20" : "hover:bg-tc-hover"
+                      activeRoom === r.slug && !personalAiOpen ? "bg-tc-accent/20" : "hover:bg-tc-hover"
                     }`}
                   >
                     <div className="min-w-0 flex-1 text-left">
-                      <span className={`flex items-center truncate text-sm font-medium ${activeRoom === r.slug ? "text-tc-accent" : "text-tc-text"}`}>
+                      <span className={`flex items-center truncate text-sm font-medium ${activeRoom === r.slug && !personalAiOpen ? "text-tc-accent" : "text-tc-text"}`}>
                         {r.peer?.nickname || r.title}
                         <MentionCountBadge count={mentionBadges[r.slug]} />
                       </span>
@@ -3539,7 +3590,7 @@ export default function App() {
           </button>
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-base font-semibold text-tc-text">
-              {headerTitleForRoom({ roomTitle, activeRoom, activeView })}
+              {personalAiOpen ? "Ассистент · Ollama" : headerTitleForRoom({ roomTitle, activeRoom, activeView })}
             </h2>
             <div className="flex items-center gap-2 text-xs text-tc-text-muted">
               <span className={`inline-block h-2 w-2 rounded-full ${status === "online" ? "bg-tc-online" : "bg-tc-text-muted"}`} />
@@ -3549,7 +3600,13 @@ export default function App() {
             </div>
           </div>
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-tc-asphalt/35 text-tc-text-sec" aria-hidden>
-            <ChannelGlyph slug={activeRoom === DTD_WORK_CHAT_SLUG ? DTD_MAIN_SLUG : activeRoom} className="h-5 w-5" />
+            {personalAiOpen ? (
+              <svg viewBox="0 0 24 24" className="h-5 w-5 text-tc-accent" fill="currentColor" aria-hidden>
+                <path d="M9.5 2c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1zM6 7.5C4.62 7.5 3.5 8.62 3.5 10S4.62 12.5 6 12.5 8.5 11.38 8.5 10 7.38 7.5 6 7.5zm12 0c-1.38 0-2.5 1.12-2.5 2.5s1.12 2.5 2.5 2.5 2.5-1.12 2.5-2.5S19.38 7.5 18 7.5zm-6 1c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1zm1 5.5c-2.49 0-4.5 2.01-4.5 4.5 0 .55.45 1 1 1h7c.55 0 1-.45 1-1 0-2.49-2.01-4.5-4.5-4.5zm7.5-6c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1z" />
+              </svg>
+            ) : (
+              <ChannelGlyph slug={activeRoom === DTD_WORK_CHAT_SLUG ? DTD_MAIN_SLUG : activeRoom} className="h-5 w-5" />
+            )}
           </div>
         </header>
 
@@ -3558,7 +3615,9 @@ export default function App() {
           <div className="bg-tc-danger/15 px-4 py-2 text-sm text-tc-danger">{banner}</div>
         )}
 
-        {activeView === CHANNEL_VIEWS.gallery ? (
+        {personalAiOpen ? (
+          <PersonalAiChat getApiBase={getApiBase} token={token} nickname={nickname} onError={setBanner} />
+        ) : activeView === CHANNEL_VIEWS.gallery ? (
           <GalleryView
             getApiBase={getApiBase}
             token={token}
@@ -3885,7 +3944,7 @@ export default function App() {
         ) : null}
 
         {/* Input area */}
-        {activeView === CHANNEL_VIEWS.chat ? (
+        {activeView === CHANNEL_VIEWS.chat && !personalAiOpen ? (
         <form
           id="tc-chat-form"
           onSubmit={sendMessage}
