@@ -303,6 +303,29 @@ function getStoredToken() {
   return localStorage.getItem(LS_TOKEN) || "";
 }
 
+/** Канонический slug ЛС: меньший user id первым (как на сервере). */
+function canonicalizeDmSlug(slug) {
+  const s = String(slug ?? "").trim();
+  const m = /^dm-(\d+)-(\d+)$/i.exec(s);
+  if (!m) return s;
+  let a = parseInt(m[1], 10);
+  let b = parseInt(m[2], 10);
+  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 1 || b < 1 || a === b) return s;
+  if (a > b) [a, b] = [b, a];
+  return `dm-${a}-${b}`;
+}
+
+/** Та же переписка, что открыта (учёт порядка id в ЛС). */
+function isSameChatRoom(openedSlug, payloadSlug) {
+  const o = String(openedSlug ?? "").trim();
+  const p = String(payloadSlug ?? "").trim();
+  if (!p) return false;
+  if (/^dm-\d+-\d+$/i.test(o) || /^dm-\d+-\d+$/i.test(p)) {
+    return canonicalizeDmSlug(o) === canonicalizeDmSlug(p);
+  }
+  return o === p;
+}
+
 function canonicalizeStoredRoom(s) {
   if (!s || typeof s !== "string") return "lobby";
   const dm = s.trim().match(/^dm-(\d+)-(\d+)$/i);
@@ -1223,7 +1246,7 @@ export default function App() {
           const body = n?.body || "";
           const focusedChat =
             room &&
-            activeRoomRef.current === room &&
+            isSameChatRoom(activeRoomRef.current, room) &&
             activeViewRef.current === CHANNEL_VIEWS.chat &&
             typeof document !== "undefined" &&
             document.visibilityState === "visible";
@@ -2282,13 +2305,7 @@ export default function App() {
     if (activeView !== CHANNEL_VIEWS.chat) return;
     const root = listRef.current;
     if (!root) return;
-    const sentinel = chatBottomSentinelRef.current;
     const go = () => {
-      if (sentinel) {
-        try {
-          sentinel.scrollIntoView({ block: "end", behavior: "auto" });
-        } catch (_) {}
-      }
       root.scrollTop = root.scrollHeight;
     };
     go();
@@ -2298,9 +2315,13 @@ export default function App() {
     });
     const t1 = window.setTimeout(go, 80);
     const t2 = window.setTimeout(go, 280);
+    const t3 = window.setTimeout(go, 520);
+    const t4 = window.setTimeout(go, 1100);
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
+      window.clearTimeout(t3);
+      window.clearTimeout(t4);
     };
   }, [messages, activeRoom, activeView]);
 
@@ -2319,18 +2340,18 @@ export default function App() {
           data = {};
         }
         if (!res.ok) {
-          if (room !== activeRoomRef.current) return;
+          if (!isSameChatRoom(room, activeRoomRef.current)) return;
           setBanner(data.error || `Не удалось загрузить чат (${res.status})`);
           setMessages([]);
           return;
         }
-        if (room !== activeRoomRef.current) return;
+        if (!isSameChatRoom(room, activeRoomRef.current)) return;
         setMessages((data.messages || []).filter((m) => !m.deleted));
         if (data.title) setRoomTitle(data.title);
         setBanner(null);
       } catch (e) {
         console.error(e);
-        if (room !== activeRoomRef.current) return;
+        if (!isSameChatRoom(room, activeRoomRef.current)) return;
         setBanner("Не удалось загрузить историю.");
       }
     },
@@ -2452,7 +2473,7 @@ export default function App() {
       } else {
         return;
       }
-      if (room && room !== activeRoomRef.current) return;
+      if (room && !isSameChatRoom(activeRoomRef.current, room)) return;
       setMessages(rows.filter((m) => !m.deleted));
       setRoomJoined(true);
       roomJoinedRef.current = true;
@@ -2464,7 +2485,7 @@ export default function App() {
 
     socket.on("message", (msg) => {
       if (activeView !== CHANNEL_VIEWS.chat) return;
-      if (msg.room && msg.room !== activeRoomRef.current) return;
+      if (msg.room && !isSameChatRoom(activeRoomRef.current, msg.room)) return;
       if (msg.id != null && msg.user_id === myUserIdRef.current) {
         setMsgDelivery((prev) => ({ ...prev, [msg.id]: Math.max(prev[msg.id] || 0, 2) }));
       }
@@ -2472,7 +2493,7 @@ export default function App() {
     });
 
     socket.on("dm-read-receipt", (payload) => {
-      if (payload?.room !== activeRoomRef.current) return;
+      if (!payload?.room || !isSameChatRoom(activeRoomRef.current, payload.room)) return;
       const u = parseInt(payload?.upToMessageId, 10);
       if (!Number.isInteger(u) || u < 1) return;
       setDmPeerReadUpTo((prev) => Math.max(prev, u));
@@ -2480,14 +2501,14 @@ export default function App() {
 
     socket.on("message-edited", (msg) => {
       if (activeView !== CHANNEL_VIEWS.chat) return;
-      if (msg.room && msg.room !== activeRoomRef.current) return;
+      if (msg.room && !isSameChatRoom(activeRoomRef.current, msg.room)) return;
       setMessages((prev) => upsertMessageList(prev, msg));
     });
 
     socket.on("message-deleted", (payload) => {
       if (activeView !== CHANNEL_VIEWS.chat) return;
       const msg = payload?.message;
-      if (!msg || (msg.room && msg.room !== activeRoomRef.current)) return;
+      if (!msg || (msg.room && !isSameChatRoom(activeRoomRef.current, msg.room))) return;
       const id = payload.id ?? msg.id;
       if (id != null) {
         setMessages((prev) => prev.filter((m) => m.id !== id));
@@ -2495,7 +2516,7 @@ export default function App() {
     });
 
     socket.on("message-reactions", (payload) => {
-      if (payload?.room && payload.room !== activeRoomRef.current) return;
+      if (payload?.room && !isSameChatRoom(activeRoomRef.current, payload.room)) return;
       const { id, reactions } = payload;
       if (id == null) return;
       setMessages((prev) =>
@@ -2504,7 +2525,7 @@ export default function App() {
     });
 
     socket.on("typing", (payload) => {
-      if (payload?.room && payload.room !== activeRoomRef.current) return;
+      if (payload?.room && !isSameChatRoom(activeRoomRef.current, payload.room)) return;
       if (payload?.nickname === nicknameRef.current) return;
       setTypingPeers((prev) => {
         const s = new Set(prev);
@@ -2529,7 +2550,7 @@ export default function App() {
       if (!payload?.room) return;
       const room = payload.room;
       const focusedChat =
-        activeRoomRef.current === room &&
+        isSameChatRoom(activeRoomRef.current, room) &&
         activeViewRef.current === CHANNEL_VIEWS.chat &&
         typeof document !== "undefined" &&
         document.visibilityState === "visible";
@@ -2545,7 +2566,7 @@ export default function App() {
       const showNative =
         typeof document !== "undefined" &&
         (document.visibilityState === "hidden" ||
-          activeRoomRef.current !== room ||
+          !isSameChatRoom(activeRoomRef.current, room) ||
           activeViewRef.current !== CHANNEL_VIEWS.chat);
       const title = `${payload.from || "Кто-то"} · ${payload.channelTitle || room}`;
       const body = (payload.preview || "Вас упомянули").slice(0, 200);
@@ -3013,7 +3034,8 @@ export default function App() {
   const goToChatRoom = useCallback((slug) => {
     setPersonalAiOpen(false);
     setBanner(null);
-    setActiveRoom(slug);
+    const raw = String(slug ?? "").trim();
+    setActiveRoom(/^dm-\d+-\d+$/i.test(raw) ? canonicalizeDmSlug(raw) : raw);
     setActiveView(CHANNEL_VIEWS.chat);
     setChannelMenuRoom(null);
     setSidebarOpen(false);
