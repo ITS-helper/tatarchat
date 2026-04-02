@@ -12,6 +12,11 @@ alwaysApply: true
 - Композер: одна полоска **`rounded-xl bg-tc-input`** — поле «Сообщение» + скрепка + отправка в одной строке; у поля `tc-msg-input`, на мобиле `text-base`, с `sm` — `text-sm`; `enterKeyHint="send"`.
 - Safe-area: класс **`tc-composer-bar`** (нижний отступ под home indicator).
 
+## Галочки доставки / прочитано и печать в канале
+
+- **Сервер** `server/server.js`: после Socket `message` успешный **`ack({ ok, message })`** (как REST). Таблица **`room_message_reads`** + **`read-up-to`** (только `dm-*`): курсор чтения и **`io.to(\`user:${peer}\`).emit("dm-read-receipt")`**; при **`join-room`** в ЛС — начальная выдача курсора собеседника.
+- **Клиент** `App.jsx`: у своих сообщений **✓ / ✓✓ / голубые ✓✓** (`MessageDeliveryTicks`, стейт **`msgDelivery`**, в ЛС **`dmPeerReadUpTo`**); **`read-up-to`** по ленте с debounce. В **каналах** (не `dm-`) строка «… печатает» **над** лентой; в **ЛС** — по-прежнему **над композером**.
+
 ## Упоминания @ «как в Telegram» (server + client)
 
 - **Сервер** `server/server.js`:
