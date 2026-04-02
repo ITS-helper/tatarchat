@@ -18,6 +18,7 @@ const { Pool } = require("pg");
 const { Server } = require("socket.io");
 const admin = require("firebase-admin");
 const webpush = require("web-push");
+const { createHash } = require("crypto");
 
 const PORT = Number(process.env.PORT) || 3001;
 /** Локальный Ollama (не открывать наружу). */
@@ -2366,6 +2367,13 @@ app.get("/api/apk/latest-info", async (_req, res) => {
     const parsed = /TatarChat-debug-v([^\(]+)\((\d+)\)-/.exec(m);
     const versionName = parsed?.[1] || null;
     const versionCode = parsed?.[2] || null;
+    let sha256 = null;
+    try {
+      const buf = await fsp.readFile(f.full);
+      sha256 = createHash("sha256").update(buf).digest("hex");
+    } catch (_) {
+      sha256 = null;
+    }
     res.json({
       ok: true,
       name: f.name,
@@ -2374,6 +2382,7 @@ app.get("/api/apk/latest-info", async (_req, res) => {
       buildAt: f.buildMs ? new Date(f.buildMs).toISOString() : null,
       versionName,
       versionCode,
+      sha256,
     });
   } catch (err) {
     console.error("GET /api/apk/latest-info", err?.message || err);

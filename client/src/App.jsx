@@ -2964,6 +2964,12 @@ export default function App() {
                 {apkInfo.buildAt
                   ? new Date(apkInfo.buildAt).toLocaleString()
                   : (apkInfo.modifiedAt ? new Date(apkInfo.modifiedAt).toLocaleString() : "")}
+                {apkInfo.sizeBytes ? ` · ${(apkInfo.sizeBytes / (1024 * 1024)).toFixed(1)} MB` : ""}
+              </p>
+            ) : null}
+            {apkInfo?.sha256 ? (
+              <p className="mt-1 text-center font-mono text-[10px] text-tc-text-muted/90" title={apkInfo.sha256}>
+                sha256: {String(apkInfo.sha256).slice(0, 12)}…
               </p>
             ) : null}
             <p className="mt-2 text-center text-[11px] leading-snug text-tc-text-muted">
