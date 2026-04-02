@@ -1009,30 +1009,29 @@ function ChannelGlyph({ slug, className }) {
     );
   }
   if (s.includes("obshag")) {
-    // Handshake
+    // Общага: бутылка с биркой VODKA
     return (
       <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden>
+        <rect x="10.2" y="1" width="3.6" height="2.35" rx="0.5" stroke="currentColor" strokeWidth="1.25" />
         <path
-          d="M4.8 14.2l2.7-2.7c.7-.7 1.8-.7 2.5 0l1.1 1.1c.6.6 1.6.6 2.2 0l1.1-1.1c.7-.7 1.8-.7 2.5 0l2.7 2.7"
+          d="M10.2 3.35h3.6l1.4 2.25V18.9q-3 2.55-6 0V5.6l1.4-2.25z"
           stroke="currentColor"
-          strokeWidth="1.6"
+          strokeWidth="1.25"
           strokeLinejoin="round"
-          strokeLinecap="round"
         />
-        <path
-          d="M7.5 11.5L5 9m11.5 2.5L19 9"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          opacity=".5"
-        />
-        <path
-          d="M9.3 16.8l.9.9c1 .9 2.6.9 3.6 0l.9-.9"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          opacity=".85"
-        />
+        <rect x="9.05" y="10.2" width="5.9" height="5.35" rx="0.5" fill="currentColor" fillOpacity="0.16" stroke="currentColor" strokeWidth="0.9" />
+        <text
+          x="12"
+          y="14.55"
+          textAnchor="middle"
+          fill="currentColor"
+          fontSize="4.4"
+          fontWeight="800"
+          fontFamily="system-ui, -apple-system, Segoe UI, sans-serif"
+          letterSpacing="-0.05em"
+        >
+          VODKA
+        </text>
       </svg>
     );
   }
