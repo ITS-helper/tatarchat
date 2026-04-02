@@ -1009,26 +1009,29 @@ function ChannelGlyph({ slug, className }) {
     );
   }
   if (s.includes("obshag")) {
-    // Общага: бутылка с биркой VODKA
+    // Общага: бутылка, VODKA вертикально вдоль правого края
     return (
       <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden>
-        <rect x="10.2" y="1" width="3.6" height="2.35" rx="0.5" stroke="currentColor" strokeWidth="1.25" />
-        <path
-          d="M10.2 3.35h3.6l1.4 2.25V18.9q-3 2.55-6 0V5.6l1.4-2.25z"
-          stroke="currentColor"
-          strokeWidth="1.25"
-          strokeLinejoin="round"
-        />
-        <rect x="9.05" y="10.2" width="5.9" height="5.35" rx="0.5" fill="currentColor" fillOpacity="0.16" stroke="currentColor" strokeWidth="0.9" />
+        <g transform="translate(-4.25 0)">
+          <rect x="10.2" y="1" width="3.6" height="2.35" rx="0.5" stroke="currentColor" strokeWidth="1.25" />
+          <path
+            d="M10.2 3.35h3.6l1.4 2.25V18.9q-3 2.55-6 0V5.6l1.4-2.25z"
+            stroke="currentColor"
+            strokeWidth="1.25"
+            strokeLinejoin="round"
+          />
+        </g>
         <text
-          x="12"
-          y="14.55"
+          x="17.85"
+          y="12.5"
           textAnchor="middle"
+          dominantBaseline="middle"
           fill="currentColor"
-          fontSize="4.4"
+          fontSize="3.65"
           fontWeight="800"
           fontFamily="system-ui, -apple-system, Segoe UI, sans-serif"
-          letterSpacing="-0.05em"
+          letterSpacing="0.14em"
+          transform="rotate(-90, 17.85, 12.5)"
         >
           VODKA
         </text>
