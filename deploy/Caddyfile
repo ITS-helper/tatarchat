@@ -16,6 +16,10 @@
 #   2) Run server:     (repo)/server -> NODE_ENV=production PORT=3001 npm start
 #   3) Put this file as /etc/caddy/Caddyfile and reload Caddy
 #
+# После git pull обязательно снова `npm run build` в client/ и проверка: в HTML
+# должен появиться новый /assets/index-<hash>.js (если hash не меняется — статика
+# не обновилась). Сравнить с последней сборкой в репозитории.
+#
 dtdfamily.ru {
   encode gzip zstd
 

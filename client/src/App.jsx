@@ -483,9 +483,13 @@ function VoiceMessagePlayer({ url }) {
   );
 }
 
-/** Видеосообщение в ленте: крупнее, первый кадр после metadata */
+/** Видеосообщение: без нативных controls — свой play/pause и полоска прогресса */
 function MessageVideoNote({ url, mime, name }) {
   const vRef = useRef(null);
+  const barRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  const [dur, setDur] = useState(0);
+  const [t, setT] = useState(0);
   const pokeFrame = useCallback(() => {
     const v = vRef.current;
     if (!v) return;
@@ -493,21 +497,107 @@ function MessageVideoNote({ url, mime, name }) {
       v.currentTime = 0.05;
     } catch (_) {}
   }, []);
+  useEffect(() => {
+    const v = vRef.current;
+    if (!v) return undefined;
+    const onTime = () => setT(v.currentTime);
+    const onMeta = () => {
+      const d = v.duration;
+      setDur(Number.isFinite(d) && d > 0 ? d : 0);
+    };
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    const onEnded = () => setPlaying(false);
+    v.addEventListener("timeupdate", onTime);
+    v.addEventListener("loadedmetadata", onMeta);
+    v.addEventListener("durationchange", onMeta);
+    v.addEventListener("play", onPlay);
+    v.addEventListener("pause", onPause);
+    v.addEventListener("ended", onEnded);
+    return () => {
+      v.removeEventListener("timeupdate", onTime);
+      v.removeEventListener("loadedmetadata", onMeta);
+      v.removeEventListener("durationchange", onMeta);
+      v.removeEventListener("play", onPlay);
+      v.removeEventListener("pause", onPause);
+      v.removeEventListener("ended", onEnded);
+    };
+  }, [url]);
+  const pct = dur > 0 ? Math.min(100, (t / dur) * 100) : 0;
+  const seekToClientX = (clientX) => {
+    const v = vRef.current;
+    const track = barRef.current;
+    if (!v || !track || !(dur > 0)) return;
+    const r = track.getBoundingClientRect();
+    const x = Math.min(Math.max(0, clientX - r.left), r.width);
+    v.currentTime = (x / r.width) * dur;
+  };
+  const togglePlay = () => {
+    const v = vRef.current;
+    if (!v) return;
+    if (v.paused) void v.play().catch(() => {});
+    else v.pause();
+  };
   return (
-    <div className="mt-2 w-full max-w-[min(280px,92vw)] sm:max-w-[300px]">
+    <div
+      className="mt-2 w-full max-w-[min(280px,92vw)] sm:max-w-[300px]"
+      onClick={(e) => e.stopPropagation()}
+      role="group"
+      aria-label={name || "Видеосообщение"}
+    >
       <div className="overflow-hidden rounded-2xl border-2 border-tc-border/60 bg-black shadow-lg ring-1 ring-black/20">
-        <video
-          ref={vRef}
-          className="aspect-square w-full bg-black object-cover"
-          controls
-          playsInline
-          preload="auto"
-          onLoadedData={pokeFrame}
-          onLoadedMetadata={pokeFrame}
-          aria-label={name || "Видеосообщение"}
-        >
-          <source src={url} type={mime} />
-        </video>
+        <div className="relative aspect-square w-full bg-black">
+          <video
+            ref={vRef}
+            className="h-full w-full cursor-pointer object-cover"
+            playsInline
+            preload="auto"
+            onLoadedData={pokeFrame}
+            onLoadedMetadata={pokeFrame}
+            onClick={(e) => {
+              e.stopPropagation();
+              togglePlay();
+            }}
+          >
+            <source src={url} type={mime} />
+          </video>
+          {!playing ? (
+            <button
+              type="button"
+              className="absolute inset-0 flex items-center justify-center bg-black/25 transition hover:bg-black/35"
+              aria-label="Воспроизвести"
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePlay();
+              }}
+            >
+              <span className="flex h-14 w-14 items-center justify-center rounded-full bg-white/90 text-neutral-950 shadow-lg ring-2 ring-white/50">
+                <span className="ml-1 block w-0 border-y-[10px] border-l-[16px] border-y-transparent border-l-current" aria-hidden />
+              </span>
+            </button>
+          ) : null}
+          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 pb-2 pt-8">
+            <button
+              type="button"
+              ref={barRef}
+              className="flex h-5 w-full cursor-pointer items-center touch-manipulation"
+              aria-label="Перемотка"
+              onPointerUp={(e) => {
+                if (e.button !== 0 && e.button !== -1) return;
+                e.stopPropagation();
+                seekToClientX(e.clientX);
+              }}
+            >
+              <span className="pointer-events-none relative h-1 w-full overflow-hidden rounded-full bg-white/30">
+                <span className="block h-full rounded-full bg-tc-accent" style={{ width: `${pct}%` }} />
+              </span>
+            </button>
+            <p className="mt-1 text-center text-[10px] font-medium tabular-nums text-white/85">
+              {formatVoiceTime(t)}
+              {dur > 0 ? <span className="text-white/60"> · {formatVoiceTime(dur)}</span> : null}
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );
