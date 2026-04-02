@@ -1416,10 +1416,12 @@ export default function App() {
 
   const savedChannel = publicChannels.find((c) => c.isSaved) || null;
   const listRef = useRef(null);
+  const chatBottomSentinelRef = useRef(null);
   const socketRef = useRef(null);
   const roomJoinedRef = useRef(false);
   const joinGenRef = useRef(0);
   const activeRoomRef = useRef(activeRoom);
+  activeRoomRef.current = activeRoom;
   const activeViewRef = useRef(activeView);
   const goToChatRoomRef = useRef(() => {});
   const typingIdleRef = useRef(null);
@@ -1555,10 +1557,6 @@ export default function App() {
       setMyUserId(fromJwt);
     }
   }, [token]);
-
-  useEffect(() => {
-    activeRoomRef.current = activeRoom;
-  }, [activeRoom]);
 
   useEffect(() => {
     activeViewRef.current = activeView;
@@ -2294,23 +2292,31 @@ export default function App() {
     ]
   );
 
-  const scrollChatToBottom = useCallback(() => {
-    const el = listRef.current;
-    if (!el) return;
+  useLayoutEffect(() => {
+    if (activeView !== CHANNEL_VIEWS.chat) return;
+    const root = listRef.current;
+    if (!root) return;
+    const sentinel = chatBottomSentinelRef.current;
     const go = () => {
-      el.scrollTop = el.scrollHeight;
+      if (sentinel) {
+        try {
+          sentinel.scrollIntoView({ block: "end", behavior: "auto" });
+        } catch (_) {}
+      }
+      root.scrollTop = root.scrollHeight;
     };
     go();
     requestAnimationFrame(() => {
       go();
       requestAnimationFrame(go);
     });
-  }, []);
-
-  useLayoutEffect(() => {
-    if (activeView !== CHANNEL_VIEWS.chat) return;
-    scrollChatToBottom();
-  }, [messages, activeRoom, activeView, scrollChatToBottom]);
+    const t1 = window.setTimeout(go, 80);
+    const t2 = window.setTimeout(go, 280);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [messages, activeRoom, activeView]);
 
   const loadHistoryForRoom = useCallback(
     async (room) => {
@@ -2327,15 +2333,18 @@ export default function App() {
           data = {};
         }
         if (!res.ok) {
+          if (room !== activeRoomRef.current) return;
           setBanner(data.error || `Не удалось загрузить чат (${res.status})`);
           setMessages([]);
           return;
         }
+        if (room !== activeRoomRef.current) return;
         setMessages((data.messages || []).filter((m) => !m.deleted));
         if (data.title) setRoomTitle(data.title);
         setBanner(null);
       } catch (e) {
         console.error(e);
+        if (room !== activeRoomRef.current) return;
         setBanner("Не удалось загрузить историю.");
       }
     },
@@ -2371,6 +2380,7 @@ export default function App() {
     }
     localStorage.setItem(LS_LAST_ROOM, activeRoom);
     if (activeView === CHANNEL_VIEWS.chat) {
+      setMessages([]);
       loadHistoryForRoom(activeRoom);
     } else {
       setMessages([]);
@@ -4481,6 +4491,7 @@ export default function App() {
                   </div>
                 );
               })}
+              <div ref={chatBottomSentinelRef} className="h-px w-full shrink-0 scroll-mt-0" aria-hidden />
             </div>
           )}
         </div>
