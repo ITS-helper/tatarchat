@@ -778,7 +778,7 @@ async function runTavilySearch(searchQuery) {
       }
     }
     let block =
-      "Ниже выдержки из веб-поиска (Tavily). Опирайся на них; укажи номер источника [1], [2]. Не выдумывай URL и факты вне текста.\n\n";
+      "Ниже выдержки из веб-поиска (Tavily). Не вставляй ссылки вида [1] прямо по тексту. В конце ответа добавь короткий блок «Источники» с 2–5 ссылками (название + URL). Не выдумывай URL и факты вне текста.\n\n";
     const ans = data.answer;
     if (typeof ans === "string" && ans.trim()) {
       block += `Краткий конспект Tavily: ${ans.trim().replace(/\s+/g, " ")}\n\n`;
@@ -792,10 +792,85 @@ async function runTavilySearch(searchQuery) {
         .slice(0, 4000);
       return `[${i + 1}] ${title}\nURL: ${url}\n${content}`;
     });
-    return { ok: true, block: `${block}${parts.join("\n\n")}`.trim(), images };
+    const sources = results
+      .map((it) => ({
+        title: String(it.title || "").replace(/\s+/g, " ").trim(),
+        url: String(it.url || "").trim(),
+      }))
+      .filter((s) => s.url)
+      .slice(0, 8);
+    return { ok: true, block: `${block}${parts.join("\n\n")}`.trim(), images, sources };
   } catch (e) {
     if (e?.name === "AbortError") return { ok: false, error: "Таймаут Tavily" };
     return { ok: false, error: e?.message || "Ошибка Tavily" };
+  } finally {
+    clearTimeout(to);
+  }
+}
+
+function stripInlineBracketCitations(text) {
+  // Remove common LLM-style inline citations: [1], [2], [12]
+  return String(text ?? "").replace(/\s*\[(\d{1,3})\]\s*/g, " ").replace(/\s{2,}/g, " ").trim();
+}
+
+function appendSourcesBlock(text, sources) {
+  const list = Array.isArray(sources) ? sources : [];
+  const uniq = [];
+  const seen = new Set();
+  for (const s of list) {
+    const url = String(s?.url || "").trim();
+    const title = String(s?.title || "").trim();
+    if (!url) continue;
+    const key = url.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniq.push({ title: title || url, url });
+    if (uniq.length >= 5) break;
+  }
+  if (!uniq.length) return text;
+  const lines = uniq.map((s) => `- ${s.title} — ${s.url}`);
+  const block = `Источники:\n${lines.join("\n")}`;
+  return `${String(text ?? "").trim()}\n\n${block}`.trim();
+}
+
+async function filterWorkingImageUrls(images, limit = 8) {
+  const list = Array.isArray(images) ? images : [];
+  const out = [];
+  const seen = new Set();
+  const ac = new AbortController();
+  const to = setTimeout(() => ac.abort(), 8000);
+  try {
+    for (const it of list) {
+      if (out.length >= limit) break;
+      const url = typeof it === "string" ? it : it?.url;
+      const desc = typeof it === "object" ? it?.description : "";
+      const u = String(url || "").trim();
+      if (!/^https?:\/\//i.test(u)) continue;
+      const key = u.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      try {
+        // Some hosts block HEAD; try GET with Range as fallback.
+        let ok = false;
+        let ct = "";
+        try {
+          const r = await fetch(u, { method: "HEAD", signal: ac.signal });
+          ct = String(r.headers.get("content-type") || "");
+          ok = r.ok && ct.toLowerCase().startsWith("image/");
+        } catch (_) {}
+        if (!ok) {
+          const r = await fetch(u, {
+            method: "GET",
+            headers: { Range: "bytes=0-1023" },
+            signal: ac.signal,
+          });
+          ct = String(r.headers.get("content-type") || "");
+          ok = r.ok && ct.toLowerCase().startsWith("image/");
+        }
+        if (ok) out.push({ url: u, description: String(desc || "").trim() });
+      } catch (_) {}
+    }
+    return out;
   } finally {
     clearTimeout(to);
   }
@@ -2576,6 +2651,7 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
 
     let webBlock = null;
     let webImages = [];
+    let webSources = [];
     if (wantSearch) {
       const sr = await runTavilySearch(text);
       if (!sr.ok) {
@@ -2583,7 +2659,9 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
         return res.status(502).json({ error: sr.error || "Поиск Tavily недоступен" });
       }
       webBlock = sr.block;
-      webImages = Array.isArray(sr.images) ? sr.images.slice(0, 8) : [];
+      webSources = Array.isArray(sr.sources) ? sr.sources : [];
+      const rawImages = Array.isArray(sr.images) ? sr.images : [];
+      webImages = await filterWorkingImageUrls(rawImages, 8);
     }
 
     const { rows } = await pool.query(`SELECT messages FROM user_ollama_chats WHERE user_id = $1`, [userId]);
@@ -2612,7 +2690,12 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
     }
 
     if (!reply) reply = "(пустой ответ модели)";
-    list.push({ role: "assistant", content: reply.slice(0, 200000) });
+    let finalReply = stripAssistantNoise(reply);
+    if (wantSearch) {
+      finalReply = stripInlineBracketCitations(finalReply);
+      finalReply = appendSourcesBlock(finalReply, webSources);
+    }
+    list.push({ role: "assistant", content: finalReply.slice(0, 200000) });
 
     await pool.query(
       `INSERT INTO user_ollama_chats (user_id, messages, updated_at) VALUES ($1, $2::jsonb, NOW())
@@ -2623,7 +2706,7 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
     res.json({
       messages: list,
       model: selectedModel,
-      web: wantSearch ? { images: webImages } : undefined,
+      web: wantSearch ? { images: webImages, sources: webSources.slice(0, 8) } : undefined,
       facts,
     });
   } catch (err) {

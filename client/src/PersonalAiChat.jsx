@@ -18,6 +18,7 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const listRef = useRef(null);
+  const [imageLightbox, setImageLightbox] = useState(null);
 
   const base = getApiBase();
 
@@ -285,16 +286,15 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
                     const desc = typeof it === "object" ? it?.description : "";
                     if (!url) return null;
                     return (
-                      <a
+                      <button
                         key={idx}
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        type="button"
+                        onClick={() => setImageLightbox({ url, desc })}
                         className="block overflow-hidden rounded-lg border border-tc-border/60 bg-tc-panel/30 hover:opacity-95"
                         title={desc || "Открыть картинку"}
                       >
                         <img src={url} alt={desc || "image"} className="h-24 w-full object-cover" loading="lazy" />
-                      </a>
+                      </button>
                     );
                   })}
                 </div>
@@ -303,6 +303,53 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
           </div>
         )}
       </div>
+
+      {imageLightbox && typeof document !== "undefined" ? (
+        <div
+          className="fixed inset-0 z-[260] flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setImageLightbox(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-xl border border-tc-border bg-tc-panel"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-tc-border px-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-xs text-tc-text-sec">{imageLightbox.desc || "Картинка"}</p>
+                <a
+                  href={imageLightbox.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="truncate text-[10px] text-tc-text-muted underline decoration-tc-border underline-offset-2 hover:text-tc-accent"
+                >
+                  Открыть в новой вкладке
+                </a>
+              </div>
+              <button
+                type="button"
+                className="rounded-lg px-2 py-1 text-sm text-tc-text-sec hover:bg-tc-hover"
+                onClick={() => setImageLightbox(null)}
+                title="Закрыть"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex max-h-[80vh] items-center justify-center bg-black">
+              <img
+                src={imageLightbox.url}
+                alt={imageLightbox.desc || "image"}
+                className="max-h-[80vh] w-auto max-w-full object-contain"
+                onError={() => {
+                  onError?.("Картинка не загрузилась (источник удалён или 404)");
+                  setImageLightbox(null);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="tc-composer-bar relative z-10 flex flex-col gap-2 border-t border-tc-border bg-tc-header px-2 py-2 sm:px-3">
         <div className="flex flex-wrap items-center justify-between gap-2 px-1">
