@@ -42,9 +42,12 @@ export default defineConfig({
       },
       workbox: {
         importScripts: ["/web-push-sw.js"],
+        skipWaiting: true,
+        clientsClaim: true,
         navigateFallback: "index.html",
         navigateFallbackDenylist: [/^\/api\//],
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,webp,woff2}"],
+        /* index.html не прекэшируем — иначе после деплоя PWA долго показывает старый бандл */
+        globPatterns: ["**/*.{js,css,ico,png,svg,webp,woff2}"],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,

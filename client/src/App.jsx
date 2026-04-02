@@ -365,7 +365,7 @@ function formatVoiceTime(s) {
   return `${m}:${sec.toString().padStart(2, "0")}`;
 }
 
-/** Голосовое в чате: только кастомные кнопки; без controls (иначе WebView/браузер рисует системный плеер) */
+/** Голосовое: воспроизведение через `new Audio()` (нет <audio> в DOM — браузер не может нарисовать нативные controls) */
 function VoiceMessagePlayer({ url }) {
   const aRef = useRef(null);
   const barRef = useRef(null);
@@ -373,8 +373,13 @@ function VoiceMessagePlayer({ url }) {
   const [dur, setDur] = useState(0);
   const [t, setT] = useState(0);
   useEffect(() => {
-    const a = aRef.current;
-    if (!a) return undefined;
+    const a = new Audio();
+    a.preload = "metadata";
+    try {
+      a.playsInline = true;
+    } catch (_) {}
+    a.src = url;
+    aRef.current = a;
     const onTime = () => setT(a.currentTime);
     const onMeta = () => {
       const d = a.duration;
@@ -396,6 +401,13 @@ function VoiceMessagePlayer({ url }) {
       a.removeEventListener("play", onPlay);
       a.removeEventListener("pause", onPause);
       a.removeEventListener("ended", onEnded);
+      try {
+        a.pause();
+        a.src = "";
+        a.removeAttribute("src");
+        a.load();
+      } catch (_) {}
+      aRef.current = null;
     };
   }, [url]);
   const pct = dur > 0 ? Math.min(100, (t / dur) * 100) : 0;
@@ -414,23 +426,6 @@ function VoiceMessagePlayer({ url }) {
       role="group"
       aria-label="Голосовое сообщение"
     >
-      <audio
-        ref={aRef}
-        src={url}
-        preload="metadata"
-        playsInline
-        tabIndex={-1}
-        aria-hidden="true"
-        style={{
-          position: "fixed",
-          left: -9999,
-          top: 0,
-          width: 1,
-          height: 1,
-          opacity: 0,
-          pointerEvents: "none",
-        }}
-      />
       <div className="flex items-center gap-3">
         <button
           type="button"
