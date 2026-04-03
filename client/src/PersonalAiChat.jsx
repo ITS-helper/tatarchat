@@ -193,14 +193,6 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
   const [model, setModel] = useState("");
   const [availableModels, setAvailableModels] = useState([]);
   const [webSearchAvailable, setWebSearchAvailable] = useState(false);
-  const [imageGenAvailable, setImageGenAvailable] = useState(false);
-  const [sdPanelOpen, setSdPanelOpen] = useState(false);
-  const [sdPrompt, setSdPrompt] = useState("");
-  const [sdNegative, setSdNegative] = useState("");
-  const [sdSteps, setSdSteps] = useState(25);
-  const [sdSize, setSdSize] = useState(512);
-  const [sdGenerating, setSdGenerating] = useState(false);
-  const [sdResult, setSdResult] = useState(null);
   const [webSearchOn, setWebSearchOn] = useState(() => localStorage.getItem(LS_AI_WEB) === "1");
   const [webImages, setWebImages] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -225,7 +217,7 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
 
   useLayoutEffect(() => {
     scrollBottom();
-  }, [messages, sending, sdResult, scrollBottom]);
+  }, [messages, sending, scrollBottom]);
 
   useEffect(() => {
     if (!token) return;
@@ -246,7 +238,6 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
           if (data.model) setModel(data.model);
           if (Array.isArray(data.availableModels)) setAvailableModels(data.availableModels);
           if (typeof data.webSearchAvailable === "boolean") setWebSearchAvailable(data.webSearchAvailable);
-          if (typeof data.imageGenAvailable === "boolean") setImageGenAvailable(data.imageGenAvailable);
           if (Array.isArray(data.facts)) setFacts(data.facts);
           const savedModel = localStorage.getItem(LS_AI_MODEL);
           if (savedModel && Array.isArray(data.availableModels) && data.availableModels.includes(savedModel) && savedModel !== data.model) {
@@ -315,7 +306,6 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
       const imgs = data?.web?.images;
       if (Array.isArray(imgs)) setWebImages(imgs.slice(0, 8));
       if (Array.isArray(data.facts)) setFacts(data.facts);
-      if (typeof data.imageGenAvailable === "boolean") setImageGenAvailable(data.imageGenAvailable);
       setPendingImage(null);
       if (fileRef.current) fileRef.current.value = "";
     } catch (err) {
@@ -442,46 +432,6 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
     }
   };
 
-  const generateSdImage = async () => {
-    const p = sdPrompt.trim();
-    if (!p || sdGenerating || !token || !imageGenAvailable) return;
-    setSdGenerating(true);
-    setSdResult(null);
-    onError?.(null);
-    try {
-      const res = await fetch(`${base}/api/ai/image`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          prompt: p,
-          negative_prompt: sdNegative.trim() || undefined,
-          steps: sdSteps,
-          width: sdSize,
-          height: sdSize,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const d = typeof data.detail === "string" && data.detail.trim() ? ` ${data.detail.trim()}` : "";
-        onError?.((data.error || `Ошибка ${res.status}`) + d);
-        return;
-      }
-      const mime = typeof data.mimeType === "string" && data.mimeType ? data.mimeType : "image/png";
-      const b64 = data.imageBase64;
-      if (typeof b64 !== "string" || !b64) {
-        onError?.("Пустой ответ картинки");
-        return;
-      }
-      setSdResult({ dataUrl: `data:${mime};base64,${b64}`, prompt: p });
-      onError?.(null);
-    } catch (e) {
-      console.error(e);
-      onError?.("Сеть: генерация картинки");
-    } finally {
-      setSdGenerating(false);
-    }
-  };
-
   return (
     <div className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden">
       <div className="chat-bg-parallax pointer-events-none z-0" aria-hidden />
@@ -585,53 +535,6 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
                       </button>
                     );
                   })}
-                </div>
-              </div>
-            ) : null}
-            {sdGenerating ? (
-              <div className="flex justify-start">
-                <div className="max-w-[min(100%,36rem)] rounded-xl rounded-bl-sm border border-tc-border/50 bg-tc-msg px-3 py-2 text-sm">
-                  <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-tc-accent/90">Stable Diffusion</p>
-                  <div className="flex items-center gap-2 text-tc-text-sec">
-                    <span
-                      className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-tc-border border-t-tc-accent"
-                      aria-hidden
-                    />
-                    <span className="text-xs">Рисую… (до пары минут)</span>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-            {sdResult ? (
-              <div className="flex justify-start">
-                <div className="max-w-[min(100%,36rem)] rounded-xl rounded-bl-sm border border-tc-border/50 bg-tc-msg px-3 py-2 text-sm text-tc-text">
-                  <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-tc-accent/90">Stable Diffusion</p>
-                  <p className="mb-2 line-clamp-3 text-xs text-tc-text-muted" title={sdResult.prompt}>
-                    {sdResult.prompt}
-                  </p>
-                  <button
-                    type="button"
-                    className="block w-full overflow-hidden rounded-lg border border-tc-border/60 focus:outline-none focus:ring-2 focus:ring-tc-accent/50"
-                    onClick={() => setImageLightbox({ url: sdResult.dataUrl, desc: sdResult.prompt })}
-                  >
-                    <img src={sdResult.dataUrl} alt="" className="max-h-80 w-full object-contain bg-black/20" />
-                  </button>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <a
-                      href={sdResult.dataUrl}
-                      download="tatarchat-sd.png"
-                      className="rounded-lg bg-tc-accent/20 px-2 py-1 text-xs font-medium text-tc-accent transition hover:bg-tc-accent/30"
-                    >
-                      Скачать PNG
-                    </a>
-                    <button
-                      type="button"
-                      className="rounded-lg px-2 py-1 text-xs text-tc-text-muted transition hover:bg-tc-hover"
-                      onClick={() => setSdResult(null)}
-                    >
-                      Убрать
-                    </button>
-                  </div>
                 </div>
               </div>
             ) : null}
@@ -743,101 +646,8 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
                 Поиск: не настроен
               </span>
             )}
-            {imageGenAvailable ? (
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => setSdPanelOpen((v) => !v)}
-                className={`text-xs underline decoration-tc-border underline-offset-2 transition disabled:opacity-40 ${
-                  sdPanelOpen ? "font-medium text-tc-accent" : "text-tc-text-sec hover:text-tc-accent"
-                }`}
-                title="txt2img через Automatic1111 на сервере"
-              >
-                Картинка (SD)
-              </button>
-            ) : (
-              <span
-                className="text-[10px] text-tc-text-muted"
-                title="В .env сервера: SD_WEBUI_BASE_URL=http://127.0.0.1:7860 и запущен A1111 с --api"
-              >
-                SD: выкл
-              </span>
-            )}
           </div>
         </div>
-
-        {imageGenAvailable && sdPanelOpen ? (
-          <div className="rounded-xl border border-tc-border/60 bg-tc-panel/25 p-3 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold text-tc-text-sec">Генерация (Stable Diffusion)</p>
-              <button
-                type="button"
-                className="text-xs text-tc-text-muted hover:text-tc-accent"
-                onClick={() => setSdPanelOpen(false)}
-              >
-                Свернуть
-              </button>
-            </div>
-            <textarea
-              className="tc-msg-input min-h-[52px] w-full resize-y rounded-lg border border-tc-border bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted focus:ring-2 focus:ring-tc-accent/50"
-              value={sdPrompt}
-              onChange={(e) => setSdPrompt(e.target.value)}
-              placeholder="Промпт: что нарисовать (англ. или рус. — как настроена модель)"
-              maxLength={1500}
-              rows={2}
-              disabled={sdGenerating || loading}
-            />
-            <input
-              type="text"
-              className="tc-msg-input w-full rounded-lg border border-tc-border bg-tc-input px-3 py-2 text-xs text-tc-text outline-none placeholder:text-tc-text-muted focus:ring-2 focus:ring-tc-accent/50"
-              value={sdNegative}
-              onChange={(e) => setSdNegative(e.target.value)}
-              placeholder="Негативный промпт (необязательно)"
-              maxLength={1500}
-              disabled={sdGenerating || loading}
-            />
-            <div className="flex flex-wrap items-end gap-3">
-              <label className="flex flex-col gap-0.5 text-[11px] text-tc-text-muted">
-                Шаги
-                <input
-                  type="number"
-                  min={8}
-                  max={40}
-                  value={sdSteps}
-                  onChange={(e) => setSdSteps(Math.min(40, Math.max(8, parseInt(e.target.value, 10) || 25)))}
-                  className="w-16 rounded border border-tc-border bg-tc-input px-2 py-1 text-xs text-tc-text"
-                  disabled={sdGenerating || loading}
-                />
-              </label>
-              <label className="flex flex-col gap-0.5 text-[11px] text-tc-text-muted">
-                Сторона
-                <select
-                  value={sdSize}
-                  onChange={(e) => setSdSize(parseInt(e.target.value, 10) || 512)}
-                  className="rounded border border-tc-border bg-tc-input px-2 py-1 text-xs text-tc-text"
-                  disabled={sdGenerating || loading}
-                >
-                  {[512, 576, 640, 704, 768].map((n) => (
-                    <option key={n} value={n}>
-                      {n}×{n}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                onClick={() => void generateSdImage()}
-                disabled={sdGenerating || loading || !sdPrompt.trim()}
-                className="rounded-lg bg-tc-accent px-3 py-2 text-xs font-semibold text-white transition hover:opacity-95 disabled:opacity-40"
-              >
-                {sdGenerating ? "…" : "Сгенерировать"}
-              </button>
-            </div>
-            <p className="text-[10px] leading-snug text-tc-text-muted">
-              Запрос с Node на локальный A1111. На 8 ГБ VRAM при OOM уменьши размер или шаги.
-            </p>
-          </div>
-        ) : null}
 
         {factsOpen ? (
           <div className="rounded-xl border border-tc-border/60 bg-tc-panel/20 p-3">

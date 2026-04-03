@@ -7,6 +7,7 @@ import { io } from "socket.io-client";
 import GalleryView from "./GalleryView.jsx";
 import CalendarView from "./CalendarView.jsx";
 import PersonalAiChat from "./PersonalAiChat.jsx";
+import PersonalSdImage from "./PersonalSdImage.jsx";
 
 const LS_TOKEN = "tatarchat_token";
 const LS_NICKNAME = "tatarchat_nickname";
@@ -1441,6 +1442,9 @@ export default function App() {
   const [personalOpen, setPersonalOpen] = useState(false);
   /** Личный ИИ-чат (отдельно от комнат) */
   const [personalAiOpen, setPersonalAiOpen] = useState(false);
+  /** Stable Diffusion txt2img — отдельный экран под «Ассистент» */
+  const [personalSdOpen, setPersonalSdOpen] = useState(false);
+  const personalAsideOpen = useMemo(() => personalAiOpen || personalSdOpen, [personalAiOpen, personalSdOpen]);
   const personalAiOpenRef = useRef(false);
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
@@ -1534,8 +1538,8 @@ export default function App() {
   }, [myUserId]);
 
   useEffect(() => {
-    personalAiOpenRef.current = personalAiOpen;
-  }, [personalAiOpen]);
+    personalAiOpenRef.current = personalAsideOpen;
+  }, [personalAsideOpen]);
 
   useEffect(() => {
     if (themeLight) document.documentElement.classList.add("theme-light");
@@ -2387,17 +2391,17 @@ export default function App() {
   }, [messages]);
 
   useLayoutEffect(() => {
-    if (personalAiOpen || activeView !== CHANNEL_VIEWS.chat) return;
+    if (personalAsideOpen || activeView !== CHANNEL_VIEWS.chat) return;
     const root = listRef.current;
     if (!root) return;
     const pinBottom = pendingInitialScrollRef.current || stickToBottomRef.current;
     if (!pinBottom) return;
     root.scrollTop = root.scrollHeight;
     if (pendingInitialScrollRef.current) pendingInitialScrollRef.current = false;
-  }, [messages, activeRoom, activeView, personalAiOpen]);
+  }, [messages, activeRoom, activeView, personalAsideOpen]);
 
   useEffect(() => {
-    if (personalAiOpen || activeView !== CHANNEL_VIEWS.chat) return;
+    if (personalAsideOpen || activeView !== CHANNEL_VIEWS.chat) return;
     const root = listRef.current;
     if (!root || typeof ResizeObserver === "undefined") return;
     const inner = root.firstElementChild;
@@ -2409,7 +2413,7 @@ export default function App() {
     });
     ro.observe(inner);
     return () => ro.disconnect();
-  }, [activeView, activeRoom, messages.length, personalAiOpen]);
+  }, [activeView, activeRoom, messages.length, personalAsideOpen]);
 
   const loadHistoryForRoom = useCallback(
     async (room) => {
@@ -2466,7 +2470,7 @@ export default function App() {
 
   useEffect(() => {
     if (!token) return;
-    if (personalAiOpen) {
+    if (personalAsideOpen) {
       if (
         prevViewForChatCacheRef.current === CHANNEL_VIEWS.chat &&
         latestMessagesRef.current.length > 0 &&
@@ -2500,7 +2504,7 @@ export default function App() {
       setMessages([]);
       setBanner(null);
     }
-  }, [token, activeRoom, loadHistoryForRoom, activeView, personalAiOpen]);
+  }, [token, activeRoom, loadHistoryForRoom, activeView, personalAsideOpen]);
 
   const emitJoinRoom = useCallback((socket) => {
     const r = activeRoomRef.current;
@@ -2740,14 +2744,14 @@ export default function App() {
   useEffect(() => {
     const s = socketRef.current;
     if (!token || !s?.connected) return;
-    if (personalAiOpen) {
+    if (personalAsideOpen) {
       s.emit("leave");
       setRoomJoined(false);
       roomJoinedRef.current = false;
       return;
     }
     emitJoinRoom(s);
-  }, [activeRoom, token, emitJoinRoom, personalAiOpen]);
+  }, [activeRoom, token, emitJoinRoom, personalAsideOpen]);
 
   useEffect(() => {
     const s = socketRef.current;
@@ -3136,6 +3140,7 @@ export default function App() {
     setRoomJoined(false);
     roomJoinedRef.current = false;
     setPersonalAiOpen(false);
+    setPersonalSdOpen(false);
     setChangePwOpen(false);
     setChangePwCurrent("");
     setChangePwNew("");
@@ -3146,6 +3151,7 @@ export default function App() {
 
   const goToChatRoom = useCallback((slug) => {
     setPersonalAiOpen(false);
+    setPersonalSdOpen(false);
     setBanner(null);
     const raw = String(slug ?? "").trim();
     setActiveRoom(/^dm-\d+-\d+$/i.test(raw) ? canonicalizeDmSlug(raw) : raw);
@@ -3198,6 +3204,7 @@ export default function App() {
 
   const chooseChannelView = (view) => {
     setPersonalAiOpen(false);
+    setPersonalSdOpen(false);
     setActiveView(view);
     if (channelMenuRoom) setActiveRoom(channelMenuRoom);
     setChannelMenuRoom(null);
@@ -3720,20 +3727,20 @@ export default function App() {
             <svg viewBox="0 0 24 24" className={`h-4 w-4 transition-transform ${personalOpen ? "rotate-180" : ""}`} fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
           </button>
 
-          <div className={`overflow-hidden px-3 transition-all duration-300 ease-out ${personalOpen ? "max-h-[620px] opacity-100 pb-2" : "max-h-0 opacity-0"}`}>
+          <div className={`overflow-hidden px-3 transition-all duration-300 ease-out ${personalOpen ? "max-h-[780px] opacity-100 pb-2" : "max-h-0 opacity-0"}`}>
             {savedChannel ? (
               <button
                 type="button"
                 onClick={() => { selectChannel(savedChannel.slug); setSidebarOpen(false); }}
                 className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 transition-colors duration-200 ${
-                  activeRoom === savedChannel.slug && !personalAiOpen ? "bg-tc-accent/20" : "hover:bg-tc-hover"
+                  activeRoom === savedChannel.slug && !personalAsideOpen ? "bg-tc-accent/20" : "hover:bg-tc-hover"
                 }`}
               >
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/20 text-amber-500" aria-hidden>
                   <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
                 </div>
                 <div className="min-w-0 flex-1 text-left">
-                  <span className={`flex items-center truncate text-sm font-medium ${activeRoom === savedChannel.slug && !personalAiOpen ? "text-tc-accent" : "text-tc-text"}`}>
+                  <span className={`flex items-center truncate text-sm font-medium ${activeRoom === savedChannel.slug && !personalAsideOpen ? "text-tc-accent" : "text-tc-text"}`}>
                     Избранное
                     <MentionCountBadge count={mentionBadges[savedChannel.slug]} />
                   </span>
@@ -3746,6 +3753,7 @@ export default function App() {
               type="button"
               onClick={() => {
                 setPersonalAiOpen(true);
+                setPersonalSdOpen(false);
                 setActiveView(CHANNEL_VIEWS.chat);
                 setChannelMenuRoom(null);
                 setSidebarOpen(false);
@@ -3765,6 +3773,30 @@ export default function App() {
               </div>
             </button>
 
+            <button
+              type="button"
+              onClick={() => {
+                setPersonalSdOpen(true);
+                setPersonalAiOpen(false);
+                setActiveView(CHANNEL_VIEWS.chat);
+                setChannelMenuRoom(null);
+                setSidebarOpen(false);
+              }}
+              className={`mt-2 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 transition-colors duration-200 ${
+                personalSdOpen ? "bg-tc-accent/20" : "hover:bg-tc-hover"
+              }`}
+            >
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-fuchsia-500/20 text-fuchsia-400" aria-hidden>
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
+                  <path d="M21 19V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2zM8.5 11.5A2.5 2.5 0 1111 9a2.5 2.5 0 01-2.5 2.5zM6 19l4.5-6 3.5 4.5 2.5-3L19 19H6z" />
+                </svg>
+              </div>
+              <div className="min-w-0 flex-1 text-left">
+                <span className={`truncate text-sm font-medium ${personalSdOpen ? "text-tc-accent" : "text-tc-text"}`}>Картинка (SD)</span>
+                <p className="truncate text-xs text-tc-text-muted">Stable Diffusion на сервере</p>
+              </div>
+            </button>
+
             {directChannels.length ? (
               <div className="mt-2 rounded-xl border border-tc-border/60 bg-tc-panel/20">
                 {directChannels.map((r) => (
@@ -3773,11 +3805,11 @@ export default function App() {
                     type="button"
                     onClick={() => { selectChannel(r.slug); setSidebarOpen(false); }}
                     className={`flex w-full items-center gap-3 px-3 py-2.5 transition-colors duration-200 ${
-                      activeRoom === r.slug && !personalAiOpen ? "bg-tc-accent/20" : "hover:bg-tc-hover"
+                      activeRoom === r.slug && !personalAsideOpen ? "bg-tc-accent/20" : "hover:bg-tc-hover"
                     }`}
                   >
                     <div className="min-w-0 flex-1 text-left">
-                      <span className={`flex items-center truncate text-sm font-medium ${activeRoom === r.slug && !personalAiOpen ? "text-tc-accent" : "text-tc-text"}`}>
+                      <span className={`flex items-center truncate text-sm font-medium ${activeRoom === r.slug && !personalAsideOpen ? "text-tc-accent" : "text-tc-text"}`}>
                         {r.peer?.nickname || r.title}
                         <MentionCountBadge count={mentionBadges[r.slug]} />
                       </span>
@@ -4422,7 +4454,7 @@ export default function App() {
           </button>
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-base font-semibold text-tc-text">
-              {personalAiOpen ? "Ассистент" : headerTitleForRoom({ roomTitle, activeRoom, activeView })}
+              {personalAiOpen ? "Ассистент" : personalSdOpen ? "Картинка (SD)" : headerTitleForRoom({ roomTitle, activeRoom, activeView })}
             </h2>
             <div className="flex items-center gap-2 text-xs text-tc-text-muted">
               <span className={`inline-block h-2 w-2 rounded-full ${status === "online" ? "bg-tc-online" : "bg-tc-text-muted"}`} />
@@ -4435,6 +4467,10 @@ export default function App() {
             {personalAiOpen ? (
               <svg viewBox="0 0 24 24" className="h-5 w-5 text-tc-accent" fill="currentColor" aria-hidden>
                 <path d="M9.5 2c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1zM6 7.5C4.62 7.5 3.5 8.62 3.5 10S4.62 12.5 6 12.5 8.5 11.38 8.5 10 7.38 7.5 6 7.5zm12 0c-1.38 0-2.5 1.12-2.5 2.5s1.12 2.5 2.5 2.5 2.5-1.12 2.5-2.5S19.38 7.5 18 7.5zm-6 1c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1zm1 5.5c-2.49 0-4.5 2.01-4.5 4.5 0 .55.45 1 1 1h7c.55 0 1-.45 1-1 0-2.49-2.01-4.5-4.5-4.5zm7.5-6c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1z" />
+              </svg>
+            ) : personalSdOpen ? (
+              <svg viewBox="0 0 24 24" className="h-5 w-5 text-tc-accent" fill="currentColor" aria-hidden>
+                <path d="M21 19V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2zM8.5 11.5A2.5 2.5 0 1111 9a2.5 2.5 0 01-2.5 2.5zM6 19l4.5-6 3.5 4.5 2.5-3L19 19H6z" />
               </svg>
             ) : (
               <ChannelGlyph slug={activeRoom === DTD_WORK_CHAT_SLUG ? DTD_MAIN_SLUG : activeRoom} className="h-5 w-5" />
@@ -4449,6 +4485,8 @@ export default function App() {
 
         {personalAiOpen ? (
           <PersonalAiChat getApiBase={getApiBase} token={token} nickname={nickname} onError={setBanner} />
+        ) : personalSdOpen ? (
+          <PersonalSdImage getApiBase={getApiBase} token={token} onError={setBanner} />
         ) : activeView === CHANNEL_VIEWS.gallery ? (
           <GalleryView
             getApiBase={getApiBase}
@@ -4827,7 +4865,7 @@ export default function App() {
         ) : null}
 
         {/* Input area */}
-        {activeView === CHANNEL_VIEWS.chat && !personalAiOpen ? (
+        {activeView === CHANNEL_VIEWS.chat && !personalAsideOpen ? (
         <>
         <div
           className="relative z-10 tc-composer-bar flex flex-col gap-2 border-t border-tc-border bg-tc-header px-2 py-2 sm:px-3"
