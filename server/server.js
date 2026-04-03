@@ -37,6 +37,12 @@ const OLLAMA_HTTP_TIMEOUT_MS = Math.min(Math.max(Number(process.env.OLLAMA_HTTP_
 /** Tavily Search API (ключ в заголовке Authorization: Bearer) */
 const TAVILY_API_KEY = String(process.env.TAVILY_API_KEY || "").trim();
 const TAVILY_TIMEOUT_MS = Math.min(Math.max(Number(process.env.TAVILY_TIMEOUT_MS) || 25_000, 5000), 120_000);
+/** Automatic1111 WebUI: `http://127.0.0.1:7860` + `--api` в webui-user.bat */
+const SD_WEBUI_BASE_URL = String(process.env.SD_WEBUI_BASE_URL || process.env.A1111_BASE_URL || "").replace(/\/$/, "");
+const SD_WEBUI_TIMEOUT_MS = Math.min(Math.max(Number(process.env.SD_WEBUI_TIMEOUT_MS) || 300_000, 45_000), 900_000);
+const MAX_SD_PROMPT_CHARS = Math.min(Math.max(Number(process.env.MAX_SD_PROMPT_CHARS) || 1500, 200), 4000);
+const SD_MAX_STEPS = Math.min(Math.max(Number(process.env.SD_MAX_STEPS) || 28, 8), 45);
+const SD_MAX_SIDE = Math.min(Math.max(Number(process.env.SD_MAX_SIDE) || 768, 320), 1024);
 /** Погода в сайдбаре: прокси к api.met.no (Gismeteo — только с коммерческим API‑ключом). */
 const WEATHER_HTTP_TIMEOUT_MS = Math.min(Math.max(Number(process.env.WEATHER_HTTP_TIMEOUT_MS) || 12_000, 3000), 30_000);
 const MET_NO_USER_AGENT = String(process.env.MET_NO_USER_AGENT || "TatarChat/1.0 (weather sidebar; contact: server admin)").trim();
@@ -965,6 +971,66 @@ function buildAiSystemPrompt(nickname, webSearchBlock, factsBlock) {
     s += `\n\nНиже есть выдержки из поиска — используй их, но ответ строй так, будто вы с пользователем в России: по умолчанию цены в рублях где уместно, города/магазины/сервисы — про РФ, время и новости — с поправкой на российский контекст, пока он явно не просит про другую страну.`;
   }
   return s.slice(0, 120_000);
+}
+
+function isSdWebUiConfigured() {
+  return SD_WEBUI_BASE_URL.length > 0;
+}
+
+function sanitizeSdPrompt(s, maxLen) {
+  return String(s ?? "")
+    .replace(/[\u0000-\u001F\u007F]/g, "")
+    .trim()
+    .slice(0, maxLen);
+}
+
+/**
+ * Прокси к A1111 POST /sdapi/v1/txt2img → { base64, mime } или throw.
+ */
+async function callSdWebUiTxt2img({ prompt, negativePrompt, steps, width, height }) {
+  const url = `${SD_WEBUI_BASE_URL}/sdapi/v1/txt2img`;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), SD_WEBUI_TIMEOUT_MS);
+  try {
+    const payload = {
+      prompt,
+      negative_prompt: negativePrompt || "",
+      steps,
+      width,
+      height,
+      cfg_scale: 7,
+      sampler_index: "Euler a",
+      restore_faces: false,
+      send_images: true,
+    };
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: ac.signal,
+    });
+    const txt = await res.text();
+    let data = {};
+    try {
+      data = txt ? JSON.parse(txt) : {};
+    } catch {
+      data = {};
+    }
+    if (!res.ok) {
+      const err = new Error(`sd_webui_http_${res.status}`);
+      err.detail = (txt || "").slice(0, 500);
+      throw err;
+    }
+    const b64 = data?.images?.[0];
+    if (typeof b64 !== "string" || !b64.length) {
+      const err = new Error("sd_webui_no_image");
+      err.detail = typeof data?.error === "string" ? data.error : JSON.stringify(data).slice(0, 300);
+      throw err;
+    }
+    return { base64: b64, mimeType: "image/png" };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function callOllamaChat(model, messages) {
@@ -2870,6 +2936,7 @@ app.get("/api/ai/chat", requireAuth, async (req, res) => {
       model: await getUserAiModel(req.user.userId),
       availableModels: OLLAMA_MODELS,
       webSearchAvailable: isTavilyConfigured(),
+      imageGenAvailable: isSdWebUiConfigured(),
       facts,
     });
   } catch (err) {
@@ -2919,6 +2986,48 @@ app.delete("/api/ai/facts/:id", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("DELETE /api/ai/facts/:id", err);
     res.status(500).json({ error: "Ошибка" });
+  }
+});
+
+app.post("/api/ai/image", requireAuth, async (req, res) => {
+  try {
+    if (!isSdWebUiConfigured()) {
+      return res.status(503).json({
+        error:
+          "Генерация не настроена: задайте SD_WEBUI_BASE_URL в .env на сервере (например http://127.0.0.1:7860) и запусти A1111 с --api.",
+      });
+    }
+    let prompt = sanitizeSdPrompt(req.body?.prompt, MAX_SD_PROMPT_CHARS);
+    if (!prompt) return res.status(400).json({ error: "Пустой промпт" });
+    const neg = sanitizeSdPrompt(req.body?.negative_prompt || req.body?.negativePrompt || "", MAX_SD_PROMPT_CHARS);
+
+    let steps = parseInt(req.body?.steps, 10);
+    if (!Number.isFinite(steps)) steps = 25;
+    steps = Math.max(8, Math.min(SD_MAX_STEPS, Math.floor(steps)));
+
+    let width = parseInt(req.body?.width, 10);
+    let height = parseInt(req.body?.height, 10);
+    if (!Number.isFinite(width)) width = 512;
+    if (!Number.isFinite(height)) height = 512;
+    const snapSide = (n) => Math.max(256, Math.min(SD_MAX_SIDE, Math.floor(n / 8) * 8));
+    width = snapSide(width);
+    height = snapSide(height);
+
+    const out = await callSdWebUiTxt2img({ prompt, negativePrompt: neg, steps, width, height });
+    res.json({ ok: true, mimeType: out.mimeType, imageBase64: out.base64 });
+  } catch (e) {
+    if (e?.name === "AbortError") {
+      return res.status(504).json({ error: "Генерация слишком долгая (таймаут)" });
+    }
+    if (String(e?.message || "").startsWith("sd_webui_")) {
+      console.error("[sd] txt2img:", e?.detail || e?.message);
+      return res.status(502).json({
+        error: "Stable Diffusion WebUI недоступен или вернул ошибку. Запусти A1111 с --api и проверь адрес.",
+        detail: String(e?.detail || "").trim().slice(0, 240) || undefined,
+      });
+    }
+    console.error("POST /api/ai/image", e);
+    res.status(500).json({ error: "Ошибка генерации" });
   }
 });
 
@@ -3008,6 +3117,7 @@ app.post("/api/ai/chat/send-with-image", requireAuth, uploadAiImage.single("imag
       messages: list,
       model: effectiveModel,
       web: wantSearch ? { images: webImages, sources: webSources.slice(0, 8) } : undefined,
+      imageGenAvailable: isSdWebUiConfigured(),
       facts,
     });
   } catch (err) {
@@ -3120,6 +3230,7 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
       messages: list,
       model: effectiveModel,
       web: wantSearch ? { images: webImages, sources: webSources.slice(0, 8) } : undefined,
+      imageGenAvailable: isSdWebUiConfigured(),
       facts,
     });
   } catch (err) {
