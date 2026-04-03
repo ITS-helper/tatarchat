@@ -4,8 +4,9 @@
 # Full stack (includes same client rebuild + scheduled stop.bat/start.bat):
 #   ssh Tatarfamily@100.123.209.16 powershell -ExecutionPolicy Bypass -File C:\tatarchat\scripts\deploy-pull.ps1 -FullRestart
 # Optional: after start.bat also start Automatic1111 (minimized), if path is set:
-#   $env:TATARCHAT_SD_WEBUI_BAT = 'D:\sd\stable-diffusion-webui\webui-user.bat'
-#   или  -SdWebuiBat 'D:\sd\stable-diffusion-webui\webui-user.bat'
+#   (на сервере только диск C: — путь тоже на C:)
+#   $env:TATARCHAT_SD_WEBUI_BAT = 'C:\sd\stable-diffusion-webui\webui-user.bat'
+#   или  -SdWebuiBat 'C:\sd\stable-diffusion-webui\webui-user.bat'
 
 param(
     [string] $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,

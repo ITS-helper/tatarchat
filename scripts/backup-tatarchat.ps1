@@ -1,5 +1,5 @@
 # TatarChat: backup PostgreSQL (Docker) + uploads folder.
-# Run: powershell -NoProfile -ExecutionPolicy Bypass -File "D:\tatarchat\scripts\backup-tatarchat.ps1"
+# Run: powershell -NoProfile -ExecutionPolicy Bypass -File "C:\tatarchat\scripts\backup-tatarchat.ps1"
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path

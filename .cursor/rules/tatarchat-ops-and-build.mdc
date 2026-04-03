@@ -5,6 +5,10 @@ alwaysApply: true
 
 # TatarChat — операции, деплой, APK (Windows)
 
+## Прод-сервер (один диск C:)
+
+На релизном хосте нет D: — репозиторий `C:\tatarchat`, Caddy `C:\caddy`. SSH-деплой, `TATARCHAT_SD_WEBUI_BAT` и прочее: `scripts/REMOTE-DEPLOY-RU.txt` (раздел **4b**).
+
 ## Запуск на Windows (локально + домен)
 
 - **Стартовый батник**: `start.bat` (запуск от администратора).
