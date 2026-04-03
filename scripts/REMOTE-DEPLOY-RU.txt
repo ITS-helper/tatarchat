@@ -96,6 +96,11 @@ Node поднимается через Win32_Process.Create (не через Sta
   или задать для SYSTEM, если деплой идёт так, что env подхватывается).
 - Задача планировщика TatarChat-FullRestart выполняется от SYSTEM: webui-user.bat
   должен лежать по пути, доступному SYSTEM (локальный C:\ — нормально).
+- Automatic1111 v1.10.x тянет torch==2.1.2; для Python 3.14 колёс нет → ошибка
+  «No matching distribution found for torch==2.1.2». Ставь для WebUI отдельно
+  Python 3.10.x или 3.11.x (с python.org), в webui-user.bat укажи путь к нему
+  (или удали папку venv в stable-diffusion-webui и перезапусти батник — venv
+  пересоздастся уже с нужным интерпретатором). Python 3.14 для этого WebUI не подходит.
 
 ---------------------------------------------------------------------------
 5) Если Tailscale не хочешь
