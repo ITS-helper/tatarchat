@@ -24,6 +24,49 @@ function trimUrl(u) {
   return String(u || "").replace(/[.,;)\]]+$/, "");
 }
 
+/** Короткая подпись для ссылки (домен + укороченный путь). */
+function linkLabelForUrl(raw) {
+  const u = trimUrl(raw);
+  try {
+    const x = new URL(u);
+    let host = x.hostname.replace(/^www\./i, "");
+    let path = x.pathname || "";
+    if (path.length > 22) path = `${path.slice(0, 20)}…`;
+    const tail = path && path !== "/" ? path : "";
+    const extra = x.search ? "·…" : "";
+    return `${host}${tail}${extra}` || u;
+  } catch {
+    return u.length > 40 ? `${u.slice(0, 38)}…` : u;
+  }
+}
+
+/** Голые http(s) → [подпись](url); не трогаем `inline` / ```fence``` и уже оформленные [](url). */
+function compressBareUrls(text) {
+  const s = String(text ?? "");
+  const fenceRe = /(```[\s\S]*?```|`[^`\n]+`)/g;
+  const parts = s.split(fenceRe);
+  const urlRe = /https?:\/\/[^\s)\]<>]+/gi;
+  for (let i = 0; i < parts.length; i += 2) {
+    parts[i] = parts[i].replace(urlRe, (url, offset, str) => {
+      if (offset >= 2 && str[offset - 2] === "]" && str[offset - 1] === "(") return url;
+      const t = trimUrl(url);
+      return `[${linkLabelForUrl(t)}](${t})`;
+    });
+  }
+  return parts.join("");
+}
+
+/** Разбивка по темам: каждый блок с ## в начале — отдельная «группа». */
+function splitAssistantGroups(normalizedMd) {
+  const s = String(normalizedMd ?? "").trim();
+  if (!s) return [];
+  const parts = s
+    .split(/\n(?=##\s+)/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  return parts.length ? parts : [s];
+}
+
 function parseSourcesBlock(content) {
   const raw = String(content ?? "");
   const candidates = [];
@@ -86,7 +129,7 @@ const assistantMdComponents = {
     <h1 className="mb-2 mt-4 border-b border-tc-border/40 pb-1 text-lg font-bold text-tc-text first:mt-0">{children}</h1>
   ),
   h2: ({ children }) => (
-    <h2 className="mb-1.5 mt-3 text-base font-bold text-tc-text first:mt-0">{children}</h2>
+    <h2 className="mb-1.5 mt-0 border-b border-tc-border/35 pb-1 text-[15px] font-bold text-tc-accent first:mt-0">{children}</h2>
   ),
   h3: ({ children }) => (
     <h3 className="mb-1.5 mt-3 text-[15px] font-semibold text-tc-accent first:mt-0">{children}</h3>
@@ -126,13 +169,21 @@ const assistantMdComponents = {
 };
 
 function AssistantMarkdownBody({ text }) {
-  const md = normalizeAssistantMarkdown(text);
+  const md = compressBareUrls(normalizeAssistantMarkdown(text));
   if (!md) return null;
+  const groups = splitAssistantGroups(md);
   return (
-    <div className="ai-assistant-md min-w-0 text-sm text-tc-text">
-      <ReactMarkdown remarkPlugins={[remarkBreaks]} components={assistantMdComponents}>
-        {md}
-      </ReactMarkdown>
+    <div className="ai-assistant-md min-w-0 space-y-2 text-sm text-tc-text">
+      {groups.map((chunk, gi) => (
+        <div
+          key={gi}
+          className="rounded-lg border border-tc-border/50 bg-tc-panel/20 px-2.5 py-2 shadow-sm sm:px-3"
+        >
+          <ReactMarkdown remarkPlugins={[remarkBreaks]} components={assistantMdComponents}>
+            {chunk}
+          </ReactMarkdown>
+        </div>
+      ))}
     </div>
   );
 }
@@ -425,21 +476,24 @@ export default function PersonalAiChat({ getApiBase, token, nickname, onError })
                       <AssistantMarkdownBody text={parsed.body} />
                     )}
                     {!mine && parsed.sources.length ? (
-                      <details className="mt-2 rounded-lg border border-tc-border/60 bg-white/5 px-2 py-1.5">
-                        <summary className="cursor-pointer select-none text-[11px] font-semibold text-tc-text-sec hover:text-tc-accent">
-                          Источники ({parsed.sources.length})
+                      <details className="group mt-2 rounded-lg border border-tc-border/55 bg-black/[0.06]">
+                        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2.5 py-2 text-[11px] font-semibold text-tc-text-sec transition hover:text-tc-accent [&::-webkit-details-marker]:hidden">
+                          <span>Источники · {parsed.sources.length}</span>
+                          <span className="text-[10px] text-tc-text-muted transition group-open:rotate-180" aria-hidden>
+                            ▼
+                          </span>
                         </summary>
-                        <ul className="mt-1 space-y-1 text-[11px] text-tc-text-muted">
+                        <ul className="border-t border-tc-border/40 px-2.5 py-2 space-y-1.5 text-[11px] text-tc-text-muted">
                           {parsed.sources.map((s, si) => (
                             <li key={si} className="leading-snug">
                               <a
                                 href={s.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="underline decoration-tc-border underline-offset-2 hover:text-tc-accent"
+                                className="break-words text-tc-link underline decoration-tc-border underline-offset-2 hover:text-tc-accent"
                                 title={s.url}
                               >
-                                {s.title}
+                                {s.title || linkLabelForUrl(s.url)}
                               </a>
                             </li>
                           ))}
