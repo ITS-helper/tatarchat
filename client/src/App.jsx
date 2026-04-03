@@ -518,10 +518,9 @@ function VoiceMessagePlayer({ url }) {
   );
 }
 
-/** Видеосообщение: без нативных controls — свой play/pause и полоска прогресса */
+/** Видеосообщение: квадрат, play по тапу; тайминг под роликом (без полосы на видео). */
 function MessageVideoNote({ url, mime, name }) {
   const vRef = useRef(null);
-  const barRef = useRef(null);
   const [playing, setPlaying] = useState(false);
   const [dur, setDur] = useState(0);
   const [t, setT] = useState(0);
@@ -558,15 +557,6 @@ function MessageVideoNote({ url, mime, name }) {
       v.removeEventListener("ended", onEnded);
     };
   }, [url]);
-  const pct = dur > 0 ? Math.min(100, (t / dur) * 100) : 0;
-  const seekToClientX = (clientX) => {
-    const v = vRef.current;
-    const track = barRef.current;
-    if (!v || !track || !(dur > 0)) return;
-    const r = track.getBoundingClientRect();
-    const x = Math.min(Math.max(0, clientX - r.left), r.width);
-    v.currentTime = (x / r.width) * dur;
-  };
   const togglePlay = () => {
     const v = vRef.current;
     if (!v) return;
@@ -587,6 +577,8 @@ function MessageVideoNote({ url, mime, name }) {
             className="h-full w-full cursor-pointer object-cover"
             playsInline
             preload="auto"
+            controls={false}
+            disablePictureInPicture
             onLoadedData={pokeFrame}
             onLoadedMetadata={pokeFrame}
             onClick={(e) => {
@@ -611,29 +603,12 @@ function MessageVideoNote({ url, mime, name }) {
               </span>
             </button>
           ) : null}
-          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 pb-2 pt-8">
-            <button
-              type="button"
-              ref={barRef}
-              className="flex h-5 w-full cursor-pointer items-center touch-manipulation"
-              aria-label="Перемотка"
-              onPointerUp={(e) => {
-                if (e.button !== 0 && e.button !== -1) return;
-                e.stopPropagation();
-                seekToClientX(e.clientX);
-              }}
-            >
-              <span className="pointer-events-none relative h-1 w-full overflow-hidden rounded-full bg-white/30">
-                <span className="block h-full rounded-full bg-tc-accent" style={{ width: `${pct}%` }} />
-              </span>
-            </button>
-            <p className="mt-1 text-center text-[10px] font-medium tabular-nums text-white/85">
-              {formatVoiceTime(t)}
-              {dur > 0 ? <span className="text-white/60"> · {formatVoiceTime(dur)}</span> : null}
-            </p>
-          </div>
         </div>
       </div>
+      <p className="mt-1.5 text-center text-[10px] font-medium tabular-nums text-tc-text-muted">
+        {formatVoiceTime(t)}
+        {dur > 0 ? <span className="text-tc-text-sec"> · {formatVoiceTime(dur)}</span> : null}
+      </p>
     </div>
   );
 }
@@ -1954,48 +1929,6 @@ export default function App() {
     [getAuthHeaders, stopTyping]
   );
 
-  /** Только видео: в @whiteguru/capacitor-plugin-media-capture нет нативного captureAudio */
-  const captureNativeVideo = useCallback(async () => {
-    if (!IS_NATIVE) return;
-    if (editingId != null || pendingFile != null || videoNoteUploading || voiceUploading || videoNoteRecording || voiceRecording) return;
-    try {
-      setAttachMenuOpen(false);
-      const { MediaCapture } = await import("@whiteguru/capacitor-plugin-media-capture");
-      const res = await MediaCapture.captureVideo({ duration: 60, quality: "hd", frameRate: 30 });
-      const mf = res?.file || (res?.files || res || [])?.[0];
-      const path =
-        mf?.fullPath ||
-        mf?.localURL ||
-        mf?.path ||
-        mf?.uri ||
-        mf?.filePath ||
-        mf?.webPath ||
-        mf?.nativeURL ||
-        mf?.localUri;
-      if (!path) {
-        setBanner("Не удалось получить файл записи");
-        return;
-      }
-      const url = Capacitor.convertFileSrc(path);
-      const resp = await fetch(url);
-      const rawBlob = await resp.blob();
-      const mime = stripMimeParams(mf?.type || rawBlob.type || "");
-      const blob = mime ? rawBlob.slice(0, rawBlob.size, mime) : rawBlob;
-      await uploadVideoNoteBlob(blob);
-    } catch (e) {
-      console.error(e);
-      setBanner("Не удалось записать видео");
-    }
-  }, [
-    editingId,
-    pendingFile,
-    videoNoteUploading,
-    voiceUploading,
-    videoNoteRecording,
-    voiceRecording,
-    uploadVideoNoteBlob,
-  ]);
-
   const stopVoiceRecord = useCallback(async (opts) => {
     const discard = !!opts?.discard;
     if (voiceStoppingRef.current) return;
@@ -2252,10 +2185,7 @@ export default function App() {
   const toggleRecording = useCallback(
     async (kind) => {
       if (kind !== "voice" && kind !== "video") return;
-      if (IS_NATIVE && kind === "video") {
-        void captureNativeVideo();
-        return;
-      }
+      // Видео и на Android через WebView + MediaRecorder (квадратный превью у композера), без полноэкранного нативного плеера
       // Native voice: тот же WebView MediaRecorder (RECORD_AUDIO в манифесте); плагин audio не экспортирует
       const isActive = kind === "voice" ? voiceRecording : videoNoteRecording;
       if (isActive) {
@@ -2275,7 +2205,6 @@ export default function App() {
       } catch (_) {}
     },
     [
-      captureNativeVideo,
       editingId,
       pendingFile,
       videoNoteUploading,
@@ -4390,7 +4319,7 @@ export default function App() {
                         </>
                       )}
                       <div className="mt-1 flex items-center justify-end gap-1">
-                        <span className="text-[10px] text-white/40">
+                        <span className="text-[11px] font-medium tabular-nums text-tc-text/90">
                           {formatTime(m.time)}
                           {m.edited_at ? " · изм." : ""}
                         </span>
@@ -4546,12 +4475,12 @@ export default function App() {
         {/* Video note recording / uploading */}
         {videoNoteRecording && recordingPreviewStream ? (
           <div className="border-t border-tc-border bg-tc-header px-3 py-2 pb-[max(10px,env(safe-area-inset-bottom,0px))] pt-2 sm:px-4">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl border-2 border-red-500 bg-black sm:h-16 sm:w-16">
+            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="mx-auto aspect-square w-[min(200px,52vw)] shrink-0 overflow-hidden rounded-xl border-2 border-red-500 bg-black sm:mx-0 sm:w-[min(200px,40vw)]">
                 <video ref={videoNoteLiveRef} className="h-full w-full scale-x-[-1] object-cover" muted playsInline autoPlay />
               </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <div className="min-w-0 flex-1 sm:pb-1">
+                <div className="flex min-w-0 flex-wrap items-baseline justify-center gap-x-2 gap-y-0.5 sm:justify-start">
                   <span className="inline-block h-2 w-2 animate-pulse shrink-0 rounded-full bg-red-500" />
                   <p className="text-sm font-medium text-red-400">Запись видео</p>
                   <p className="text-xs font-semibold tabular-nums text-red-300/90">{recordingTimeLabel()}</p>
