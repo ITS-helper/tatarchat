@@ -39,12 +39,13 @@ alwaysApply: true
 - Раньше галерея дополнительно резалась через `isGalleryMember` (whitelist ников) — это снято; проверка только **доступ к `room`** + заголовок **`X-Room-Password`** для закрытых комнат (тот же механизм, что у чата).
 - Клиент: `GalleryView` / `CalendarView` получают **`getAuthHeaders`** из `App.jsx`, чтобы запросы шли с паролем комнаты при необходимости.
 
-## Погода в сайдбаре (client)
+## Погода в сайдбаре (server + client)
 
-- В **`client/src/App.jsx`**: компонент **`SidebarWeatherStrip`** — внизу левой колонки, сразу после **`</nav>`** (у `<nav>` уже **`flex-1`** — список каналов прокручивается, погода закреплена снизу).
-- Города: **Тюмень**, **Челябинск**, **Санкт‑Петербург** («Питер» в UI); координаты в **`SIDEBAR_WEATHER_CITIES`** рядом с компонентом.
-- API: **`https://api.open-meteo.com/v1/forecast`** (без ключа), `current=temperature_2m,weather_code,wind_speed_10m`, `timezone=auto`; погодный код → эмодзи **`wmoWeatherEmoji`**.
-- Обновление: при монтировании, кнопка **↻**, интервал **30 минут**; ссылка «Open‑Meteo» внизу блока.
+- В **`client/src/App.jsx`**: компонент **`SidebarWeatherStrip`** — внизу левой колонки, сразу после **`</nav>`** (у `<nav>` уже **`flex-1`** — список каналов прокручивается, погода закреплена снизу). Запросы с **`getAuthHeaders`** на **`GET /api/weather/current?lat=&lon=`** (тот же origin, что чат).
+- Города: **Тюмень**, **Челябинск**, **Санкт‑Петербург** («Питер» в UI); координаты в **`SIDEBAR_WEATHER_CITIES`**.
+- **Сервер** `server/server.js`: прокси к **[api.met.no Locationforecast 2.0 compact](https://api.met.no/doc/LocationForecast)** (MET Norway / yr.no), без ключа; эмодзи по **`symbol_code`** (`metNoSymbolToEmoji`). Gismeteo в проде без их API‑токена не подключается.
+- Env (опционально): **`WEATHER_HTTP_TIMEOUT_MS`**, **`MET_NO_USER_AGENT`** (см. требования MET к User‑Agent).
+- Обновление: при монтировании, кнопка **↻**, интервал **30 минут**; ссылка внизу блока — MET Norway.
 
 ## Личный ассистент (LLM на сервере, server + client)
 

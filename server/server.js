@@ -37,6 +37,9 @@ const OLLAMA_HTTP_TIMEOUT_MS = Math.min(Math.max(Number(process.env.OLLAMA_HTTP_
 /** Tavily Search API (ключ в заголовке Authorization: Bearer) */
 const TAVILY_API_KEY = String(process.env.TAVILY_API_KEY || "").trim();
 const TAVILY_TIMEOUT_MS = Math.min(Math.max(Number(process.env.TAVILY_TIMEOUT_MS) || 25_000, 5000), 120_000);
+/** Погода в сайдбаре: прокси к api.met.no (Gismeteo — только с коммерческим API‑ключом). */
+const WEATHER_HTTP_TIMEOUT_MS = Math.min(Math.max(Number(process.env.WEATHER_HTTP_TIMEOUT_MS) || 12_000, 3000), 30_000);
+const MET_NO_USER_AGENT = String(process.env.MET_NO_USER_AGENT || "TatarChat/1.0 (weather sidebar; contact: server admin)").trim();
 const APK_DIR = path.resolve(process.env.APK_DIR || path.join(__dirname, "..", "apk"));
 const MAX_MESSAGE_LEN = 2000;
 const MAX_NICK_LEN = 64;
@@ -2338,6 +2341,55 @@ function getRoomPasswordFromRequest(req) {
   return "";
 }
 
+function metNoSymbolToEmoji(symbol) {
+  const s = String(symbol || "").toLowerCase();
+  if (!s) return "☁️";
+  if (s.includes("thunder")) return "⛈️";
+  if (s.includes("snow") || s.includes("sleet") || s.includes("hail")) return "❄️";
+  if (s.includes("rain")) return s.includes("light") ? "🌦️" : "🌧️";
+  if (s.includes("fog")) return "🌫️";
+  if (s.includes("clearsky") || s.startsWith("fair")) return s.includes("night") ? "🌙" : "☀️";
+  if (s.includes("partlycloudy")) return "⛅";
+  if (s.includes("cloudy")) return "☁️";
+  return "☁️";
+}
+
+async function fetchCurrentWeatherFromMetNo(lat, lon) {
+  const u = new URL("https://api.met.no/weatherapi/locationforecast/2.0/compact");
+  u.searchParams.set("lat", String(lat));
+  u.searchParams.set("lon", String(lon));
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), WEATHER_HTTP_TIMEOUT_MS);
+  try {
+    const res = await fetch(u.toString(), {
+      signal: ac.signal,
+      headers: {
+        Accept: "application/json",
+        "User-Agent": MET_NO_USER_AGENT || "TatarChat/1.0",
+      },
+    });
+    if (!res.ok) throw new Error("met_no_http");
+    const data = await res.json();
+    const ts = data?.properties?.timeseries;
+    const first = Array.isArray(ts) && ts[0];
+    const inst = first?.data?.instant?.details;
+    if (!inst || typeof inst.air_temperature !== "number") throw new Error("met_no_shape");
+    const windMs = typeof inst.wind_speed === "number" ? inst.wind_speed : 0;
+    const sym =
+      first?.data?.next_1_hours?.summary?.symbol_code ||
+      first?.data?.next_6_hours?.summary?.symbol_code ||
+      first?.data?.next_12_hours?.summary?.symbol_code ||
+      "";
+    return {
+      temp: inst.air_temperature,
+      windKmh: Math.round(windMs * 3.6),
+      emoji: metNoSymbolToEmoji(sym),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // --- REST ---
 
 app.get("/api/health", async (_req, res) => {
@@ -2359,6 +2411,21 @@ app.get("/api/health", async (_req, res) => {
     dbErr,
     maxUploadMb: Math.round(MAX_UPLOAD_BYTES / (1024 * 1024)),
   });
+});
+
+app.get("/api/weather/current", requireAuth, async (req, res) => {
+  const lat = parseFloat(req.query.lat);
+  const lon = parseFloat(req.query.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    return res.status(400).json({ error: "Некорректные координаты" });
+  }
+  try {
+    const out = await fetchCurrentWeatherFromMetNo(lat, lon);
+    res.json(out);
+  } catch (e) {
+    console.error("GET /api/weather/current", e?.message || e);
+    res.status(502).json({ error: "Погода недоступна" });
+  }
 });
 
 async function getLatestApkFile() {

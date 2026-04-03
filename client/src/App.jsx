@@ -613,34 +613,20 @@ function MessageVideoNote({ url, mime, name }) {
   );
 }
 
-/** Погода в сайдбаре: Open‑Meteo, без API‑ключа */
+/** Погода в сайдбаре: через сервер (`/api/weather/current` → MET Norway / yr.no). */
 const SIDEBAR_WEATHER_CITIES = [
   { key: "tyumen", label: "Тюмень", lat: 57.1522, lon: 65.5272 },
   { key: "chel", label: "Челябинск", lat: 55.1644, lon: 61.4368 },
   { key: "spb", label: "Питер", lat: 59.9343, lon: 30.3351 },
 ];
 
-function wmoWeatherEmoji(code) {
-  if (code == null || Number.isNaN(code)) return "—";
-  const c = Number(code);
-  if (c === 0) return "☀️";
-  if (c <= 3) return "⛅";
-  if (c <= 48) return "🌫️";
-  if (c <= 67) return "🌧️";
-  if (c <= 77) return "❄️";
-  if (c <= 82) return "🌦️";
-  if (c <= 86) return "🌨️";
-  if (c <= 99) return "⛈️";
-  return "☁️";
-}
-
-function SidebarWeatherStrip() {
+function SidebarWeatherStrip({ getAuthHeaders }) {
   const [rows, setRows] = useState(() =>
     SIDEBAR_WEATHER_CITIES.map((c) => ({
       key: c.key,
       label: c.label,
       temp: null,
-      code: null,
+      emoji: null,
       windKmh: null,
       err: false,
       loading: true,
@@ -650,24 +636,21 @@ function SidebarWeatherStrip() {
 
   const load = useCallback(async () => {
     setRows((prev) => prev.map((r) => ({ ...r, loading: true, err: false })));
+    const base = getApiBase();
     const next = await Promise.all(
       SIDEBAR_WEATHER_CITIES.map(async (c) => {
         try {
-          const u = new URL("https://api.open-meteo.com/v1/forecast");
-          u.searchParams.set("latitude", String(c.lat));
-          u.searchParams.set("longitude", String(c.lon));
-          u.searchParams.set("current", "temperature_2m,weather_code,wind_speed_10m");
-          u.searchParams.set("timezone", "auto");
-          const res = await fetch(u.toString());
-          if (!res.ok) throw new Error("forecast");
+          const q = new URLSearchParams({ lat: String(c.lat), lon: String(c.lon) });
+          const res = await fetch(`${base}/api/weather/current?${q}`, { headers: getAuthHeaders() });
+          if (!res.ok) throw new Error("weather");
           const data = await res.json();
-          const cur = data?.current;
+          if (data?.temp == null || typeof data.temp !== "number") throw new Error("weather_shape");
           return {
             key: c.key,
             label: c.label,
-            temp: cur?.temperature_2m,
-            code: cur?.weather_code,
-            windKmh: cur?.wind_speed_10m,
+            temp: data.temp,
+            emoji: typeof data.emoji === "string" && data.emoji ? data.emoji : "☁️",
+            windKmh: typeof data.windKmh === "number" ? data.windKmh : null,
             err: false,
             loading: false,
           };
@@ -676,7 +659,7 @@ function SidebarWeatherStrip() {
             key: c.key,
             label: c.label,
             temp: null,
-            code: null,
+            emoji: null,
             windKmh: null,
             err: true,
             loading: false,
@@ -685,7 +668,7 @@ function SidebarWeatherStrip() {
       })
     );
     if (weatherAlive.current) setRows(next);
-  }, []);
+  }, [getAuthHeaders]);
 
   useEffect(() => {
     weatherAlive.current = true;
@@ -717,7 +700,7 @@ function SidebarWeatherStrip() {
             className="flex items-center gap-2 rounded-xl border border-tc-border/60 bg-tc-panel/25 px-2.5 py-2"
           >
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-tc-asphalt/30 text-lg leading-none" title="Условия">
-              {r.loading ? <span className="text-xs text-tc-text-muted">…</span> : wmoWeatherEmoji(r.code)}
+              {r.loading ? <span className="text-xs text-tc-text-muted">…</span> : r.err ? "—" : r.emoji || "—"}
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-semibold text-tc-text">{r.label}</p>
@@ -736,8 +719,13 @@ function SidebarWeatherStrip() {
         ))}
       </div>
       <p className="mt-2 text-center text-[9px] leading-tight text-tc-text-muted/90">
-        <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer" className="underline decoration-tc-border underline-offset-2 hover:text-tc-accent">
-          Open‑Meteo
+        <a
+          href="https://api.met.no/doc/LocationForecast"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline decoration-tc-border underline-offset-2 hover:text-tc-accent"
+        >
+          MET Norway (yr.no)
         </a>
       </p>
     </div>
@@ -3759,7 +3747,7 @@ export default function App() {
             );
           })()}
         </nav>
-        <SidebarWeatherStrip />
+        <SidebarWeatherStrip getAuthHeaders={getAuthHeaders} />
       </aside>
       </div>
 
