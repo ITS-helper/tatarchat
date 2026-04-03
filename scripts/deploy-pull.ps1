@@ -3,12 +3,16 @@
 # Example: ssh user@100.x.x.x powershell -ExecutionPolicy Bypass -File C:\tatarchat\scripts\deploy-pull.ps1
 # Full stack (includes same client rebuild + scheduled stop.bat/start.bat):
 #   ssh Tatarfamily@100.123.209.16 powershell -ExecutionPolicy Bypass -File C:\tatarchat\scripts\deploy-pull.ps1 -FullRestart
+# Optional: after start.bat also start Automatic1111 (minimized), if path is set:
+#   $env:TATARCHAT_SD_WEBUI_BAT = 'D:\sd\stable-diffusion-webui\webui-user.bat'
+#   или  -SdWebuiBat 'D:\sd\stable-diffusion-webui\webui-user.bat'
 
 param(
     [string] $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
     [string] $Branch = 'main',
     [switch] $SkipBuild,
-    [switch] $FullRestart
+    [switch] $FullRestart,
+    [string] $SdWebuiBat = $env:TATARCHAT_SD_WEBUI_BAT
 )
 
 $ErrorActionPreference = 'Stop'
@@ -107,23 +111,36 @@ try {
             throw "stop.bat or start.bat not found in $RepoRoot"
         }
 
-        # Create on-demand scheduled task with highest privileges.
+        $sdPart = ''
+        if ($SdWebuiBat) {
+            if (Test-Path -LiteralPath $SdWebuiBat) {
+                # start "" /MIN — отдельное окно, свёрнутое; WebUI с --api продолжит работать после выхода из цепочки cmd
+                $sdPart = " && timeout /t 3 /nobreak >nul && start `"`" /MIN `"$SdWebuiBat`""
+                Write-Host "  SD WebUI after start: $SdWebuiBat" -ForegroundColor DarkGray
+            } else {
+                Write-Warning "SdWebuiBat not found (SD autostart skipped): $SdWebuiBat"
+            }
+        }
+
+        # Пересоздаём задачу каждый раз — чтобы подтянуть актуальный путь к webui-user.bat при смене env.
         $exists = $false
         try {
             schtasks /Query /TN $taskName *> $null
             if ($LASTEXITCODE -eq 0) { $exists = $true }
         } catch {}
 
-        if (-not $exists) {
-            $cmd = "cmd.exe /c `"set TC_NO_PAUSE=1 && `"$stopBat`" && timeout /t 2 /nobreak >nul && `"$startBat`"`""
-            # Run as SYSTEM to avoid password prompt; requires admin rights which Task Scheduler provides.
-            schtasks /Create /F /TN $taskName /SC ONDEMAND /RL HIGHEST /RU SYSTEM /TR $cmd | Out-Null
+        $cmd = "cmd.exe /c `"set TC_NO_PAUSE=1 && `"$stopBat`" && timeout /t 2 /nobreak >nul && `"$startBat`"$sdPart`""
+        schtasks /Create /F /TN $taskName /SC ONDEMAND /RL HIGHEST /RU SYSTEM /TR $cmd | Out-Null
+        if ($exists) {
+            Write-Host "  Updated scheduled task: $taskName"
+        } else {
             Write-Host "  Created scheduled task: $taskName"
         }
 
         schtasks /Run /TN $taskName | Out-Null
         Write-Host "  Triggered scheduled task: $taskName"
-        Append-DeployLog "FULL_RESTART task=$taskName"
+        $logSd = if ($sdPart) { " SD=$SdWebuiBat" } else { '' }
+        Append-DeployLog "FULL_RESTART task=$taskName$logSd"
     }
 } catch {
     Append-DeployLog 'FAIL'
