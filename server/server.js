@@ -3026,8 +3026,22 @@ app.post("/api/ai/image", requireAuth, async (req, res) => {
         detail: String(e?.detail || "").trim().slice(0, 240) || undefined,
       });
     }
+    const causeMsg = String(e?.cause?.message || e?.cause || "");
+    const topMsg = String(e?.message || "");
+    const connHint =
+      e?.cause?.code === "ECONNREFUSED" ||
+      e?.code === "ECONNREFUSED" ||
+      /ECONNREFUSED|fetch failed|getaddrinfo|ENOTFOUND|ConnectTimeoutError/i.test(topMsg + causeMsg);
+    if (connHint) {
+      console.error("[sd] connect:", topMsg || causeMsg, e?.cause?.code || "");
+      return res.status(502).json({
+        error:
+          "Не удаётся достучаться до WebUI по SD_WEBUI_BASE_URL. Запусти Automatic1111 с --api, проверь порт (часто 7860) и что URL совпадает (например http://127.0.0.1:7860).",
+        detail: (topMsg || causeMsg).trim().slice(0, 240) || undefined,
+      });
+    }
     console.error("POST /api/ai/image", e);
-    res.status(500).json({ error: "Ошибка генерации" });
+    res.status(500).json({ error: "Ошибка генерации", detail: topMsg.trim().slice(0, 240) || undefined });
   }
 });
 
