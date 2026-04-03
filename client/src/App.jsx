@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Capacitor } from "@capacitor/core";
 import { LocalNotifications } from "@capacitor/local-notifications";
@@ -346,6 +346,75 @@ function readUserId() {
   if (!s) return null;
   const n = parseInt(s, 10);
   return Number.isFinite(n) ? n : null;
+}
+
+/** Дефолт режима push по slug (как `defaultPushModeForRoom` на сервере). */
+function defaultPushModeClient(slug) {
+  const s = String(slug || "").toLowerCase();
+  if (s.startsWith("dm-")) return "all";
+  if (s === "lobby") return "all";
+  return "off";
+}
+
+function effectivePushMode(slug, roomModes, globalEnabled) {
+  if (!globalEnabled) return "off";
+  const s = String(slug || "");
+  const m = roomModes?.[s];
+  if (m === "all" || m === "mentions" || m === "off") return m;
+  return defaultPushModeClient(s);
+}
+
+function foregroundPushAllowed(prefs, room, kind) {
+  const slug = String(room || "");
+  const mode = effectivePushMode(slug, prefs?.roomModes, prefs?.enabled !== false);
+  if (mode === "off") return false;
+  const k = String(kind || "message");
+  if (k === "mention") return mode === "mentions" || mode === "all";
+  if (k === "message") return mode === "all";
+  return mode !== "off";
+}
+
+const CHAT_MSG_CACHE_MAX = 24;
+function trimChatMessageCache(map) {
+  while (map.size > CHAT_MSG_CACHE_MAX) {
+    const k = map.keys().next().value;
+    if (k === undefined) break;
+    map.delete(k);
+  }
+}
+
+const AVATAR_OBJECT_URL_CACHE = new Map();
+function peekCachedAvatarUrl(userId) {
+  if (userId == null) return null;
+  return AVATAR_OBJECT_URL_CACHE.get(userId) ?? null;
+}
+function storeCachedAvatarUrl(userId, objectUrl) {
+  if (userId == null || !objectUrl) return;
+  const prev = AVATAR_OBJECT_URL_CACHE.get(userId);
+  if (prev && prev !== objectUrl) {
+    try {
+      URL.revokeObjectURL(prev);
+    } catch (_) {}
+  }
+  AVATAR_OBJECT_URL_CACHE.set(userId, objectUrl);
+}
+function invalidateCachedAvatarUrl(userId) {
+  if (userId == null) return;
+  const u = AVATAR_OBJECT_URL_CACHE.get(userId);
+  if (u) {
+    try {
+      URL.revokeObjectURL(u);
+    } catch (_) {}
+    AVATAR_OBJECT_URL_CACHE.delete(userId);
+  }
+}
+function clearAvatarObjectUrlCache() {
+  for (const u of AVATAR_OBJECT_URL_CACHE.values()) {
+    try {
+      URL.revokeObjectURL(u);
+    } catch (_) {}
+  }
+  AVATAR_OBJECT_URL_CACHE.clear();
 }
 
 function userIdFromToken(jwt) {
@@ -849,13 +918,18 @@ function MessageAttachment({ messageId, messageRoom, attachment, getAttachmentHe
 }
 
 function UserAvatarBubble({ userId, hasAvatar, getAuthHeaders, className }) {
-  const [url, setUrl] = useState(null);
+  const cached0 = userId != null && hasAvatar ? peekCachedAvatarUrl(userId) : null;
+  const [url, setUrl] = useState(() => cached0);
   useEffect(() => {
     if (!hasAvatar || userId == null) {
       setUrl(null);
       return undefined;
     }
-    let revoke = null;
+    const hit = peekCachedAvatarUrl(userId);
+    if (hit) {
+      setUrl(hit);
+      return undefined;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -865,32 +939,36 @@ function UserAvatarBubble({ userId, hasAvatar, getAuthHeaders, className }) {
         const blob = await res.blob();
         if (cancelled) return;
         const u = URL.createObjectURL(blob);
-        revoke = u;
+        storeCachedAvatarUrl(userId, u);
         setUrl(u);
       } catch {
-        setUrl(null);
+        if (!cancelled) setUrl(null);
       }
     })();
     return () => {
       cancelled = true;
-      if (revoke) URL.revokeObjectURL(revoke);
     };
   }, [userId, hasAvatar, getAuthHeaders]);
   if (url) {
-    return <img src={url} alt="" className={className} />;
+    return <img src={url} alt="" className={className} decoding="async" loading="lazy" />;
   }
   return <div className={`bg-tc-asphalt ${className}`} aria-hidden />;
 }
 
 /** Полноэкранный просмотр аватара (тот же эндпоинт, object-contain на весь экран). */
 function AvatarFullLightbox({ userId, hasAvatar, label, getAuthHeaders, onClose }) {
-  const [url, setUrl] = useState(null);
+  const cached0 = userId != null && hasAvatar ? peekCachedAvatarUrl(userId) : null;
+  const [url, setUrl] = useState(() => cached0);
   useEffect(() => {
     if (!hasAvatar || userId == null) {
       setUrl(null);
       return undefined;
     }
-    let revoke = null;
+    const hit = peekCachedAvatarUrl(userId);
+    if (hit) {
+      setUrl(hit);
+      return undefined;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -900,15 +978,14 @@ function AvatarFullLightbox({ userId, hasAvatar, label, getAuthHeaders, onClose 
         const blob = await res.blob();
         if (cancelled) return;
         const u = URL.createObjectURL(blob);
-        revoke = u;
+        storeCachedAvatarUrl(userId, u);
         setUrl(u);
       } catch {
-        setUrl(null);
+        if (!cancelled) setUrl(null);
       }
     })();
     return () => {
       cancelled = true;
-      if (revoke) URL.revokeObjectURL(revoke);
     };
   }, [userId, hasAvatar, getAuthHeaders]);
   return (
@@ -1193,6 +1270,7 @@ export default function App() {
       try {
         subRecv = await PushNotifications.addListener("pushNotificationReceived", (n) => {
           const room = n?.data?.room || n?.data?.roomSlug || n?.data?.slug;
+          const kind = n?.data?.kind || "message";
           const title = n?.title || "TatarChat";
           const body = n?.body || "";
           const focusedChat =
@@ -1202,6 +1280,7 @@ export default function App() {
             typeof document !== "undefined" &&
             document.visibilityState === "visible";
           if (!room || focusedChat) return;
+          if (!foregroundPushAllowed(pushPrefsRef.current, room, kind)) return;
           try {
             void LocalNotifications.schedule({
               notifications: [
@@ -1373,10 +1452,42 @@ export default function App() {
   const [chatImageLightbox, setChatImageLightbox] = useState(null);
   /** Счётчик упоминаний @ник по slug комнаты (как бейдж в Telegram). */
   const [mentionBadges, setMentionBadges] = useState({});
+  const [pushGlobalEnabled, setPushGlobalEnabled] = useState(true);
+  const [pushRoomModes, setPushRoomModes] = useState({});
+  const [pushPrefsSaving, setPushPrefsSaving] = useState(false);
+  const [notifySettingsOpen, setNotifySettingsOpen] = useState(false);
+  const pushPrefsRef = useRef({ enabled: true, roomModes: {} });
+  const pushGlobalEnabledRef = useRef(true);
+  const pushNotifyRoomRowsRef = useRef([]);
 
   const savedChannel = publicChannels.find((c) => c.isSaved) || null;
+  const pushNotifyRoomRows = useMemo(() => {
+    const seen = new Set();
+    const rows = [];
+    for (const c of publicChannels) {
+      const slug = c?.slug;
+      if (!slug || seen.has(slug)) continue;
+      seen.add(slug);
+      rows.push({ slug, title: c.title || slug });
+    }
+    for (const c of directChannels) {
+      const slug = c?.slug;
+      if (!slug || seen.has(slug)) continue;
+      seen.add(slug);
+      rows.push({ slug, title: c.title || "ЛС" });
+    }
+    return rows;
+  }, [publicChannels, directChannels]);
+  pushNotifyRoomRowsRef.current = pushNotifyRoomRows;
+
   const listRef = useRef(null);
   const chatBottomSentinelRef = useRef(null);
+  const latestMessagesRef = useRef([]);
+  const prevViewForChatCacheRef = useRef(activeView);
+  const prevActiveChatRoomRef = useRef(null);
+  const chatMessagesCacheRef = useRef(new Map());
+  const stickToBottomRef = useRef(true);
+  const pendingInitialScrollRef = useRef(false);
   const socketRef = useRef(null);
   const roomJoinedRef = useRef(false);
   const joinGenRef = useRef(0);
@@ -1670,6 +1781,7 @@ export default function App() {
         }
         setHasAvatar(true);
         localStorage.setItem(LS_HAS_AVATAR, "1");
+        invalidateCachedAvatarUrl(readUserId());
         setBanner(null);
       } catch {
         setBanner("Сеть: аватар");
@@ -1766,6 +1878,70 @@ export default function App() {
     }),
     [token, buildRoomHeaders]
   );
+
+  useEffect(() => {
+    pushGlobalEnabledRef.current = pushGlobalEnabled;
+  }, [pushGlobalEnabled]);
+
+  const loadPushPrefs = useCallback(async () => {
+    if (!token.trim()) return;
+    try {
+      const base = getApiBase();
+      const res = await fetch(`${base}/api/push/prefs`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      const enabled = data.enabled !== false;
+      const modes = {};
+      for (const r of data.rooms || []) {
+        if (r.roomSlug && r.mode) modes[String(r.roomSlug)] = String(r.mode);
+      }
+      setPushGlobalEnabled(enabled);
+      setPushRoomModes(modes);
+      pushPrefsRef.current = { enabled, roomModes: modes };
+      pushGlobalEnabledRef.current = enabled;
+    } catch (_) {}
+  }, [token]);
+
+  const flushPushPrefs = useCallback(
+    async (enabled, modes) => {
+      if (!token.trim()) return;
+      setPushPrefsSaving(true);
+      try {
+        const base = getApiBase();
+        const rows = pushNotifyRoomRowsRef.current;
+        const roomsPayload = rows.map(({ slug }) => ({
+          roomSlug: slug,
+          mode: modes[slug] ?? defaultPushModeClient(slug),
+        }));
+        const res = await fetch(`${base}/api/push/prefs`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ enabled, rooms: roomsPayload }),
+        });
+        if (res.ok) pushPrefsRef.current = { enabled, roomModes: { ...modes } };
+      } catch (_) {
+      } finally {
+        setPushPrefsSaving(false);
+      }
+    },
+    [token]
+  );
+
+  useEffect(() => {
+    if (!token.trim()) return;
+    void loadPushPrefs();
+  }, [token, loadPushPrefs]);
+
+  useEffect(() => {
+    if (!profileModalOpen || !token.trim()) return;
+    void loadPushPrefs();
+  }, [profileModalOpen, token, loadPushPrefs]);
+
+  useEffect(() => {
+    if (!token.trim()) return;
+    if (pushNotifyRoomRows.length === 0) return;
+    void loadPushPrefs();
+  }, [pushNotifyRoomRows.length, token, loadPushPrefs]);
 
   useEffect(() => {
     if (!token.trim()) {
@@ -2206,29 +2382,34 @@ export default function App() {
     ]
   );
 
+  useEffect(() => {
+    latestMessagesRef.current = messages;
+  }, [messages]);
+
   useLayoutEffect(() => {
-    if (activeView !== CHANNEL_VIEWS.chat) return;
+    if (personalAiOpen || activeView !== CHANNEL_VIEWS.chat) return;
     const root = listRef.current;
     if (!root) return;
-    const go = () => {
-      root.scrollTop = root.scrollHeight;
-    };
-    go();
-    requestAnimationFrame(() => {
-      go();
-      requestAnimationFrame(go);
+    const pinBottom = pendingInitialScrollRef.current || stickToBottomRef.current;
+    if (!pinBottom) return;
+    root.scrollTop = root.scrollHeight;
+    if (pendingInitialScrollRef.current) pendingInitialScrollRef.current = false;
+  }, [messages, activeRoom, activeView, personalAiOpen]);
+
+  useEffect(() => {
+    if (personalAiOpen || activeView !== CHANNEL_VIEWS.chat) return;
+    const root = listRef.current;
+    if (!root || typeof ResizeObserver === "undefined") return;
+    const inner = root.firstElementChild;
+    if (!inner) return;
+    const ro = new ResizeObserver(() => {
+      if (!stickToBottomRef.current && !pendingInitialScrollRef.current) return;
+      const r = listRef.current;
+      if (r) r.scrollTop = r.scrollHeight;
     });
-    const t1 = window.setTimeout(go, 80);
-    const t2 = window.setTimeout(go, 280);
-    const t3 = window.setTimeout(go, 520);
-    const t4 = window.setTimeout(go, 1100);
-    return () => {
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
-      window.clearTimeout(t3);
-      window.clearTimeout(t4);
-    };
-  }, [messages, activeRoom, activeView]);
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, [activeView, activeRoom, messages.length, personalAiOpen]);
 
   const loadHistoryForRoom = useCallback(
     async (room) => {
@@ -2286,13 +2467,34 @@ export default function App() {
   useEffect(() => {
     if (!token) return;
     if (personalAiOpen) {
+      if (
+        prevViewForChatCacheRef.current === CHANNEL_VIEWS.chat &&
+        latestMessagesRef.current.length > 0 &&
+        prevActiveChatRoomRef.current
+      ) {
+        chatMessagesCacheRef.current.set(prevActiveChatRoomRef.current, [...latestMessagesRef.current]);
+        trimChatMessageCache(chatMessagesCacheRef.current);
+      }
       setMessages([]);
       setBanner(null);
       return;
     }
+
+    const wasChat = prevViewForChatCacheRef.current === CHANNEL_VIEWS.chat;
+    if (wasChat && latestMessagesRef.current.length > 0 && prevActiveChatRoomRef.current) {
+      chatMessagesCacheRef.current.set(prevActiveChatRoomRef.current, [...latestMessagesRef.current]);
+      trimChatMessageCache(chatMessagesCacheRef.current);
+    }
+    prevViewForChatCacheRef.current = activeView;
+
     localStorage.setItem(LS_LAST_ROOM, activeRoom);
+
     if (activeView === CHANNEL_VIEWS.chat) {
-      setMessages([]);
+      prevActiveChatRoomRef.current = activeRoom;
+      const cached = chatMessagesCacheRef.current.get(activeRoom);
+      setMessages(cached?.length ? [...cached] : []);
+      pendingInitialScrollRef.current = true;
+      stickToBottomRef.current = true;
       loadHistoryForRoom(activeRoom);
     } else {
       setMessages([]);
@@ -2360,6 +2562,7 @@ export default function App() {
       if (/токен|вход|Unauthorized|invalid/i.test(msg)) {
         setBanner("Сессия недействительна. Войдите снова.");
         localStorage.removeItem(LS_TOKEN);
+        clearAvatarObjectUrlCache();
         setToken("");
       } else {
         setBanner("Нет соединения с сервером (Socket.io).");
@@ -2454,6 +2657,9 @@ export default function App() {
     socket.on("mention", (payload) => {
       if (!payload?.room) return;
       const room = payload.room;
+      const p = pushPrefsRef.current;
+      const mode = effectivePushMode(room, p.roomModes, p.enabled !== false);
+      if (mode === "off") return;
       const focusedChat =
         isSameChatRoom(activeRoomRef.current, room) &&
         activeViewRef.current === CHANNEL_VIEWS.chat &&
@@ -2563,6 +2769,7 @@ export default function App() {
       return;
     }
     const name = fallbackName;
+    clearAvatarObjectUrlCache();
     localStorage.setItem(LS_TOKEN, data.token);
     localStorage.setItem(LS_NICKNAME, data.user?.nickname || name);
     if (data.user?.id != null) {
@@ -2899,6 +3106,7 @@ export default function App() {
     localStorage.removeItem(LS_NICKNAME);
     localStorage.removeItem(LS_USER_ID);
     localStorage.removeItem(LS_LAST_ROOM);
+    clearAvatarObjectUrlCache();
     setToken("");
     setNickname("");
     setNameInput("");
@@ -3853,6 +4061,73 @@ export default function App() {
                 </div>
               </button>
 
+              {/* Push / уведомления */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setNotifySettingsOpen((v) => !v)}
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" fill="currentColor" aria-hidden>
+                    <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z" />
+                  </svg>
+                  <span className="flex-1 text-left">Уведомления</span>
+                  <svg viewBox="0 0 24 24" className={`h-4 w-4 shrink-0 transition-transform ${notifySettingsOpen ? "rotate-180" : ""}`} fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+                </button>
+                {notifySettingsOpen ? (
+                  <div className="mx-3 mb-2 space-y-2 border-b border-tc-border/40 pb-3">
+                    <label className="flex cursor-pointer items-center justify-between gap-2 rounded-lg px-1 py-1 text-xs text-tc-text-sec">
+                      <span>Уведомления на устройстве</span>
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-tc-accent"
+                        checked={pushGlobalEnabled}
+                        disabled={pushPrefsSaving}
+                        onChange={(e) => {
+                          const v = e.target.checked;
+                          setPushGlobalEnabled(v);
+                          pushGlobalEnabledRef.current = v;
+                          void flushPushPrefs(v, pushRoomModes);
+                        }}
+                      />
+                    </label>
+                    <p className="px-1 text-[10px] leading-snug text-tc-text-muted">
+                      Для «Семьи» и личных чатов по умолчанию приходят все сообщения; в остальных каналах — только если включите «Все».
+                    </p>
+                    <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
+                      {pushNotifyRoomRows.length === 0 ? (
+                        <p className="px-1 text-[11px] text-tc-text-muted">Каналы появятся после загрузки списка…</p>
+                      ) : (
+                        pushNotifyRoomRows.map(({ slug, title }) => (
+                          <div key={slug} className="rounded-lg bg-tc-input/40 px-2 py-1.5">
+                            <p className="mb-1 truncate text-[11px] font-medium text-tc-text">{title}</p>
+                            <select
+                              className="w-full rounded-md border border-tc-border bg-tc-input px-2 py-1.5 text-xs text-tc-text outline-none focus:border-tc-accent"
+                              value={pushRoomModes[slug] ?? defaultPushModeClient(slug)}
+                              disabled={pushPrefsSaving}
+                              onChange={(e) => {
+                                const mode = e.target.value;
+                                if (mode !== "all" && mode !== "mentions" && mode !== "off") return;
+                                setPushRoomModes((prev) => {
+                                  const next = { ...prev, [slug]: mode };
+                                  void flushPushPrefs(pushGlobalEnabledRef.current, next);
+                                  return next;
+                                });
+                              }}
+                            >
+                              <option value="all">Все сообщения</option>
+                              <option value="mentions">Только @упоминания</option>
+                              <option value="off">Выключено</option>
+                            </select>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    {pushPrefsSaving ? <p className="text-center text-[10px] text-tc-text-muted">Сохраняю…</p> : null}
+                  </div>
+                ) : null}
+              </div>
+
               {/* Admin */}
               {imAdmin && (
                 <button
@@ -4208,6 +4483,12 @@ export default function App() {
           <div
             ref={listRef}
             className="messages-scroll relative z-10 w-full min-w-0 flex-1 overflow-y-auto bg-transparent px-4 py-3"
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              const slack = 120;
+              const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+              stickToBottomRef.current = dist <= slack;
+            }}
             onClick={(e) => { if (e.target === e.currentTarget) setSelectedMsgId(null); }}
           >
           {messages.length === 0 ? (
