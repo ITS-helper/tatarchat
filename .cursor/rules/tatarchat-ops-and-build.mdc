@@ -7,7 +7,7 @@ alwaysApply: true
 
 ## Прод-сервер (один диск C:)
 
-На релизном хосте нет D: — репозиторий `C:\tatarchat`, Caddy `C:\caddy`. SSH-деплой, `TATARCHAT_SD_WEBUI_BAT` и прочее: `scripts/REMOTE-DEPLOY-RU.txt` (раздел **4b**).
+На релизном хосте нет D: — репозиторий `C:\tatarchat`, Caddy `C:\caddy`. SSH-деплой, `TATARCHAT_SD_WEBUI_BAT` и прочее: `scripts/REMOTE-DEPLOY-RU.txt` (**4b**, **4c** — SD/A1111). Полный текст про генерацию: `tatarchat-recent-features.mdc` → «Генерация картинок».
 
 ## Запуск на Windows (локально + домен)
 

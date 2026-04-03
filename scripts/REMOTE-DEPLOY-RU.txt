@@ -103,6 +103,28 @@ Node поднимается через Win32_Process.Create (не через Sta
   пересоздастся уже с нужным интерпретатором). Python 3.14 для этого WebUI не подходит.
 
 ---------------------------------------------------------------------------
+4c) Stable Diffusion (A1111) — связка с TatarChat и типовые проблемы
+---------------------------------------------------------------------------
+Полная схема и нюансы — в .cursor/rules/tatarchat-recent-features.mdc, раздел
+«Генерация картинок (Stable Diffusion, txt2img)». Кратко для сервера:
+
+- TatarChat: в .env Node задать SD_WEBUI_BASE_URL=http://127.0.0.1:7860 (порт
+  как у WebUI), перезапуск Node. localhost в URL на стороне Node подменяется
+  на 127.0.0.1 (IPv4).
+- WebUI: webui-user.bat — set PYTHON=... (3.10/3.11), COMMANDLINE_ARGS=--api
+  --listen --port 7860 (не писать «--listen 127.0.0.1»; при необходимости
+  добавить --server-name 127.0.0.1). Запуск только из папки stable-diffusion-webui.
+- Репозиторий Stability-AI/stablediffusion недоступен с GitHub — в webui-user.bat:
+  set STABLE_DIFFUSION_REPO=https://github.com/w-e-w/stablediffusion.git
+- Ошибка pkg_resources при установке CLIP: в venv setuptools==69.5.1, опционально
+  pip install --no-build-isolation на zip CLIP или PIP_NO_BUILD_ISOLATION=1.
+- Модель для сайта = та, что выбрана в выпадающем списке checkpoint в окне WebUI;
+  файлы класть в models\Stable-diffusion\.
+- start.bat репозитория tatarchat: Node из каталога server\ (server.js). Если
+  видишь Cannot find module '...\tatarchat\server.js' — исправь батник/задачу
+  планировщика: не node ...\tatarchat\server.js, а cd в server и node server.js.
+
+---------------------------------------------------------------------------
 5) Если Tailscale не хочешь
 ---------------------------------------------------------------------------
 - Открыть на роутере TCP 22 на IP сервера (как для 443) — риск брутфорса;

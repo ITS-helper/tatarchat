@@ -1,5 +1,5 @@
 ---
-description: Недавние доработки чата, мобильной вёрстки и упоминаний @ — контекст для ассистента
+description: Недавние доработки чата, мобильной вёрстки, упоминаний @, ассистента Ollama и генерации картинок SD — контекст для ассистента
 alwaysApply: true
 ---
 
@@ -55,11 +55,48 @@ alwaysApply: true
   - Модель (пер‑пользователя): таблица **`user_ollama_prefs`** + `POST /api/ai/chat { setModel }`, `GET /api/ai/chat` отдаёт `model` и `availableModels`.
   - Память фактов: таблица **`user_ai_facts`** + API **`GET/POST/DELETE /api/ai/facts`**; факты подмешиваются в **system** перед каждым ответом.
   - HTTP к локальному API модели: `POST …/api/chat` (URL, таймаут, список моделей и лимиты — константы/`process.env` в начале **`server/server.js`**, наружу не прокидывать). Свой базовый промпт: опционально **`AI_SYSTEM_PROMPT`** (полностью подменяет встроенный; в коде читается и прежний одноимённый ключ из env для обратной совместимости).
-  - **Картинки (txt2img):** локальный **Automatic1111** с **`--api`**. Env **`SD_WEBUI_BASE_URL`** (или **`A1111_BASE_URL`**, например `http://127.0.0.1:7860`). **`POST /api/ai/image`** (JWT) → прокси **`/sdapi/v1/txt2img`**. Опционально **`SD_WEBUI_TIMEOUT_MS`**, **`MAX_SD_PROMPT_CHARS`**, **`SD_MAX_STEPS`**, **`SD_MAX_SIDE`**. **`GET /api/ai/chat`** отдаёт **`imageGenAvailable`**. UI: сайдбар **Личное** → под **«Ассистент»** пункт **«Картинка (SD)»** (`personalSdOpen`), экран **`client/src/PersonalSdImage.jsx`**.
+  - **Картинки (txt2img):** см. отдельный раздел **«Генерация картинок (Stable Diffusion)»** ниже.
 - **Поиск в интернете (опционально):** в **`POST /api/ai/chat`** флаг **`search: true`** — сначала [Tavily Search API](https://docs.tavily.com/) (`POST https://api.tavily.com/search`, **`Authorization: Bearer TAVILY_API_KEY`**), выдержки в **system** (в БД только user/assistant). При ответе по выдержкам в промпте учитывается контекст **России**. Env: **`TAVILY_API_KEY`**, опционально **`TAVILY_SEARCH_DEPTH`**, **`TAVILY_MAX_RESULTS`**, **`TAVILY_TIMEOUT_MS`**.
   - UI: чекбокс «Искать в интернете» (localStorage **`tatarchat_ai_web_search`**), индикатор **«Думаю… / Ищу и думаю…»**; ответ разбит по группам (`##`), голые URL сжимаются в `[текст](url)`, блок **«Источники»** в **`details`**.
   - Картинки: запрос Tavily с `include_images`; сервер фильтрует битые URL, клиент показывает сетку **«Картинки по теме поиска»** и открывает их в **превью‑лайтбоксе** внутри чата.
   - Источники: в ответе ассистента не должно быть `[1]` внутри текста — ссылки оформляются кратко в конце блоком **«Источники»**.
+
+## Генерация картинок (Stable Diffusion, txt2img)
+
+Связка: **браузер** → **Node TatarChat** (`POST /api/ai/image`, JWT) → **локальный Automatic1111** (`POST /sdapi/v1/txt2img`). Оба процесса на **одном ПК** (loopback). WebUI должен быть **запущен**, пока нужна генерация с сайта.
+
+### Клиент (`client`)
+
+- Сайдбар **Личное** → **«Картинка (SD)»** (`personalSdOpen` в **`App.jsx`**). Экран **`PersonalSdImage.jsx`**: промпт, негатив, шаги, размер, превью, скачивание, лайтбокс.
+- Флаг **`imageGenAvailable`** приходит с **`GET /api/ai/chat`** (и не относится к блоку SD в ассистенте — генерация вынесена в отдельный пункт меню).
+- **Промпты:** обычные checkpoint’ы лучше понимают **английские теги** (`a cute dog, fluffy, outdoor…`), а не русские команды вроде «нарисуй собаку» — иначе результат случайный.
+
+### Сервер TatarChat (`server/server.js`)
+
+- **Код:** `normalizeSdWebUiBaseUrl`, `isSdWebUiConfigured`, `callSdWebUiTxt2img`, маршрут **`POST /api/ai/image`**; в ответах **`GET/POST /api/ai/chat`** поле **`imageGenAvailable`**.
+- **Включение:** в `.env` задать **`SD_WEBUI_BASE_URL=http://127.0.0.1:7860`** (или **`A1111_BASE_URL`**). Пустое значение → в UI нет пункта генерации (`imageGenAvailable: false`).
+- **Нормализация URL:** `localhost` в базовом URL подменяется на **`127.0.0.1`** при старте Node (избежание IPv6 `::1`, когда WebUI слушает только IPv4).
+- **API:** **`POST /api/ai/image`** (`requireAuth`) — тело: `prompt`, опционально `negative_prompt` / `negativePrompt`, `steps`, `width`, `height`. Прокси в A1111: sampler **Euler a**, `cfg_scale: 7`, `send_images: true`.
+- **Лимиты env:** **`SD_WEBUI_TIMEOUT_MS`**, **`MAX_SD_PROMPT_CHARS`**, **`SD_MAX_STEPS`**, **`SD_MAX_SIDE`**.
+- **Ошибки:** при обрыве связи с WebUI — **502** с текстом про адрес/порт/`--api`; при таймауте — **504**. В логе старта при настроенном SD: строка **`[sd] SD_WEBUI_BASE_URL=...`**.
+- **Модель чекпоинта** в запросе **не передаётся** — используется **тот checkpoint, который сейчас выбран и загружен в UI WebUI** (выпадающий список вверху Gradio).
+
+### Automatic1111 на машине с Node
+
+- **Запуск с API:** в **`webui-user.bat`** задать **`COMMANDLINE_ARGS=--api --listen --port 7860`** (порт подставить свой). Флаг **`--listen` без аргумента**; нельзя писать **`--listen 127.0.0.1`** — парсер выдаст `unrecognized arguments`. При необходимости только localhost: добавить **`--server-name 127.0.0.1`**.
+- **`set PYTHON=`** — полный путь к **python.exe 3.10.x или 3.11.x** (не 3.14: нет колёс `torch==2.1.2`). Не оставлять второй строкой **`set PYTHON=`** без значения (обнуляет путь).
+- Запуск батника **из каталога WebUI** (`cd /d C:\...\stable-diffusion-webui` → `webui-user.bat`) или двойной щелчок из проводника в этой папке — иначе ищется `launch.py` в `System32`.
+- **Репозиторий Stability-AI:** `Stability-AI/stablediffusion` может отдавать 404 при клоне. В **`webui-user.bat`** до `call webui.bat`: **`set STABLE_DIFFUSION_REPO=https://github.com/w-e-w/stablediffusion.git`** (или другой доверенный mirror; см. обсуждения AUTOMATIC1111 на GitHub). При ошибке удалить частично клонированную папку под **`repositories\stable-diffusion-stability-ai`** и повторить.
+- **pip / CLIP:** ошибка **`No module named 'pkg_resources'`** при сборке CLIP — в venv: `pip install "setuptools==69.5.1"` и при необходимости **`pip install --no-build-isolation`** на zip CLIP; опционально **`set PIP_NO_BUILD_ISOLATION=1`** в `webui-user.bat` после фикса setuptools.
+- **Git:** клон репозиториев может открыть окно **Git Credential Manager** — для публичных реп обычно достаточно войти в GitHub в браузере.
+- **Windows:** отключить псевдонимы **python.exe** / **python3.exe** из Microsoft Store (Параметры → приложения → псевдонимы), если мешают **`python`** в PATH.
+- **xformers:** необязателен; без него в логе `no module 'xformers'. Processing without...`.
+- **Другая модель картинок:** скачать **`.safetensors`** / **`.ckpt`** → **`models\Stable-diffusion\`** → выбрать в выпадающем списке в WebUI; для сайта меняется автоматически (тот же API-сессия).
+
+### Деплой и автозапуск
+
+- После полного рестарта хоста WebUI можно поднимать через **`deploy-pull.ps1 -FullRestart`** и env **`TATARCHAT_SD_WEBUI_BAT`** (путь к **`webui-user.bat`**). Подробнее и пути только **C:** — **`scripts/REMOTE-DEPLOY-RU.txt`** (разделы **4b**, **4c**).
+- **`start.bat`** в корне репозитория запускает Node из **`server\`**: **`cd ...\server`** и **`node server.js`**. Ошибка `Cannot find module '...\tatarchat\server.js'` — на машине устаревший батник/задача, указывающая на корень без папки **`server`**.
 
 ## Push / уведомления (server + client)
 
