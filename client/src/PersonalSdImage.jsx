@@ -102,7 +102,9 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
         ) : (
           <div className="space-y-4">
             <p className="text-center text-xs text-tc-text-muted">
-              txt2img через Automatic1111 на сервере. На 8 ГБ VRAM при OOM уменьши размер или шаги.
+              txt2img через Automatic1111. Обычные модели лучше понимают{" "}
+              <span className="font-medium text-tc-text-sec">английские теги</span>, а не фразы вроде «нарисуй
+              собаку» — иначе картинка может «плавать». На 8 ГБ VRAM при OOM уменьши размер или шаги.
             </p>
             {sdGenerating ? (
               <div className="flex justify-center">
@@ -212,7 +214,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
               className="tc-msg-input min-h-[52px] w-full resize-y rounded-lg border border-tc-border bg-tc-input px-3 py-2 text-sm text-tc-text outline-none placeholder:text-tc-text-muted focus:ring-2 focus:ring-tc-accent/50"
               value={sdPrompt}
               onChange={(e) => setSdPrompt(e.target.value)}
-              placeholder="Промпт: что нарисовать (англ. или рус. — как настроена модель)"
+              placeholder="Например: a cute dog, fluffy fur, sitting, outdoor, soft light, detailed"
               maxLength={1500}
               rows={2}
               disabled={sdGenerating}
