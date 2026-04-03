@@ -38,7 +38,21 @@ const OLLAMA_HTTP_TIMEOUT_MS = Math.min(Math.max(Number(process.env.OLLAMA_HTTP_
 const TAVILY_API_KEY = String(process.env.TAVILY_API_KEY || "").trim();
 const TAVILY_TIMEOUT_MS = Math.min(Math.max(Number(process.env.TAVILY_TIMEOUT_MS) || 25_000, 5000), 120_000);
 /** Automatic1111 WebUI: `http://127.0.0.1:7860` + `--api` в webui-user.bat */
-const SD_WEBUI_BASE_URL = String(process.env.SD_WEBUI_BASE_URL || process.env.A1111_BASE_URL || "").replace(/\/$/, "");
+function normalizeSdWebUiBaseUrl(raw) {
+  const s = String(raw || "")
+    .trim()
+    .replace(/\/$/, "");
+  if (!s) return "";
+  try {
+    const u = new URL(s);
+    // Node fetch часто бьёт в ::1 для "localhost", а A1111 с --listen 127.0.0.1 слушает только IPv4 → "fetch failed"
+    if (u.hostname === "localhost") u.hostname = "127.0.0.1";
+    return u.toString().replace(/\/$/, "");
+  } catch {
+    return s;
+  }
+}
+const SD_WEBUI_BASE_URL = normalizeSdWebUiBaseUrl(process.env.SD_WEBUI_BASE_URL || process.env.A1111_BASE_URL || "");
 const SD_WEBUI_TIMEOUT_MS = Math.min(Math.max(Number(process.env.SD_WEBUI_TIMEOUT_MS) || 300_000, 45_000), 900_000);
 const MAX_SD_PROMPT_CHARS = Math.min(Math.max(Number(process.env.MAX_SD_PROMPT_CHARS) || 1500, 200), 4000);
 const SD_MAX_STEPS = Math.min(Math.max(Number(process.env.SD_MAX_STEPS) || 28, 8), 45);
@@ -3036,7 +3050,7 @@ app.post("/api/ai/image", requireAuth, async (req, res) => {
       console.error("[sd] connect:", topMsg || causeMsg, e?.cause?.code || "");
       return res.status(502).json({
         error:
-          "Не удаётся достучаться до WebUI по SD_WEBUI_BASE_URL. Запусти Automatic1111 с --api, проверь порт (часто 7860) и что URL совпадает (например http://127.0.0.1:7860).",
+          "Не удаётся достучаться до WebUI. Запусти Automatic1111 с --api; в браузере на этом ПК должно открываться http://127.0.0.1:7860/docs . Порт в SD_WEBUI_BASE_URL должен совпадать. В .env лучше указывать 127.0.0.1, не localhost (иначе Node иногда ходит в IPv6 ::1, а WebUI слушает только IPv4).",
         detail: (topMsg || causeMsg).trim().slice(0, 240) || undefined,
       });
     }
@@ -4740,6 +4754,9 @@ async function start() {
   ensureUploadDirs();
   server.listen(PORT, () => {
     console.log(`Сервер: http://localhost:${PORT}`);
+    if (SD_WEBUI_BASE_URL) {
+      console.log(`[sd] SD_WEBUI_BASE_URL=${SD_WEBUI_BASE_URL} (localhost в .env подменяется на 127.0.0.1)`);
+    }
   });
 }
 
