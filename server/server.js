@@ -67,6 +67,8 @@ const SD_SAMPLER_INDEX = String(process.env.SD_SAMPLER_INDEX || "Euler a").trim(
 const SD_RESTORE_FACES =
   String(process.env.SD_RESTORE_FACES || "").toLowerCase() === "1" ||
   String(process.env.SD_RESTORE_FACES || "").toLowerCase() === "true";
+/** Имя файла чекпоинта как в выпадающем списке WebUI/Forge (принудительная подгрузка по API; см. SD_MODEL_CHECKPOINT). */
+const SD_MODEL_CHECKPOINT = String(process.env.SD_MODEL_CHECKPOINT || "").trim();
 /** Погода в сайдбаре: прокси к api.met.no (Gismeteo — только с коммерческим API‑ключом). */
 const WEATHER_HTTP_TIMEOUT_MS = Math.min(Math.max(Number(process.env.WEATHER_HTTP_TIMEOUT_MS) || 12_000, 3000), 30_000);
 const MET_NO_USER_AGENT = String(process.env.MET_NO_USER_AGENT || "TatarChat/1.0 (weather sidebar; contact: server admin)").trim();
@@ -1008,6 +1010,33 @@ function sanitizeSdPrompt(s, maxLen) {
     .slice(0, maxLen);
 }
 
+/** Разбор тела ответа WebUI при HTTP 4xx/5xx (часто JSON с полем message). */
+function extractSdWebUiHttpErrorText(txt) {
+  if (!txt || typeof txt !== "string") return "";
+  const s = txt.trim().slice(0, 4000);
+  if (!s) return "";
+  try {
+    const j = JSON.parse(s);
+    const m = j?.message ?? j?.error ?? j?.detail;
+    if (typeof m === "string" && m.trim()) return m.trim().slice(0, 800);
+    if (m != null && typeof m !== "object") return String(m).trim().slice(0, 800);
+    if (j?.errors != null) return String(typeof j.errors === "string" ? j.errors : JSON.stringify(j.errors)).slice(0, 800);
+  } catch {
+    /* not JSON */
+  }
+  return s.slice(0, 800);
+}
+
+function buildSdWebUiPayloadBase(extra) {
+  const payload = { ...extra };
+  if (SD_MODEL_CHECKPOINT) {
+    const prev =
+      payload.override_settings && typeof payload.override_settings === "object" ? payload.override_settings : {};
+    payload.override_settings = { ...prev, sd_model_checkpoint: SD_MODEL_CHECKPOINT };
+  }
+  return payload;
+}
+
 /**
  * Прокси к A1111 POST /sdapi/v1/txt2img → { base64, mime } или throw.
  */
@@ -1016,7 +1045,7 @@ async function callSdWebUiTxt2img({ prompt, negativePrompt, steps, width, height
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), SD_WEBUI_TIMEOUT_MS);
   try {
-    const payload = {
+    const payload = buildSdWebUiPayloadBase({
       prompt,
       negative_prompt: negativePrompt || "",
       steps,
@@ -1026,7 +1055,7 @@ async function callSdWebUiTxt2img({ prompt, negativePrompt, steps, width, height
       sampler_index: SD_SAMPLER_INDEX,
       restore_faces: SD_RESTORE_FACES,
       send_images: true,
-    };
+    });
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1042,13 +1071,16 @@ async function callSdWebUiTxt2img({ prompt, negativePrompt, steps, width, height
     }
     if (!res.ok) {
       const err = new Error(`sd_webui_http_${res.status}`);
-      err.detail = (txt || "").slice(0, 500);
+      err.detail = extractSdWebUiHttpErrorText(txt) || (txt || "").slice(0, 500);
       throw err;
     }
     const b64 = data?.images?.[0];
     if (typeof b64 !== "string" || !b64.length) {
       const err = new Error("sd_webui_no_image");
-      err.detail = typeof data?.error === "string" ? data.error : JSON.stringify(data).slice(0, 300);
+      err.detail =
+        extractSdWebUiHttpErrorText(txt) ||
+        (typeof data?.message === "string" ? data.message : "") ||
+        (typeof data?.error === "string" ? data.error : JSON.stringify(data).slice(0, 300));
       throw err;
     }
     return { base64: b64, mimeType: "image/png" };
@@ -1075,7 +1107,7 @@ async function callSdWebUiImg2img({
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), SD_WEBUI_TIMEOUT_MS);
   try {
-    const payload = {
+    const payload = buildSdWebUiPayloadBase({
       init_images: [initImageBase64],
       prompt,
       negative_prompt: negativePrompt || "",
@@ -1088,7 +1120,7 @@ async function callSdWebUiImg2img({
       send_images: true,
       denoising_strength: denoisingStrength,
       resize_mode: 0,
-    };
+    });
     if (typeof maskBase64 === "string" && maskBase64.length > 0) {
       payload.mask = maskBase64;
       payload.mask_blur = 4;
@@ -1112,13 +1144,16 @@ async function callSdWebUiImg2img({
     }
     if (!res.ok) {
       const err = new Error(`sd_webui_http_${res.status}`);
-      err.detail = (txt || "").slice(0, 500);
+      err.detail = extractSdWebUiHttpErrorText(txt) || (txt || "").slice(0, 500);
       throw err;
     }
     const b64 = data?.images?.[0];
     if (typeof b64 !== "string" || !b64.length) {
       const err = new Error("sd_webui_no_image");
-      err.detail = typeof data?.error === "string" ? data.error : JSON.stringify(data).slice(0, 300);
+      err.detail =
+        extractSdWebUiHttpErrorText(txt) ||
+        (typeof data?.message === "string" ? data.message : "") ||
+        (typeof data?.error === "string" ? data.error : JSON.stringify(data).slice(0, 300));
       throw err;
     }
     return { base64: b64, mimeType: "image/png" };
@@ -1133,10 +1168,16 @@ function handleSdProxyError(e, res, logLabel) {
   }
   if (String(e?.message || "").startsWith("sd_webui_")) {
     console.error(`[sd] ${logLabel}:`, e?.detail || e?.message);
+    const det = String(e?.detail || "").trim();
+    const hintSd =
+      /sd_checkpoint_info|NoneType.*checkpoint/i.test(det)
+        ? " В WebUI выбери FLUX/чекпоинт и сделай один txt2img вручную; при Forge после сбоя загрузки иногда помогает переключить модель и назад. Либо в .env Node задай SD_MODEL_CHECKPOINT=имя_файла.safetensors как в списке моделей."
+        : "";
     return res.status(502).json({
       error:
-        "Локальный Web UI генерации недоступен или вернул ошибку. Запусти стек (например C:\\sd\\run.bat) с включённым API и проверь адрес в SD_WEBUI_BASE_URL.",
-      detail: String(e?.detail || "").trim().slice(0, 240) || undefined,
+        "Локальный Web UI генерации недоступен или вернул ошибку. Запусти стек (например C:\\sd\\run.bat) с включённым API и проверь адрес в SD_WEBUI_BASE_URL." +
+        hintSd,
+      detail: det.slice(0, 480) || undefined,
     });
   }
   const causeMsg = String(e?.cause?.message || e?.cause || "");
@@ -4923,6 +4964,7 @@ async function start() {
       console.log(
         `[sd] SD_WEBUI_BASE_URL=${SD_WEBUI_BASE_URL} cfg_scale=${SD_CFG_SCALE} sampler_index=${JSON.stringify(SD_SAMPLER_INDEX)}`
       );
+      if (SD_MODEL_CHECKPOINT) console.log(`[sd] SD_MODEL_CHECKPOINT=${JSON.stringify(SD_MODEL_CHECKPOINT)}`);
     }
   });
 }

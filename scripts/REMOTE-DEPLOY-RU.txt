@@ -125,6 +125,8 @@ Node поднимается через Win32_Process.Create (не через Sta
 - img2img / inpaint с сайта: POST /api/ai/image/img2img (multipart: source, опционально mask).
 - FLUX: стабильный txt2img в UI → затем при необходимости SD_CFG_SCALE=1,
   SD_SAMPLER_INDEX=Euler в .env Node (имя сэмплера — GET /sdapi/v1/samplers).
+  Если API даёт sd_checkpoint_info / NoneType — один раз сгенерировать в UI или
+  задать SD_MODEL_CHECKPOINT=файл.safetensors как в списке моделей.
   Подробнее — tatarchat-recent-features.mdc, подраздел FLUX.
 
 ---------------------------------------------------------------------------
