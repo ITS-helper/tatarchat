@@ -57,6 +57,15 @@ const SD_WEBUI_TIMEOUT_MS = Math.min(Math.max(Number(process.env.SD_WEBUI_TIMEOU
 const MAX_SD_PROMPT_CHARS = Math.min(Math.max(Number(process.env.MAX_SD_PROMPT_CHARS) || 1500, 200), 4000);
 const SD_MAX_STEPS = Math.min(Math.max(Number(process.env.SD_MAX_STEPS) || 28, 8), 45);
 const SD_MAX_SIDE = Math.min(Math.max(Number(process.env.SD_MAX_SIDE) || 768, 320), 1024);
+/** Параметры прокси к A1111; для FLUX часто SD_CFG_SCALE=1 и SD_SAMPLER_INDEX=Euler */
+const SD_CFG_SCALE_RAW = Number(process.env.SD_CFG_SCALE);
+const SD_CFG_SCALE = Number.isFinite(SD_CFG_SCALE_RAW)
+  ? Math.max(1, Math.min(30, SD_CFG_SCALE_RAW))
+  : 7;
+const SD_SAMPLER_INDEX = String(process.env.SD_SAMPLER_INDEX || "Euler a").trim() || "Euler a";
+const SD_RESTORE_FACES =
+  String(process.env.SD_RESTORE_FACES || "").toLowerCase() === "1" ||
+  String(process.env.SD_RESTORE_FACES || "").toLowerCase() === "true";
 /** Погода в сайдбаре: прокси к api.met.no (Gismeteo — только с коммерческим API‑ключом). */
 const WEATHER_HTTP_TIMEOUT_MS = Math.min(Math.max(Number(process.env.WEATHER_HTTP_TIMEOUT_MS) || 12_000, 3000), 30_000);
 const MET_NO_USER_AGENT = String(process.env.MET_NO_USER_AGENT || "TatarChat/1.0 (weather sidebar; contact: server admin)").trim();
@@ -1012,9 +1021,9 @@ async function callSdWebUiTxt2img({ prompt, negativePrompt, steps, width, height
       steps,
       width,
       height,
-      cfg_scale: 7,
-      sampler_index: "Euler a",
-      restore_faces: false,
+      cfg_scale: SD_CFG_SCALE,
+      sampler_index: SD_SAMPLER_INDEX,
+      restore_faces: SD_RESTORE_FACES,
       send_images: true,
     };
     const res = await fetch(url, {
@@ -1072,9 +1081,9 @@ async function callSdWebUiImg2img({
       steps,
       width,
       height,
-      cfg_scale: 7,
-      sampler_index: "Euler a",
-      restore_faces: false,
+      cfg_scale: SD_CFG_SCALE,
+      sampler_index: SD_SAMPLER_INDEX,
+      restore_faces: SD_RESTORE_FACES,
       send_images: true,
       denoising_strength: denoisingStrength,
       resize_mode: 0,
@@ -4909,7 +4918,9 @@ async function start() {
   server.listen(PORT, () => {
     console.log(`Сервер: http://localhost:${PORT}`);
     if (SD_WEBUI_BASE_URL) {
-      console.log(`[sd] SD_WEBUI_BASE_URL=${SD_WEBUI_BASE_URL} (localhost в .env подменяется на 127.0.0.1)`);
+      console.log(
+        `[sd] SD_WEBUI_BASE_URL=${SD_WEBUI_BASE_URL} cfg_scale=${SD_CFG_SCALE} sampler_index=${JSON.stringify(SD_SAMPLER_INDEX)}`
+      );
     }
   });
 }

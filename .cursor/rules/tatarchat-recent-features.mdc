@@ -76,8 +76,8 @@ alwaysApply: true
 - **Код:** `normalizeSdWebUiBaseUrl`, `isSdWebUiConfigured`, `callSdWebUiTxt2img`, **`callSdWebUiImg2img`**, **`handleSdProxyError`**, **`uploadSdImg2img`**, маршруты **`POST /api/ai/image`** и **`POST /api/ai/image/img2img`**; в ответах **`GET/POST /api/ai/chat`** поле **`imageGenAvailable`**.
 - **Включение:** в `.env` задать **`SD_WEBUI_BASE_URL=http://127.0.0.1:7860`** (или **`A1111_BASE_URL`**). Пустое значение → в UI нет пункта генерации (`imageGenAvailable: false`).
 - **Нормализация URL:** `localhost` в базовом URL подменяется на **`127.0.0.1`** при старте Node (избежание IPv6 `::1`, когда WebUI слушает только IPv4).
-- **API:** **`POST /api/ai/image`** (`requireAuth`, JSON) — `prompt`, опционально `negative_prompt` / `negativePrompt`, `steps`, `width`, `height` → **`txt2img`**. **`POST /api/ai/image/img2img`** (`requireAuth`, **`multipart/form-data`**) — файл **`source`** (обязательно), **`mask`** (опционально: при наличии в A1111 включается инпainting с `inpaint_full_res`, `mask_blur` и т.д.; в WebUI обычно **белое** на маске = зона перерисовки). Текстовые поля формы: `prompt`, `negative_prompt`, `steps`, `width`, `height`, `denoising_strength` (0.05–0.95). Лимит размера файлов — как у **AI-картинки** в чат (`MAX_AI_IMAGE_MB`). Прокси: sampler **Euler a**, `cfg_scale: 7`, `send_images: true`.
-- **Лимиты env:** **`SD_WEBUI_TIMEOUT_MS`**, **`MAX_SD_PROMPT_CHARS`**, **`SD_MAX_STEPS`**, **`SD_MAX_SIDE`**.
+- **API:** **`POST /api/ai/image`** (`requireAuth`, JSON) — `prompt`, опционально `negative_prompt` / `negativePrompt`, `steps`, `width`, `height` → **`txt2img`**. **`POST /api/ai/image/img2img`** (`requireAuth`, **`multipart/form-data`**) — файл **`source`** (обязательно), **`mask`** (опционально: при наличии в A1111 включается инпainting с `inpaint_full_res`, `mask_blur` и т.д.; в WebUI обычно **белое** на маске = зона перерисовки). Текстовые поля формы: `prompt`, `negative_prompt`, `steps`, `width`, `height`, `denoising_strength` (0.05–0.95). Лимит размера файлов — как у **AI-картинки** в чат (`MAX_AI_IMAGE_MB`). Прокси в WebUI: **`cfg_scale`**, **`sampler_index`**, **`restore_faces`** задаются env (см. ниже), плюс `send_images: true`.
+- **Лимиты env:** **`SD_WEBUI_TIMEOUT_MS`**, **`MAX_SD_PROMPT_CHARS`**, **`SD_MAX_STEPS`**, **`SD_MAX_SIDE`**, **`SD_CFG_SCALE`** (1–30, по умолчанию **7**), **`SD_SAMPLER_INDEX`** (строка, по умолчанию **`Euler a`** — имя как в **`GET /sdapi/v1/samplers`**), **`SD_RESTORE_FACES`** (`1` / `true` — редко нужно для FLUX).
 - **Ошибки:** при обрыве связи с WebUI — **502** с текстом про адрес/порт/`--api`; при таймауте — **504**. В логе старта при настроенном SD: строка **`[sd] SD_WEBUI_BASE_URL=...`**.
 - **Модель чекпоинта** в запросе **не передаётся** — используется **тот checkpoint, который сейчас выбран и загружен в UI WebUI** (выпадающий список вверху Gradio).
 
@@ -92,6 +92,13 @@ alwaysApply: true
 - **Windows:** отключить псевдонимы **python.exe** / **python3.exe** из Microsoft Store (Параметры → приложения → псевдонимы), если мешают **`python`** в PATH.
 - **xformers:** необязателен; без него в логе `no module 'xformers'. Processing without...`.
 - **Другая модель картинок:** скачать **`.safetensors`** / **`.ckpt`** → **`models\Stable-diffusion\`** → выбрать в выпадающем списке в WebUI; для сайта меняется автоматически (тот же API-сессия).
+
+#### FLUX в WebUI (стабильная работа + TatarChat)
+
+- **Сборка:** в «чистом» **AUTOMATIC1111** поддержка FLUX долго шла отдельными PR; часто проще взять ветку/форк, где FLUX уже вмержен (см. [PR про FLUX](https://github.com/AUTOMATIC1111/stable-diffusion-webui/pull/16484)), или **Stable Diffusion WebUI Forge** / **SD.Next** по их инструкциям — пока руками в UI **txt2img** с выбранным FLUX-чекпоинтом не даёт стабильную картинку, через API тоже не заработает.
+- **Веса:** пути и формат файлов зависят от сборки (часть кладёт в **`models\Stable-diffusion\`**, часть — отдельные unet/VAE/TE); на **Hugging Face** модели бывают **gated** — логин, принятие условий, **`hf auth login`** при необходимости.
+- **Параметры:** для FLUX в WebUI обычно **CFG ~1**, сэмплер **Euler** (не обязательно **Euler a**), сильный негатив иногда отключают или ослабляют в настройках сэмплинга. После того как так же стабильно работает в UI, в `.env` Node задать, например: **`SD_CFG_SCALE=1`** и **`SD_SAMPLER_INDEX=Euler`** (точное имя — из **`/docs`** или списка сэмплеров WebUI).
+- **VRAM:** при нехватке памяти — **`--medvram`** / **`--lowvram`** в **`COMMANDLINE_ARGS`**, FP8-варианты моделей по доке сборки.
 
 ### Деплой и автозапуск
 

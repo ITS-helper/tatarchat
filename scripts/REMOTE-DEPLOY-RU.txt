@@ -124,6 +124,10 @@ Node поднимается через Win32_Process.Create (не через Sta
   видишь Cannot find module '...\tatarchat\server.js' — исправь батник/задачу
   планировщика: не node ...\tatarchat\server.js, а cd в server и node server.js.
 - img2img / inpaint с сайта: POST /api/ai/image/img2img (multipart: source, опционально mask).
+- FLUX в WebUI: сначала добиться стабильного txt2img в самом WebUI (нужная ветка/Forge и
+  веса по инструкции сборки). Для API с сайта при классических SD-параметрах FLUX часто
+  «ломается» — в .env на сервере задать SD_CFG_SCALE=1 и SD_SAMPLER_INDEX=Euler (имя
+  как в GET /sdapi/v1/samplers). См. .cursor/rules/tatarchat-recent-features.mdc, подраздел FLUX.
 
 ---------------------------------------------------------------------------
 5) Если Tailscale не хочешь
