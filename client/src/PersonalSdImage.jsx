@@ -218,11 +218,11 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
           </div>
         ) : !imageGenAvailable ? (
           <div className="mx-auto max-w-md rounded-xl border border-tc-border/60 bg-tc-panel/30 p-4 text-sm text-tc-text-sec">
-            <p className="font-medium text-tc-text">Stable Diffusion недоступен</p>
+            <p className="font-medium text-tc-text">Генерация картинок недоступна</p>
             <p className="mt-2 text-xs leading-relaxed text-tc-text-muted">
               На сервере задайте <code className="rounded bg-tc-input px-1">SD_WEBUI_BASE_URL</code> (например{" "}
-              <code className="rounded bg-tc-input px-1">http://127.0.0.1:7860</code>) и запустите Automatic1111 с{" "}
-              <code className="rounded bg-tc-input px-1">--api</code>, затем перезапустите Node.
+              <code className="rounded bg-tc-input px-1">http://127.0.0.1:7860</code>), запустите локальный UI (например{" "}
+              <code className="rounded bg-tc-input px-1">C:\sd\run.bat</code>) с включённым HTTP API, затем перезапустите Node.
             </p>
           </div>
         ) : (
@@ -232,7 +232,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
               <div className="flex justify-center">
                 <div className="max-w-md rounded-xl border border-tc-border/50 bg-tc-msg px-4 py-3 text-sm">
                   <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-tc-accent/90">
-                    Stable Diffusion
+                    Картинка
                   </p>
                   <div className="flex items-center gap-2 text-tc-text-sec">
                     <span
@@ -247,7 +247,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
             {sdResult ? (
               <div className="mx-auto max-w-lg rounded-xl border border-tc-border/50 bg-tc-msg px-4 py-3 text-sm text-tc-text">
                 <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-tc-accent/90">
-                  Stable Diffusion
+                  Картинка
                   {sdResult.mode && sdResult.mode !== SD_MODES.txt2img ? (
                     <span className="ml-1 font-normal text-tc-text-muted">
                       · {sdResult.mode === SD_MODES.inpaint ? "inpaint" : "img2img"}

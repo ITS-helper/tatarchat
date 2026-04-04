@@ -37,7 +37,7 @@ const OLLAMA_HTTP_TIMEOUT_MS = Math.min(Math.max(Number(process.env.OLLAMA_HTTP_
 /** Tavily Search API (ключ в заголовке Authorization: Bearer) */
 const TAVILY_API_KEY = String(process.env.TAVILY_API_KEY || "").trim();
 const TAVILY_TIMEOUT_MS = Math.min(Math.max(Number(process.env.TAVILY_TIMEOUT_MS) || 25_000, 5000), 120_000);
-/** Automatic1111 WebUI: `http://127.0.0.1:7860` + `--api` в webui-user.bat */
+/** Локальный Web UI (FLUX и т.п.): тот же HTTP API, что у A1111 (`/sdapi/v1/...`). Пример: `C:\sd\run.bat` + `SD_WEBUI_BASE_URL`. */
 function normalizeSdWebUiBaseUrl(raw) {
   const s = String(raw || "")
     .trim()
@@ -1133,7 +1133,8 @@ function handleSdProxyError(e, res, logLabel) {
   if (String(e?.message || "").startsWith("sd_webui_")) {
     console.error(`[sd] ${logLabel}:`, e?.detail || e?.message);
     return res.status(502).json({
-      error: "Stable Diffusion WebUI недоступен или вернул ошибку. Запусти A1111 с --api и проверь адрес.",
+      error:
+        "Локальный Web UI генерации недоступен или вернул ошибку. Запусти стек (например C:\\sd\\run.bat) с включённым API и проверь адрес в SD_WEBUI_BASE_URL.",
       detail: String(e?.detail || "").trim().slice(0, 240) || undefined,
     });
   }
@@ -1147,7 +1148,7 @@ function handleSdProxyError(e, res, logLabel) {
     console.error("[sd] connect:", topMsg || causeMsg, e?.cause?.code || "");
     return res.status(502).json({
       error:
-        "Не удаётся достучаться до WebUI. Запусти Automatic1111 с --api; в браузере на этом ПК должно открываться http://127.0.0.1:7860/docs . Порт в SD_WEBUI_BASE_URL должен совпадать.",
+        "Не удаётся достучаться до Web UI. Запусти генератор с API (--api или как в твоей сборке); на этом ПК должна открываться страница /docs по адресу из SD_WEBUI_BASE_URL.",
       detail: (topMsg || causeMsg).trim().slice(0, 240) || undefined,
     });
   }
@@ -3127,7 +3128,7 @@ app.post("/api/ai/image", requireAuth, async (req, res) => {
     if (!isSdWebUiConfigured()) {
       return res.status(503).json({
         error:
-          "Генерация не настроена: задайте SD_WEBUI_BASE_URL в .env на сервере (например http://127.0.0.1:7860) и запусти A1111 с --api.",
+          "Генерация не настроена: задайте SD_WEBUI_BASE_URL в .env на сервере (например http://127.0.0.1:7860) и запусти локальный UI (например C:\\sd\\run.bat) с включённым API.",
       });
     }
     let prompt = sanitizeSdPrompt(req.body?.prompt, MAX_SD_PROMPT_CHARS);
@@ -3175,7 +3176,7 @@ app.post("/api/ai/image/img2img", requireAuth, runSdImg2imgUpload, async (req, r
     if (!isSdWebUiConfigured()) {
       return res.status(503).json({
         error:
-          "Генерация не настроена: задайте SD_WEBUI_BASE_URL в .env на сервере (например http://127.0.0.1:7860) и запусти A1111 с --api.",
+          "Генерация не настроена: задайте SD_WEBUI_BASE_URL в .env на сервере (например http://127.0.0.1:7860) и запусти локальный UI (например C:\\sd\\run.bat) с включённым API.",
       });
     }
     const srcBuf = req.files?.source?.[0]?.buffer;

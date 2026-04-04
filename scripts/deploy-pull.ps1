@@ -3,20 +3,30 @@
 # Example: ssh user@100.x.x.x powershell -ExecutionPolicy Bypass -File C:\tatarchat\scripts\deploy-pull.ps1
 # Full stack (includes same client rebuild + scheduled stop.bat/start.bat):
 #   ssh Tatarfamily@100.123.209.16 powershell -ExecutionPolicy Bypass -File C:\tatarchat\scripts\deploy-pull.ps1 -FullRestart
-# Optional: after start.bat also start Automatic1111 (minimized), if path is set:
+# Optional: after start.bat also start local image UI (FLUX / WebUI), minimized, if path is set:
 #   (на сервере только диск C: — путь тоже на C:)
-#   $env:TATARCHAT_SD_WEBUI_BAT = 'C:\sd\stable-diffusion-webui\webui-user.bat'
-#   или  -SdWebuiBat 'C:\sd\stable-diffusion-webui\webui-user.bat'
+#   $env:TATARCHAT_SD_RUN_BAT = 'C:\sd\run.bat'
+#   или  -SdWebuiBat 'C:\sd\run.bat'
+#   Старое имя переменной TATARCHAT_SD_WEBUI_BAT всё ещё поддерживается, если TATARCHAT_SD_RUN_BAT не задана.
 
 param(
     [string] $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
     [string] $Branch = 'main',
     [switch] $SkipBuild,
     [switch] $FullRestart,
-    [string] $SdWebuiBat = $env:TATARCHAT_SD_WEBUI_BAT
+    [Alias('SdLaunchBat')]
+    [string] $SdWebuiBat = ''
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($SdWebuiBat)) {
+    if (-not [string]::IsNullOrWhiteSpace($env:TATARCHAT_SD_RUN_BAT)) {
+        $SdWebuiBat = $env:TATARCHAT_SD_RUN_BAT
+    } elseif (-not [string]::IsNullOrWhiteSpace($env:TATARCHAT_SD_WEBUI_BAT)) {
+        $SdWebuiBat = $env:TATARCHAT_SD_WEBUI_BAT
+    }
+}
 
 Write-Host "=== TatarChat deploy-pull ===" -ForegroundColor Cyan
 Write-Host "Repo: $RepoRoot"
@@ -115,15 +125,15 @@ try {
         $sdPart = ''
         if ($SdWebuiBat) {
             if (Test-Path -LiteralPath $SdWebuiBat) {
-                # start "" /MIN — отдельное окно, свёрнутое; WebUI с --api продолжит работать после выхода из цепочки cmd
+                # start "" /MIN — отдельное окно, свёрнутое; UI с API продолжит работать после выхода из цепочки cmd
                 $sdPart = " && timeout /t 3 /nobreak >nul && start `"`" /MIN `"$SdWebuiBat`""
-                Write-Host "  SD WebUI after start: $SdWebuiBat" -ForegroundColor DarkGray
+                Write-Host "  SD launcher after start: $SdWebuiBat" -ForegroundColor DarkGray
             } else {
                 Write-Warning "SdWebuiBat not found (SD autostart skipped): $SdWebuiBat"
             }
         }
 
-        # Пересоздаём задачу каждый раз — чтобы подтянуть актуальный путь к webui-user.bat при смене env.
+        # Пересоздаём задачу каждый раз — чтобы подтянуть актуальный путь к run.bat при смене env.
         $exists = $false
         try {
             schtasks /Query /TN $taskName *> $null

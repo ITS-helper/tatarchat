@@ -81,28 +81,29 @@ alwaysApply: true
 - **Ошибки:** при обрыве связи с WebUI — **502** с текстом про адрес/порт/`--api`; при таймауте — **504**. В логе старта при настроенном SD: строка **`[sd] SD_WEBUI_BASE_URL=...`**.
 - **Модель чекпоинта** в запросе **не передаётся** — используется **тот checkpoint, который сейчас выбран и загружен в UI WebUI** (выпадающий список вверху Gradio).
 
-### Automatic1111 на машине с Node
+### Локальный Web UI на машине с Node (FLUX; API как у A1111)
 
-- **Запуск с API:** в **`webui-user.bat`** задать **`COMMANDLINE_ARGS=--api --listen --port 7860`** (порт подставить свой). Флаг **`--listen` без аргумента**; нельзя писать **`--listen 127.0.0.1`** — парсер выдаст `unrecognized arguments`. При необходимости только localhost: добавить **`--server-name 127.0.0.1`**.
-- **`set PYTHON=`** — полный путь к **python.exe 3.10.x или 3.11.x** (не 3.14: нет колёс `torch==2.1.2`). Не оставлять второй строкой **`set PYTHON=`** без значения (обнуляет путь).
-- Запуск батника **из каталога WebUI** (`cd /d C:\...\stable-diffusion-webui` → `webui-user.bat`) или двойной щелчок из проводника в этой папке — иначе ищется `launch.py` в `System32`.
-- **Репозиторий Stability-AI:** `Stability-AI/stablediffusion` может отдавать 404 при клоне. В **`webui-user.bat`** до `call webui.bat`: **`set STABLE_DIFFUSION_REPO=https://github.com/w-e-w/stablediffusion.git`** (или другой доверенный mirror; см. обсуждения AUTOMATIC1111 на GitHub). При ошибке удалить частично клонированную папку под **`repositories\stable-diffusion-stability-ai`** и повторить.
-- **pip / CLIP:** ошибка **`No module named 'pkg_resources'`** при сборке CLIP — в venv: `pip install "setuptools==69.5.1"` и при необходимости **`pip install --no-build-isolation`** на zip CLIP; опционально **`set PIP_NO_BUILD_ISOLATION=1`** в `webui-user.bat` после фикса setuptools.
-- **Git:** клон репозиториев может открыть окно **Git Credential Manager** — для публичных реп обычно достаточно войти в GitHub в браузере.
-- **Windows:** отключить псевдонимы **python.exe** / **python3.exe** из Microsoft Store (Параметры → приложения → псевдонимы), если мешают **`python`** в PATH.
-- **xformers:** необязателен; без него в логе `no module 'xformers'. Processing without...`.
-- **Другая модель картинок:** скачать **`.safetensors`** / **`.ckpt`** → **`models\Stable-diffusion\`** → выбрать в выпадающем списке в WebUI; для сайта меняется автоматически (тот же API-сессия).
+- **Точка входа на сервере:** **`C:\sd\run.bat`** (единый батник старта). Внутри должны подниматься Gradio/веб-интерфейс и **HTTP API**, совместимый с Automatic1111 (**`/sdapi/v1/txt2img`**, **`/sdapi/v1/img2img`**), порт — как в **`SD_WEBUI_BASE_URL`** (часто **7860**). Проверка: в браузере на этом ПК **`http://127.0.0.1:<порт>/docs`**.
+- **Автозапуск после деплоя:** переменная **`TATARCHAT_SD_RUN_BAT=C:\sd\run.bat`** (или параметр **`-SdWebuiBat`** / **`-SdLaunchBat`** у **`deploy-pull.ps1 -FullRestart`**). Старое имя **`TATARCHAT_SD_WEBUI_BAT`** всё ещё читается скриптом, если **`TATARCHAT_SD_RUN_BAT`** не задана. Подробности — **`scripts/REMOTE-DEPLOY-RU.txt`** (**4b**).
 
-#### FLUX в WebUI (стабильная работа + TatarChat)
+#### FLUX и параметры API
 
-- **Сборка:** в «чистом» **AUTOMATIC1111** поддержка FLUX долго шла отдельными PR; часто проще взять ветку/форк, где FLUX уже вмержен (см. [PR про FLUX](https://github.com/AUTOMATIC1111/stable-diffusion-webui/pull/16484)), или **Stable Diffusion WebUI Forge** / **SD.Next** по их инструкциям — пока руками в UI **txt2img** с выбранным FLUX-чекпоинтом не даёт стабильную картинку, через API тоже не заработает.
-- **Веса:** пути и формат файлов зависят от сборки (часть кладёт в **`models\Stable-diffusion\`**, часть — отдельные unet/VAE/TE); на **Hugging Face** модели бывают **gated** — логин, принятие условий, **`hf auth login`** при необходимости.
-- **Параметры:** для FLUX в WebUI обычно **CFG ~1**, сэмплер **Euler** (не обязательно **Euler a**), сильный негатив иногда отключают или ослабляют в настройках сэмплинга. После того как так же стабильно работает в UI, в `.env` Node задать, например: **`SD_CFG_SCALE=1`** и **`SD_SAMPLER_INDEX=Euler`** (точное имя — из **`/docs`** или списка сэмплеров WebUI).
-- **VRAM:** при нехватке памяти — **`--medvram`** / **`--lowvram`** в **`COMMANDLINE_ARGS`**, FP8-варианты моделей по доке сборки.
+- **Сборка:** конкретные шаги — в доке твоего стека (Forge, sd-next, кастомный FLUX UI и т.д.). Пока **txt2img** в UI не стабилен, через TatarChat не заработает.
+- **Веса:** пути зависят от сборки; на **Hugging Face** модели бывают **gated** — логин, принятие условий, **`hf auth login`** при необходимости.
+- **Параметры прокси:** в `.env` Node часто **`SD_CFG_SCALE=1`** и **`SD_SAMPLER_INDEX=Euler`** (точное имя — **`GET /sdapi/v1/samplers`**). См. env **`SD_CFG_SCALE`**, **`SD_SAMPLER_INDEX`**, **`SD_RESTORE_FACES`** выше.
+- **VRAM:** **`--medvram`**, **`--lowvram`**, FP8 — по доке твоей установки (в **`run.bat`** или вложенных скриптах).
+
+#### Классический Automatic1111 (если используешь отдельно)
+
+- **`webui-user.bat`:** **`COMMANDLINE_ARGS=--api --listen --port 7860`** (без **`--listen 127.0.0.1`** одним токеном); при необходимости **`--server-name 127.0.0.1`**. **`set PYTHON=`** — **python.exe 3.10.x или 3.11.x**; не обнулять второй строкой **`set PYTHON=`**.
+- Запуск из папки **`stable-diffusion-webui`**, иначе ищется **`launch.py`** в **`System32`**.
+- **Репозиторий Stability-AI:** при 404 — **`set STABLE_DIFFUSION_REPO=https://github.com/w-e-w/stablediffusion.git`**; при ошибке очистить **`repositories\stable-diffusion-stability-ai`** и повторить.
+- **CLIP / setuptools:** рецепты с **`setuptools==69.5.1`**, **`PIP_NO_BUILD_ISOLATION`** — как в старых гайдах A1111.
+- **xformers:** необязателен. **Модели:** **`models\Stable-diffusion\`** и выбор в UI — для сайта тот же выбранный чекпоинт.
 
 ### Деплой и автозапуск
 
-- После полного рестарта хоста WebUI можно поднимать через **`deploy-pull.ps1 -FullRestart`** и env **`TATARCHAT_SD_WEBUI_BAT`** (путь к **`webui-user.bat`**). Подробнее и пути только **C:** — **`scripts/REMOTE-DEPLOY-RU.txt`** (разделы **4b**, **4c**).
+- Полный рестарт хоста и подъём UI: **`deploy-pull.ps1 -FullRestart`** и **`TATARCHAT_SD_RUN_BAT`** (путь к **`C:\sd\run.bat`**). Пути только **C:** — **`scripts/REMOTE-DEPLOY-RU.txt`** (**4b**, **4c**).
 - **`start.bat`** в корне репозитория запускает Node из **`server\`**: **`cd ...\server`** и **`node server.js`**. Ошибка `Cannot find module '...\tatarchat\server.js'` — на машине устаревший батник/задача, указывающая на корень без папки **`server`**.
 
 ## Push / уведомления (server + client)

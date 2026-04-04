@@ -84,50 +84,47 @@ Node поднимается через Win32_Process.Create (не через Sta
 4b) Сервер: только диск C: (заметка)
 ---------------------------------------------------------------------------
 - Репозиторий и всё окружение держим на C: (например C:\tatarchat). Других дисков нет.
-- Automatic1111 после -FullRestart: переменная окружения пользователя, от которого
-  идёт деплой, или параметр скрипта. Путь к батнику тоже на C:, например:
-    C:\sd\stable-diffusion-webui\webui-user.bat
-  Пример перед ssh с ноутбука (если на сервере задана постоянная переменная —
-  достаточно -FullRestart):
-    $env:TATARCHAT_SD_WEBUI_BAT = 'C:\sd\stable-diffusion-webui\webui-user.bat'
+- Генерация картинок (FLUX / локальный UI): после -FullRestart скрипт может
+  дополнительно запустить батник старта UI (свёрнуто). Путь на C:, текущий проект:
+    C:\sd\run.bat
+  Рекомендуемая переменная окружения:
+    TATARCHAT_SD_RUN_BAT = C:\sd\run.bat
+  Старое имя (всё ещё работает, если TATARCHAT_SD_RUN_BAT не задана):
+    TATARCHAT_SD_WEBUI_BAT
+  Пример перед ssh с ноутбука:
+    $env:TATARCHAT_SD_RUN_BAT = 'C:\sd\run.bat'
     ssh ... deploy-pull.ps1 -FullRestart
-  Либо один раз на сервере: System Properties -> Environment Variables ->
-  TATARCHAT_SD_WEBUI_BAT = полный путь к webui-user.bat (тогда не забыть перелогиниться
-  или задать для SYSTEM, если деплой идёт так, что env подхватывается).
-- Задача планировщика TatarChat-FullRestart выполняется от SYSTEM: webui-user.bat
+  Альтернатива параметром: -SdWebuiBat 'C:\sd\run.bat' (или -SdLaunchBat).
+  Постоянно на сервере: System Properties -> Environment Variables ->
+  TATARCHAT_SD_RUN_BAT (перелогиниться или задать для SYSTEM, если деплой подхватывает system env).
+- Задача планировщика TatarChat-FullRestart выполняется от SYSTEM: run.bat
   должен лежать по пути, доступному SYSTEM (локальный C:\ — нормально).
-- Automatic1111 v1.10.x тянет torch==2.1.2; для Python 3.14 колёс нет → ошибка
-  «No matching distribution found for torch==2.1.2». Ставь для WebUI отдельно
-  Python 3.10.x или 3.11.x (с python.org), в webui-user.bat укажи путь к нему
-  (или удали папку venv в stable-diffusion-webui и перезапусти батник — venv
-  пересоздастся уже с нужным интерпретатором). Python 3.14 для этого WebUI не подходит.
+- Внутри C:\sd\run.bat (или цепочки, которую он вызывает) должен быть поднят HTTP API,
+  совместимый с A1111 (/sdapi/v1/...), и порт должен совпадать с SD_WEBUI_BASE_URL в .env Node.
 
 ---------------------------------------------------------------------------
-4c) Stable Diffusion (A1111) — связка с TatarChat и типовые проблемы
+4c) Генерация картинок (локальный Web UI / FLUX) — связка с TatarChat
 ---------------------------------------------------------------------------
 Полная схема — в .cursor/rules/tatarchat-recent-features.mdc, раздел
 «Генерация картинок». Кратко для сервера:
 
 - TatarChat: в .env Node задать SD_WEBUI_BASE_URL=http://127.0.0.1:7860 (порт
-  как у WebUI), перезапуск Node. localhost в URL на стороне Node подменяется
+  как у твоего UI), перезапуск Node. localhost в URL на стороне Node подменяется
   на 127.0.0.1 (IPv4).
-- WebUI: webui-user.bat — set PYTHON=... (3.10/3.11), COMMANDLINE_ARGS=--api
-  --listen --port 7860 (не писать «--listen 127.0.0.1»; при необходимости
-  добавить --server-name 127.0.0.1). Запуск только из папки stable-diffusion-webui.
-- Репозиторий Stability-AI/stablediffusion недоступен с GitHub — в webui-user.bat:
-  set STABLE_DIFFUSION_REPO=https://github.com/w-e-w/stablediffusion.git
-- Ошибка pkg_resources при установке CLIP: в venv setuptools==69.5.1, опционально
-  pip install --no-build-isolation на zip CLIP или PIP_NO_BUILD_ISOLATION=1.
-- Модель для сайта = та, что выбрана в выпадающем списке checkpoint в окне WebUI;
-  файлы класть в models\Stable-diffusion\.
+- Запуск UI на сервере: C:\sd\run.bat (или вручную). В стеке должен быть включён API
+  (--api или аналог в твоей сборке FLUX), страница /docs на том же порту.
+- Классический Automatic1111: если когда‑либо понадобится webui-user.bat — PYTHON 3.10/3.11,
+  COMMANDLINE_ARGS с --api --listen --port (без «--listen 127.0.0.1» как одного токена);
+  зеркало STABLE_DIFFUSION_REPO=https://github.com/w-e-w/stablediffusion.git при 404;
+  setuptools для CLIP — см. старые заметки в tatarchat-recent-features.mdc.
+- Модель для сайта: та, что выбрана в UI; пути к весам — по инструкции твоей FLUX-сборки.
 - start.bat репозитория tatarchat: Node из каталога server\ (server.js). Если
   видишь Cannot find module '...\tatarchat\server.js' — исправь батник/задачу
   планировщика: не node ...\tatarchat\server.js, а cd в server и node server.js.
 - img2img / inpaint с сайта: POST /api/ai/image/img2img (multipart: source, опционально mask).
-- FLUX в WebUI: сначала добиться стабильного txt2img в самом WebUI (нужная ветка/Forge и
-  веса по инструкции сборки). Для API с сайта при классических SD-параметрах FLUX часто
-  «ломается» — в .env на сервере задать SD_CFG_SCALE=1 и SD_SAMPLER_INDEX=Euler (имя
-  как в GET /sdapi/v1/samplers). См. .cursor/rules/tatarchat-recent-features.mdc, подраздел FLUX.
+- FLUX: стабильный txt2img в UI → затем при необходимости SD_CFG_SCALE=1,
+  SD_SAMPLER_INDEX=Euler в .env Node (имя сэмплера — GET /sdapi/v1/samplers).
+  Подробнее — tatarchat-recent-features.mdc, подраздел FLUX.
 
 ---------------------------------------------------------------------------
 5) Если Tailscale не хочешь
