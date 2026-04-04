@@ -53,7 +53,8 @@ function normalizeSdWebUiBaseUrl(raw) {
   }
 }
 const SD_WEBUI_BASE_URL = normalizeSdWebUiBaseUrl(process.env.SD_WEBUI_BASE_URL || process.env.A1111_BASE_URL || "");
-const SD_WEBUI_TIMEOUT_MS = Math.min(Math.max(Number(process.env.SD_WEBUI_TIMEOUT_MS) || 300_000, 45_000), 900_000);
+/** Ожидание ответа WebUI (FLUX часто дольше SD); переопределение: SD_WEBUI_TIMEOUT_MS в .env */
+const SD_WEBUI_TIMEOUT_MS = Math.min(Math.max(Number(process.env.SD_WEBUI_TIMEOUT_MS) || 240_000, 45_000), 900_000);
 const MAX_SD_PROMPT_CHARS = Math.min(Math.max(Number(process.env.MAX_SD_PROMPT_CHARS) || 1500, 200), 4000);
 const SD_MAX_STEPS = Math.min(Math.max(Number(process.env.SD_MAX_STEPS) || 28, 8), 45);
 const SD_MAX_SIDE = Math.min(Math.max(Number(process.env.SD_MAX_SIDE) || 768, 320), 1024);

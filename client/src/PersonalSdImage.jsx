@@ -239,7 +239,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
                       className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-tc-border border-t-tc-accent"
                       aria-hidden
                     />
-                    <span className="text-xs">Рисую… (до пары минут)</span>
+                    <span className="text-xs">Рисую… (до ~4 минут)</span>
                   </div>
                 </div>
               </div>
