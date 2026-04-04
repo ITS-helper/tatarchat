@@ -105,8 +105,8 @@ Node поднимается через Win32_Process.Create (не через Sta
 ---------------------------------------------------------------------------
 4c) Stable Diffusion (A1111) — связка с TatarChat и типовые проблемы
 ---------------------------------------------------------------------------
-Полная схема и нюансы — в .cursor/rules/tatarchat-recent-features.mdc, раздел
-«Генерация картинок (Stable Diffusion, txt2img)». Кратко для сервера:
+Полная схема — в .cursor/rules/tatarchat-recent-features.mdc, раздел
+«Генерация картинок». Кратко для сервера:
 
 - TatarChat: в .env Node задать SD_WEBUI_BASE_URL=http://127.0.0.1:7860 (порт
   как у WebUI), перезапуск Node. localhost в URL на стороне Node подменяется
@@ -123,6 +123,7 @@ Node поднимается через Win32_Process.Create (не через Sta
 - start.bat репозитория tatarchat: Node из каталога server\ (server.js). Если
   видишь Cannot find module '...\tatarchat\server.js' — исправь батник/задачу
   планировщика: не node ...\tatarchat\server.js, а cd в server и node server.js.
+- img2img / inpaint с сайта: POST /api/ai/image/img2img (multipart: source, опционально mask).
 
 ---------------------------------------------------------------------------
 5) Если Tailscale не хочешь

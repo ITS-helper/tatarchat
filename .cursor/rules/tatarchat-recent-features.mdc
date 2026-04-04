@@ -61,22 +61,22 @@ alwaysApply: true
   - Картинки: запрос Tavily с `include_images`; сервер фильтрует битые URL, клиент показывает сетку **«Картинки по теме поиска»** и открывает их в **превью‑лайтбоксе** внутри чата.
   - Источники: в ответе ассистента не должно быть `[1]` внутри текста — ссылки оформляются кратко в конце блоком **«Источники»**.
 
-## Генерация картинок (Stable Diffusion, txt2img)
+## Генерация картинок (Stable Diffusion: txt2img, img2img, inpaint)
 
-Связка: **браузер** → **Node TatarChat** (`POST /api/ai/image`, JWT) → **локальный Automatic1111** (`POST /sdapi/v1/txt2img`). Оба процесса на **одном ПК** (loopback). WebUI должен быть **запущен**, пока нужна генерация с сайта.
+Связка: **браузер** → **Node TatarChat** (JWT) → **локальный Automatic1111** (`/sdapi/v1/txt2img` или **`/sdapi/v1/img2img`**). Оба процесса на **одном ПК** (loopback). WebUI должен быть **запущен**, пока нужна генерация с сайта.
 
 ### Клиент (`client`)
 
-- Сайдбар **Личное** → **«Картинка (SD)»** (`personalSdOpen` в **`App.jsx`**). Экран **`PersonalSdImage.jsx`**: промпт, негатив, шаги, размер, превью, скачивание, лайтбокс.
+- Сайдбар **Личное** → **«Картинка (SD)»** (`personalSdOpen` в **`App.jsx`**). Экран **`PersonalSdImage.jsx`**: режимы **Текст → фото** (JSON `POST /api/ai/image`), **img2img** и **Инпейнт** (`multipart` `POST /api/ai/image/img2img`: поля **`source`**, опционально **`mask`**, плюс текстовые `prompt`, `negative_prompt`, `steps`, `width`, `height`, `denoising_strength`); превью файлов, слайдер denoise, размеры до **1024** для img2img/inpaint.
 - Флаг **`imageGenAvailable`** приходит с **`GET /api/ai/chat`** (и не относится к блоку SD в ассистенте — генерация вынесена в отдельный пункт меню).
 - **Промпты:** обычные checkpoint’ы лучше понимают **английские теги** (`a cute dog, fluffy, outdoor…`), а не русские команды вроде «нарисуй собаку» — иначе результат случайный.
 
 ### Сервер TatarChat (`server/server.js`)
 
-- **Код:** `normalizeSdWebUiBaseUrl`, `isSdWebUiConfigured`, `callSdWebUiTxt2img`, маршрут **`POST /api/ai/image`**; в ответах **`GET/POST /api/ai/chat`** поле **`imageGenAvailable`**.
+- **Код:** `normalizeSdWebUiBaseUrl`, `isSdWebUiConfigured`, `callSdWebUiTxt2img`, **`callSdWebUiImg2img`**, **`handleSdProxyError`**, **`uploadSdImg2img`**, маршруты **`POST /api/ai/image`** и **`POST /api/ai/image/img2img`**; в ответах **`GET/POST /api/ai/chat`** поле **`imageGenAvailable`**.
 - **Включение:** в `.env` задать **`SD_WEBUI_BASE_URL=http://127.0.0.1:7860`** (или **`A1111_BASE_URL`**). Пустое значение → в UI нет пункта генерации (`imageGenAvailable: false`).
 - **Нормализация URL:** `localhost` в базовом URL подменяется на **`127.0.0.1`** при старте Node (избежание IPv6 `::1`, когда WebUI слушает только IPv4).
-- **API:** **`POST /api/ai/image`** (`requireAuth`) — тело: `prompt`, опционально `negative_prompt` / `negativePrompt`, `steps`, `width`, `height`. Прокси в A1111: sampler **Euler a**, `cfg_scale: 7`, `send_images: true`.
+- **API:** **`POST /api/ai/image`** (`requireAuth`, JSON) — `prompt`, опционально `negative_prompt` / `negativePrompt`, `steps`, `width`, `height` → **`txt2img`**. **`POST /api/ai/image/img2img`** (`requireAuth`, **`multipart/form-data`**) — файл **`source`** (обязательно), **`mask`** (опционально: при наличии в A1111 включается инпainting с `inpaint_full_res`, `mask_blur` и т.д.; в WebUI обычно **белое** на маске = зона перерисовки). Текстовые поля формы: `prompt`, `negative_prompt`, `steps`, `width`, `height`, `denoising_strength` (0.05–0.95). Лимит размера файлов — как у **AI-картинки** в чат (`MAX_AI_IMAGE_MB`). Прокси: sampler **Euler a**, `cfg_scale: 7`, `send_images: true`.
 - **Лимиты env:** **`SD_WEBUI_TIMEOUT_MS`**, **`MAX_SD_PROMPT_CHARS`**, **`SD_MAX_STEPS`**, **`SD_MAX_SIDE`**.
 - **Ошибки:** при обрыве связи с WebUI — **502** с текстом про адрес/порт/`--api`; при таймауте — **504**. В логе старта при настроенном SD: строка **`[sd] SD_WEBUI_BASE_URL=...`**.
 - **Модель чекпоинта** в запросе **не передаётся** — используется **тот checkpoint, который сейчас выбран и загружен в UI WebUI** (выпадающий список вверху Gradio).

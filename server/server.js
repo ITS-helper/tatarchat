@@ -1047,6 +1047,105 @@ async function callSdWebUiTxt2img({ prompt, negativePrompt, steps, width, height
   }
 }
 
+/**
+ * Прокси к A1111 POST /sdapi/v1/img2img → { base64, mime } или throw.
+ * maskBase64: опционально — инпainting (в WebUI обычно белое = зона перерисовки).
+ */
+async function callSdWebUiImg2img({
+  prompt,
+  negativePrompt,
+  steps,
+  width,
+  height,
+  initImageBase64,
+  maskBase64,
+  denoisingStrength,
+}) {
+  const url = `${SD_WEBUI_BASE_URL}/sdapi/v1/img2img`;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), SD_WEBUI_TIMEOUT_MS);
+  try {
+    const payload = {
+      init_images: [initImageBase64],
+      prompt,
+      negative_prompt: negativePrompt || "",
+      steps,
+      width,
+      height,
+      cfg_scale: 7,
+      sampler_index: "Euler a",
+      restore_faces: false,
+      send_images: true,
+      denoising_strength: denoisingStrength,
+      resize_mode: 0,
+    };
+    if (typeof maskBase64 === "string" && maskBase64.length > 0) {
+      payload.mask = maskBase64;
+      payload.mask_blur = 4;
+      payload.inpainting_fill = 1;
+      payload.inpaint_full_res = true;
+      payload.inpaint_full_res_padding = 32;
+      payload.inpainting_mask_invert = 0;
+    }
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: ac.signal,
+    });
+    const txt = await res.text();
+    let data = {};
+    try {
+      data = txt ? JSON.parse(txt) : {};
+    } catch {
+      data = {};
+    }
+    if (!res.ok) {
+      const err = new Error(`sd_webui_http_${res.status}`);
+      err.detail = (txt || "").slice(0, 500);
+      throw err;
+    }
+    const b64 = data?.images?.[0];
+    if (typeof b64 !== "string" || !b64.length) {
+      const err = new Error("sd_webui_no_image");
+      err.detail = typeof data?.error === "string" ? data.error : JSON.stringify(data).slice(0, 300);
+      throw err;
+    }
+    return { base64: b64, mimeType: "image/png" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function handleSdProxyError(e, res, logLabel) {
+  if (e?.name === "AbortError") {
+    return res.status(504).json({ error: "Генерация слишком долгая (таймаут)" });
+  }
+  if (String(e?.message || "").startsWith("sd_webui_")) {
+    console.error(`[sd] ${logLabel}:`, e?.detail || e?.message);
+    return res.status(502).json({
+      error: "Stable Diffusion WebUI недоступен или вернул ошибку. Запусти A1111 с --api и проверь адрес.",
+      detail: String(e?.detail || "").trim().slice(0, 240) || undefined,
+    });
+  }
+  const causeMsg = String(e?.cause?.message || e?.cause || "");
+  const topMsg = String(e?.message || "");
+  const connHint =
+    e?.cause?.code === "ECONNREFUSED" ||
+    e?.code === "ECONNREFUSED" ||
+    /ECONNREFUSED|fetch failed|getaddrinfo|ENOTFOUND|ConnectTimeoutError/i.test(topMsg + causeMsg);
+  if (connHint) {
+    console.error("[sd] connect:", topMsg || causeMsg, e?.cause?.code || "");
+    return res.status(502).json({
+      error:
+        "Не удаётся достучаться до WebUI. Запусти Automatic1111 с --api; в браузере на этом ПК должно открываться http://127.0.0.1:7860/docs . Порт в SD_WEBUI_BASE_URL должен совпадать.",
+      detail: (topMsg || causeMsg).trim().slice(0, 240) || undefined,
+    });
+  }
+  console.error(`POST /api/ai/image (${logLabel})`, e);
+  return res.status(500).json({ error: "Ошибка генерации", detail: topMsg.trim().slice(0, 240) || undefined });
+}
+
 async function callOllamaChat(model, messages) {
   const ac = new AbortController();
   const to = setTimeout(() => ac.abort(), OLLAMA_HTTP_TIMEOUT_MS);
@@ -1794,6 +1893,17 @@ const uploadAiImage = multer({
     const mime = normalizeContentTypeMime(file.mimetype || "");
     if (AI_IMAGE_MIMES.has(mime)) return cb(null, true);
     cb(new Error("AI_IMAGE_TYPE"));
+  },
+});
+
+/** Исходник + опциональная маска для img2img / inpainting (A1111 API). */
+const uploadSdImg2img = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_AI_IMAGE_BYTES, files: 2 },
+  fileFilter(_req, file, cb) {
+    const mime = normalizeContentTypeMime(file.mimetype || "");
+    if (AI_IMAGE_MIMES.has(mime)) return cb(null, true);
+    cb(new Error("SD_IMAGE_TYPE"));
   },
 });
 
@@ -3030,32 +3140,76 @@ app.post("/api/ai/image", requireAuth, async (req, res) => {
     const out = await callSdWebUiTxt2img({ prompt, negativePrompt: neg, steps, width, height });
     res.json({ ok: true, mimeType: out.mimeType, imageBase64: out.base64 });
   } catch (e) {
-    if (e?.name === "AbortError") {
-      return res.status(504).json({ error: "Генерация слишком долгая (таймаут)" });
+    return handleSdProxyError(e, res, "txt2img");
+  }
+});
+
+function runSdImg2imgUpload(req, res, next) {
+  uploadSdImg2img.fields([
+    { name: "source", maxCount: 1 },
+    { name: "mask", maxCount: 1 },
+  ])(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({ error: "Файл слишком большой" });
     }
-    if (String(e?.message || "").startsWith("sd_webui_")) {
-      console.error("[sd] txt2img:", e?.detail || e?.message);
-      return res.status(502).json({
-        error: "Stable Diffusion WebUI недоступен или вернул ошибку. Запусти A1111 с --api и проверь адрес.",
-        detail: String(e?.detail || "").trim().slice(0, 240) || undefined,
-      });
+    if (String(err.message || "") === "SD_IMAGE_TYPE") {
+      return res.status(400).json({ error: "Неподдерживаемый тип файла (используй PNG / JPEG / WebP)" });
     }
-    const causeMsg = String(e?.cause?.message || e?.cause || "");
-    const topMsg = String(e?.message || "");
-    const connHint =
-      e?.cause?.code === "ECONNREFUSED" ||
-      e?.code === "ECONNREFUSED" ||
-      /ECONNREFUSED|fetch failed|getaddrinfo|ENOTFOUND|ConnectTimeoutError/i.test(topMsg + causeMsg);
-    if (connHint) {
-      console.error("[sd] connect:", topMsg || causeMsg, e?.cause?.code || "");
-      return res.status(502).json({
+    console.error("[sd] multer img2img:", err);
+    return res.status(400).json({ error: "Ошибка загрузки файлов" });
+  });
+}
+
+app.post("/api/ai/image/img2img", requireAuth, runSdImg2imgUpload, async (req, res) => {
+  try {
+    if (!isSdWebUiConfigured()) {
+      return res.status(503).json({
         error:
-          "Не удаётся достучаться до WebUI. Запусти Automatic1111 с --api; в браузере на этом ПК должно открываться http://127.0.0.1:7860/docs . Порт в SD_WEBUI_BASE_URL должен совпадать. В .env лучше указывать 127.0.0.1, не localhost (иначе Node иногда ходит в IPv6 ::1, а WebUI слушает только IPv4).",
-        detail: (topMsg || causeMsg).trim().slice(0, 240) || undefined,
+          "Генерация не настроена: задайте SD_WEBUI_BASE_URL в .env на сервере (например http://127.0.0.1:7860) и запусти A1111 с --api.",
       });
     }
-    console.error("POST /api/ai/image", e);
-    res.status(500).json({ error: "Ошибка генерации", detail: topMsg.trim().slice(0, 240) || undefined });
+    const srcBuf = req.files?.source?.[0]?.buffer;
+    if (!srcBuf?.length) return res.status(400).json({ error: "Добавь исходное изображение" });
+
+    const prompt = sanitizeSdPrompt(req.body?.prompt, MAX_SD_PROMPT_CHARS);
+    if (!prompt) return res.status(400).json({ error: "Пустой промпт" });
+    const neg = sanitizeSdPrompt(req.body?.negative_prompt || req.body?.negativePrompt || "", MAX_SD_PROMPT_CHARS);
+
+    let steps = parseInt(req.body?.steps, 10);
+    if (!Number.isFinite(steps)) steps = 25;
+    steps = Math.max(8, Math.min(SD_MAX_STEPS, Math.floor(steps)));
+
+    let width = parseInt(req.body?.width, 10);
+    let height = parseInt(req.body?.height, 10);
+    if (!Number.isFinite(width)) width = 512;
+    if (!Number.isFinite(height)) height = 512;
+    const snapSide = (n) => Math.max(256, Math.min(SD_MAX_SIDE, Math.floor(n / 8) * 8));
+    width = snapSide(width);
+    height = snapSide(height);
+
+    let denoising = parseFloat(req.body?.denoising_strength ?? req.body?.denoisingStrength ?? "0.55");
+    if (!Number.isFinite(denoising)) denoising = 0.55;
+    denoising = Math.max(0.05, Math.min(0.95, denoising));
+
+    const initB64 = srcBuf.toString("base64");
+    const maskBuf = req.files?.mask?.[0]?.buffer;
+    const maskB64 =
+      typeof maskBuf?.length === "number" && maskBuf.length > 0 ? maskBuf.toString("base64") : undefined;
+
+    const out = await callSdWebUiImg2img({
+      prompt,
+      negativePrompt: neg,
+      steps,
+      width,
+      height,
+      initImageBase64: initB64,
+      maskBase64: maskB64,
+      denoisingStrength: denoising,
+    });
+    return res.json({ ok: true, mimeType: out.mimeType, imageBase64: out.base64 });
+  } catch (e) {
+    return handleSdProxyError(e, res, "img2img");
   }
 });
 

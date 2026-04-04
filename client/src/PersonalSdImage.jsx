@@ -1,16 +1,30 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+const SD_MODES = { txt2img: "txt2img", img2img: "img2img", inpaint: "inpaint" };
+
+const SIZE_TXT = [512, 576, 640, 704, 768];
+const SIZE_IMG = [512, 576, 640, 704, 768, 832, 896, 1024];
 
 export default function PersonalSdImage({ getApiBase, token, onError }) {
   const [loading, setLoading] = useState(true);
   const [imageGenAvailable, setImageGenAvailable] = useState(false);
+  const [sdMode, setSdMode] = useState(SD_MODES.txt2img);
   const [sdPrompt, setSdPrompt] = useState("");
   const [sdNegative, setSdNegative] = useState("");
   const [sdSteps, setSdSteps] = useState(25);
   const [sdSize, setSdSize] = useState(512);
+  const [sdDenoise, setSdDenoise] = useState(0.55);
   const [sdGenerating, setSdGenerating] = useState(false);
   const [sdResult, setSdResult] = useState(null);
   const [imageLightbox, setImageLightbox] = useState(null);
 
+  const [sourceFile, setSourceFile] = useState(null);
+  const [maskFile, setMaskFile] = useState(null);
+  const [srcPreview, setSrcPreview] = useState(null);
+  const [maskPreview, setMaskPreview] = useState(null);
+
+  const sourceRef = useRef(null);
+  const maskRef = useRef(null);
   const base = getApiBase();
 
   useEffect(() => {
@@ -42,23 +56,106 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
     };
   }, [base, token, onError]);
 
+  useEffect(() => {
+    if (!sourceFile) {
+      setSrcPreview(null);
+      return;
+    }
+    const u = URL.createObjectURL(sourceFile);
+    setSrcPreview(u);
+    return () => URL.revokeObjectURL(u);
+  }, [sourceFile]);
+
+  useEffect(() => {
+    if (!maskFile) {
+      setMaskPreview(null);
+      return;
+    }
+    const u = URL.createObjectURL(maskFile);
+    setMaskPreview(u);
+    return () => URL.revokeObjectURL(u);
+  }, [maskFile]);
+
+  useEffect(() => {
+    const sizes = sdMode === SD_MODES.txt2img ? SIZE_TXT : SIZE_IMG;
+    setSdSize((prev) => (sizes.includes(prev) ? prev : 512));
+  }, [sdMode]);
+
+  useEffect(() => {
+    if (sdMode === SD_MODES.txt2img) {
+      setSourceFile(null);
+      setMaskFile(null);
+      if (sourceRef.current) sourceRef.current.value = "";
+      if (maskRef.current) maskRef.current.value = "";
+    }
+    if (sdMode === SD_MODES.img2img) {
+      setMaskFile(null);
+      if (maskRef.current) maskRef.current.value = "";
+    }
+  }, [sdMode]);
+
   const generateSdImage = useCallback(async () => {
     const p = sdPrompt.trim();
     if (!p || sdGenerating || !token || !imageGenAvailable) return;
+
+    if (sdMode === SD_MODES.img2img || sdMode === SD_MODES.inpaint) {
+      if (!sourceFile) {
+        onError?.("Выбери исходное изображение");
+        return;
+      }
+      if (sdMode === SD_MODES.inpaint && !maskFile) {
+        onError?.("Для инпейнта нужна маска (PNG: белое = зона перерисовки)");
+        return;
+      }
+    }
+
     setSdGenerating(true);
     setSdResult(null);
     onError?.(null);
     try {
-      const res = await fetch(`${base}/api/ai/image`, {
+      if (sdMode === SD_MODES.txt2img) {
+        const res = await fetch(`${base}/api/ai/image`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            prompt: p,
+            negative_prompt: sdNegative.trim() || undefined,
+            steps: sdSteps,
+            width: sdSize,
+            height: sdSize,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const d = typeof data.detail === "string" && data.detail.trim() ? ` ${data.detail.trim()}` : "";
+          onError?.((data.error || `Ошибка ${res.status}`) + d);
+          return;
+        }
+        const mime = typeof data.mimeType === "string" && data.mimeType ? data.mimeType : "image/png";
+        const b64 = data.imageBase64;
+        if (typeof b64 !== "string" || !b64) {
+          onError?.("Пустой ответ картинки");
+          return;
+        }
+        setSdResult({ dataUrl: `data:${mime};base64,${b64}`, prompt: p, mode: sdMode });
+        onError?.(null);
+        return;
+      }
+
+      const fd = new FormData();
+      fd.append("source", sourceFile);
+      if (sdMode === SD_MODES.inpaint && maskFile) fd.append("mask", maskFile);
+      fd.append("prompt", p);
+      fd.append("negative_prompt", sdNegative.trim());
+      fd.append("steps", String(sdSteps));
+      fd.append("width", String(sdSize));
+      fd.append("height", String(sdSize));
+      fd.append("denoising_strength", String(sdDenoise));
+
+      const res = await fetch(`${base}/api/ai/image/img2img`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          prompt: p,
-          negative_prompt: sdNegative.trim() || undefined,
-          steps: sdSteps,
-          width: sdSize,
-          height: sdSize,
-        }),
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -72,7 +169,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
         onError?.("Пустой ответ картинки");
         return;
       }
-      setSdResult({ dataUrl: `data:${mime};base64,${b64}`, prompt: p });
+      setSdResult({ dataUrl: `data:${mime};base64,${b64}`, prompt: p, mode: sdMode });
       onError?.(null);
     } catch (e) {
       console.error(e);
@@ -80,7 +177,36 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
     } finally {
       setSdGenerating(false);
     }
-  }, [base, token, imageGenAvailable, sdPrompt, sdNegative, sdSteps, sdSize, sdGenerating, onError]);
+  }, [
+    base,
+    token,
+    imageGenAvailable,
+    sdPrompt,
+    sdNegative,
+    sdSteps,
+    sdSize,
+    sdDenoise,
+    sdMode,
+    sourceFile,
+    maskFile,
+    sdGenerating,
+    onError,
+  ]);
+
+  const sizeOptions = sdMode === SD_MODES.txt2img ? SIZE_TXT : SIZE_IMG;
+
+  const modeHint =
+    sdMode === SD_MODES.txt2img
+      ? "Текст → картинка (txt2img). Промпт лучше на английском."
+      : sdMode === SD_MODES.img2img
+        ? "img2img: исходник + промпт. Сила перерисовки — «Шум» (denoising)."
+        : "Инпейнт: исходник + маска (белое = перерисовать). Размеры маски лучше совпадать с картинкой.";
+
+  const canSubmit =
+    sdPrompt.trim() &&
+    (sdMode === SD_MODES.txt2img ||
+      (sourceFile && sdMode === SD_MODES.img2img) ||
+      (sourceFile && maskFile && sdMode === SD_MODES.inpaint));
 
   return (
     <div className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden">
@@ -101,11 +227,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
           </div>
         ) : (
           <div className="space-y-4">
-            <p className="text-center text-xs text-tc-text-muted">
-              txt2img через Automatic1111. Обычные модели лучше понимают{" "}
-              <span className="font-medium text-tc-text-sec">английские теги</span>, а не фразы вроде «нарисуй
-              собаку» — иначе картинка может «плавать». На 8 ГБ VRAM при OOM уменьши размер или шаги.
-            </p>
+            <p className="text-center text-xs text-tc-text-muted">{modeHint} На 8 ГБ VRAM при OOM уменьши размер.</p>
             {sdGenerating ? (
               <div className="flex justify-center">
                 <div className="max-w-md rounded-xl border border-tc-border/50 bg-tc-msg px-4 py-3 text-sm">
@@ -126,6 +248,11 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
               <div className="mx-auto max-w-lg rounded-xl border border-tc-border/50 bg-tc-msg px-4 py-3 text-sm text-tc-text">
                 <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-tc-accent/90">
                   Stable Diffusion
+                  {sdResult.mode && sdResult.mode !== SD_MODES.txt2img ? (
+                    <span className="ml-1 font-normal text-tc-text-muted">
+                      · {sdResult.mode === SD_MODES.inpaint ? "inpaint" : "img2img"}
+                    </span>
+                  ) : null}
                 </p>
                 <p className="mb-2 line-clamp-3 text-xs text-tc-text-muted" title={sdResult.prompt}>
                   {sdResult.prompt}
@@ -208,6 +335,86 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
 
       {imageGenAvailable && !loading ? (
         <div className="tc-composer-bar relative z-10 flex flex-col gap-2 border-t border-tc-border bg-tc-header px-2 py-2 sm:px-3">
+          <div className="flex flex-wrap gap-1 rounded-lg border border-tc-border/50 bg-tc-panel/20 p-1">
+            {[
+              { id: SD_MODES.txt2img, label: "Текст → фото" },
+              { id: SD_MODES.img2img, label: "img2img" },
+              { id: SD_MODES.inpaint, label: "Инпейнт" },
+            ].map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                disabled={sdGenerating}
+                onClick={() => setSdMode(m.id)}
+                className={`rounded-md px-2.5 py-1.5 text-[11px] font-medium transition sm:text-xs ${
+                  sdMode === m.id ? "bg-tc-accent/25 text-tc-accent" : "text-tc-text-sec hover:bg-tc-hover"
+                } disabled:opacity-40`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          {(sdMode === SD_MODES.img2img || sdMode === SD_MODES.inpaint) && (
+            <div className="rounded-xl border border-tc-border/60 bg-tc-panel/25 p-3 space-y-2">
+              <p className="text-xs font-semibold text-tc-text-sec">Исходник и маска</p>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  ref={sourceRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  disabled={sdGenerating}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] || null;
+                    setSourceFile(f);
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={sdGenerating}
+                  onClick={() => sourceRef.current?.click()}
+                  className="rounded-lg border border-tc-border bg-tc-input px-2 py-1.5 text-xs text-tc-text transition hover:bg-tc-hover disabled:opacity-40"
+                >
+                  Картинка…
+                </button>
+                {sdMode === SD_MODES.inpaint && (
+                  <>
+                    <input
+                      ref={maskRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      disabled={sdGenerating}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] || null;
+                        setMaskFile(f);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      disabled={sdGenerating}
+                      onClick={() => maskRef.current?.click()}
+                      className="rounded-lg border border-tc-border bg-tc-input px-2 py-1.5 text-xs text-tc-text transition hover:bg-tc-hover disabled:opacity-40"
+                    >
+                      Маска…
+                    </button>
+                  </>
+                )}
+              </div>
+              {(srcPreview || maskPreview) && (
+                <div className="flex flex-wrap gap-2">
+                  {srcPreview ? (
+                    <img src={srcPreview} alt="" className="h-16 w-16 rounded border border-tc-border object-cover" />
+                  ) : null}
+                  {maskPreview ? (
+                    <img src={maskPreview} alt="" className="h-16 w-16 rounded border border-tc-border object-cover" />
+                  ) : null}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="rounded-xl border border-tc-border/60 bg-tc-panel/25 p-3 space-y-2">
             <p className="text-xs font-semibold text-tc-text-sec">Промпт и параметры</p>
             <textarea
@@ -249,17 +456,33 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
                   className="rounded border border-tc-border bg-tc-input px-2 py-1 text-xs text-tc-text"
                   disabled={sdGenerating}
                 >
-                  {[512, 576, 640, 704, 768].map((n) => (
+                  {sizeOptions.map((n) => (
                     <option key={n} value={n}>
                       {n}×{n}
                     </option>
                   ))}
                 </select>
               </label>
+              {(sdMode === SD_MODES.img2img || sdMode === SD_MODES.inpaint) && (
+                <label className="flex min-w-[8rem] flex-col gap-0.5 text-[11px] text-tc-text-muted">
+                  Шум (denoise)
+                  <input
+                    type="range"
+                    min={0.05}
+                    max={0.95}
+                    step={0.05}
+                    value={sdDenoise}
+                    onChange={(e) => setSdDenoise(parseFloat(e.target.value) || 0.55)}
+                    disabled={sdGenerating}
+                    className="w-full"
+                  />
+                  <span className="text-[10px]">{sdDenoise.toFixed(2)}</span>
+                </label>
+              )}
               <button
                 type="button"
                 onClick={() => void generateSdImage()}
-                disabled={sdGenerating || !sdPrompt.trim()}
+                disabled={sdGenerating || !canSubmit}
                 className="rounded-lg bg-tc-accent px-3 py-2 text-xs font-semibold text-white transition hover:opacity-95 disabled:opacity-40"
               >
                 {sdGenerating ? "…" : "Сгенерировать"}
