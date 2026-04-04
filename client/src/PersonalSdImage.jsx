@@ -5,9 +5,15 @@ const SD_MODES = { txt2img: "txt2img", img2img: "img2img", inpaint: "inpaint" };
 const SIZE_TXT = [512, 576, 640, 704, 768];
 const SIZE_IMG = [512, 576, 640, 704, 768, 832, 896, 1024];
 
+const LS_SD_CHECKPOINT_KEY = "tatarchat_sd_checkpoint";
+
 export default function PersonalSdImage({ getApiBase, token, onError }) {
   const [loading, setLoading] = useState(true);
   const [imageGenAvailable, setImageGenAvailable] = useState(false);
+  const [sdCheckpointOptions, setSdCheckpointOptions] = useState([]);
+  const [sdCheckpoint, setSdCheckpoint] = useState("");
+  const [sdModelsLoading, setSdModelsLoading] = useState(false);
+  const [sdModelsError, setSdModelsError] = useState(null);
   const [sdMode, setSdMode] = useState(SD_MODES.txt2img);
   const [sdPrompt, setSdPrompt] = useState("");
   const [sdNegative, setSdNegative] = useState("");
@@ -55,6 +61,55 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
       cancelled = true;
     };
   }, [base, token, onError]);
+
+  const loadSdModels = useCallback(async () => {
+    if (!token || !imageGenAvailable) return;
+    setSdModelsLoading(true);
+    setSdModelsError(null);
+    try {
+      const res = await fetch(`${base}/api/ai/image/models`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const d = typeof data.detail === "string" && data.detail.trim() ? ` ${data.detail.trim()}` : "";
+        throw new Error((data.error || `HTTP ${res.status}`) + d);
+      }
+      const list = Array.isArray(data.models)
+        ? data.models.map((m) => (typeof m?.title === "string" ? m.title.trim() : "")).filter(Boolean)
+        : [];
+      let saved = "";
+      try {
+        saved = String(window.localStorage.getItem(LS_SD_CHECKPOINT_KEY) || "").trim();
+      } catch {
+        /* ignore */
+      }
+      const merged = saved && !list.includes(saved) ? [saved, ...list] : list;
+      setSdCheckpointOptions(merged);
+      setSdCheckpoint((prev) => {
+        if (saved && merged.includes(saved)) return saved;
+        if (prev && merged.includes(prev)) return prev;
+        return "";
+      });
+    } catch (e) {
+      console.error(e);
+      setSdModelsError(typeof e?.message === "string" ? e.message : "Список моделей");
+    } finally {
+      setSdModelsLoading(false);
+    }
+  }, [base, token, imageGenAvailable]);
+
+  useEffect(() => {
+    if (!imageGenAvailable || !token) return;
+    let cancelled = false;
+    (async () => {
+      if (cancelled) return;
+      await loadSdModels();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [imageGenAvailable, token, loadSdModels]);
 
   useEffect(() => {
     if (!sourceFile) {
@@ -114,16 +169,18 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
     onError?.(null);
     try {
       if (sdMode === SD_MODES.txt2img) {
+        const body = {
+          prompt: p,
+          negative_prompt: sdNegative.trim() || undefined,
+          steps: sdSteps,
+          width: sdSize,
+          height: sdSize,
+        };
+        if (sdCheckpoint.trim()) body.checkpoint = sdCheckpoint.trim();
         const res = await fetch(`${base}/api/ai/image`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({
-            prompt: p,
-            negative_prompt: sdNegative.trim() || undefined,
-            steps: sdSteps,
-            width: sdSize,
-            height: sdSize,
-          }),
+          body: JSON.stringify(body),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -151,6 +208,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
       fd.append("width", String(sdSize));
       fd.append("height", String(sdSize));
       fd.append("denoising_strength", String(sdDenoise));
+      if (sdCheckpoint.trim()) fd.append("checkpoint", sdCheckpoint.trim());
 
       const res = await fetch(`${base}/api/ai/image/img2img`, {
         method: "POST",
@@ -189,6 +247,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
     sdMode,
     sourceFile,
     maskFile,
+    sdCheckpoint,
     sdGenerating,
     onError,
   ]);
@@ -353,6 +412,48 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
                 {m.label}
               </button>
             ))}
+          </div>
+
+          <div className="rounded-xl border border-tc-border/60 bg-tc-panel/25 px-3 py-2 space-y-1">
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="flex min-w-0 flex-1 flex-col gap-0.5 text-[11px] text-tc-text-muted sm:min-w-[12rem]">
+                Модель
+                <select
+                  value={sdCheckpoint}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSdCheckpoint(v);
+                    try {
+                      if (v) window.localStorage.setItem(LS_SD_CHECKPOINT_KEY, v);
+                      else window.localStorage.removeItem(LS_SD_CHECKPOINT_KEY);
+                    } catch {
+                      /* ignore */
+                    }
+                  }}
+                  disabled={sdGenerating || sdModelsLoading}
+                  className="tc-msg-input max-w-full truncate rounded-lg border border-tc-border bg-tc-input px-2 py-1.5 text-xs text-tc-text outline-none focus:ring-2 focus:ring-tc-accent/50"
+                >
+                  <option value="">Как в WebUI / SD_MODEL_CHECKPOINT</option>
+                  {sdCheckpointOptions.map((t) => (
+                    <option key={t} value={t} title={t}>
+                      {t.length > 72 ? `${t.slice(0, 70)}…` : t}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={sdGenerating || sdModelsLoading}
+                onClick={() => void loadSdModels()}
+                className="shrink-0 rounded-lg border border-tc-border/70 bg-tc-input/50 px-2 py-1.5 text-[11px] text-tc-text-sec hover:bg-tc-hover disabled:opacity-40"
+              >
+                {sdModelsLoading ? "…" : "Обновить список"}
+              </button>
+            </div>
+            {sdModelsError ? <p className="text-[11px] text-tc-danger">{sdModelsError}</p> : null}
+            <p className="text-[10px] leading-snug text-tc-text-muted">
+              Список подгружается из Web UI. Длинные подписи сокращены в строке; полный текст — в подсказке при наведении на пункт.
+            </p>
           </div>
 
           {(sdMode === SD_MODES.img2img || sdMode === SD_MODES.inpaint) && (

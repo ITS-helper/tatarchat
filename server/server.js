@@ -1027,35 +1027,88 @@ function extractSdWebUiHttpErrorText(txt) {
   return s.slice(0, 800);
 }
 
-function buildSdWebUiPayloadBase(extra) {
+const SD_MODELS_LIST_TIMEOUT_MS = Math.min(Math.max(Number(process.env.SD_MODELS_LIST_TIMEOUT_MS) || 20_000, 5000), 60_000);
+const SD_CHECKPOINT_VALUE_MAX = 384;
+
+function sanitizeSdCheckpoint(raw) {
+  return String(raw ?? "")
+    .replace(/[\u0000-\u001F\u007F]/g, "")
+    .trim()
+    .slice(0, SD_CHECKPOINT_VALUE_MAX);
+}
+
+/** requestCheckpoint: из тела запроса; пусто → только env SD_MODEL_CHECKPOINT */
+function buildSdWebUiPayloadBase(extra, requestCheckpoint) {
   const payload = { ...extra };
-  if (SD_MODEL_CHECKPOINT) {
+  const fromReq = sanitizeSdCheckpoint(requestCheckpoint);
+  const use = fromReq || SD_MODEL_CHECKPOINT;
+  if (use) {
     const prev =
       payload.override_settings && typeof payload.override_settings === "object" ? payload.override_settings : {};
-    payload.override_settings = { ...prev, sd_model_checkpoint: SD_MODEL_CHECKPOINT };
+    payload.override_settings = { ...prev, sd_model_checkpoint: use };
   }
   return payload;
 }
 
 /**
+ * Список чекпоинтов с GET /sdapi/v1/sd-models → массив title для override_settings.
+ */
+async function fetchSdWebUiCheckpointTitles() {
+  const url = `${SD_WEBUI_BASE_URL}/sdapi/v1/sd-models`;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), SD_MODELS_LIST_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: ac.signal });
+    const txt = await res.text();
+    if (!res.ok) {
+      const err = new Error("sd_models_http");
+      err.detail = extractSdWebUiHttpErrorText(txt) || txt.slice(0, 300);
+      err.status = res.status;
+      throw err;
+    }
+    let data;
+    try {
+      data = txt ? JSON.parse(txt) : [];
+    } catch {
+      data = [];
+    }
+    if (!Array.isArray(data)) return [];
+    const titles = [];
+    for (const row of data) {
+      if (row == null || typeof row !== "object") continue;
+      let t = typeof row.title === "string" ? row.title.trim() : "";
+      if (!t && typeof row.model_name === "string") t = row.model_name.trim();
+      if (t) titles.push(t);
+    }
+    titles.sort((a, b) => a.localeCompare(b, "en"));
+    return [...new Set(titles)];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Прокси к A1111 POST /sdapi/v1/txt2img → { base64, mime } или throw.
  */
-async function callSdWebUiTxt2img({ prompt, negativePrompt, steps, width, height }) {
+async function callSdWebUiTxt2img({ prompt, negativePrompt, steps, width, height, checkpoint }) {
   const url = `${SD_WEBUI_BASE_URL}/sdapi/v1/txt2img`;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), SD_WEBUI_TIMEOUT_MS);
   try {
-    const payload = buildSdWebUiPayloadBase({
-      prompt,
-      negative_prompt: negativePrompt || "",
-      steps,
-      width,
-      height,
-      cfg_scale: SD_CFG_SCALE,
-      sampler_index: SD_SAMPLER_INDEX,
-      restore_faces: SD_RESTORE_FACES,
-      send_images: true,
-    });
+    const payload = buildSdWebUiPayloadBase(
+      {
+        prompt,
+        negative_prompt: negativePrompt || "",
+        steps,
+        width,
+        height,
+        cfg_scale: SD_CFG_SCALE,
+        sampler_index: SD_SAMPLER_INDEX,
+        restore_faces: SD_RESTORE_FACES,
+        send_images: true,
+      },
+      checkpoint
+    );
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1102,25 +1155,29 @@ async function callSdWebUiImg2img({
   initImageBase64,
   maskBase64,
   denoisingStrength,
+  checkpoint,
 }) {
   const url = `${SD_WEBUI_BASE_URL}/sdapi/v1/img2img`;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), SD_WEBUI_TIMEOUT_MS);
   try {
-    const payload = buildSdWebUiPayloadBase({
-      init_images: [initImageBase64],
-      prompt,
-      negative_prompt: negativePrompt || "",
-      steps,
-      width,
-      height,
-      cfg_scale: SD_CFG_SCALE,
-      sampler_index: SD_SAMPLER_INDEX,
-      restore_faces: SD_RESTORE_FACES,
-      send_images: true,
-      denoising_strength: denoisingStrength,
-      resize_mode: 0,
-    });
+    const payload = buildSdWebUiPayloadBase(
+      {
+        init_images: [initImageBase64],
+        prompt,
+        negative_prompt: negativePrompt || "",
+        steps,
+        width,
+        height,
+        cfg_scale: SD_CFG_SCALE,
+        sampler_index: SD_SAMPLER_INDEX,
+        restore_faces: SD_RESTORE_FACES,
+        send_images: true,
+        denoising_strength: denoisingStrength,
+        resize_mode: 0,
+      },
+      checkpoint
+    );
     if (typeof maskBase64 === "string" && maskBase64.length > 0) {
       payload.mask = maskBase64;
       payload.mask_blur = 4;
@@ -3165,6 +3222,44 @@ app.delete("/api/ai/facts/:id", requireAuth, async (req, res) => {
   }
 });
 
+app.get("/api/ai/image/models", requireAuth, async (req, res) => {
+  try {
+    if (!isSdWebUiConfigured()) {
+      return res.status(503).json({
+        error:
+          "Генерация не настроена: задайте SD_WEBUI_BASE_URL в .env на сервере (например http://127.0.0.1:7860) и запусти локальный UI (например C:\\sd\\run.bat) с включённым API.",
+      });
+    }
+    const titles = await fetchSdWebUiCheckpointTitles();
+    res.json({ models: titles.map((title) => ({ title })) });
+  } catch (e) {
+    if (e?.name === "AbortError") {
+      return res.status(504).json({ error: "Список моделей: таймаут" });
+    }
+    if (String(e?.message || "") === "sd_models_http") {
+      console.error("[sd] GET sd-models:", e?.detail || e?.status);
+      return res.status(502).json({
+        error: "Не удалось получить список моделей из Web UI (GET /sdapi/v1/sd-models).",
+        detail: String(e?.detail || "").trim().slice(0, 400) || undefined,
+      });
+    }
+    const causeMsg = String(e?.cause?.message || e?.cause || "");
+    const topMsg = String(e?.message || "");
+    const connHint =
+      e?.cause?.code === "ECONNREFUSED" ||
+      e?.code === "ECONNREFUSED" ||
+      /ECONNREFUSED|fetch failed|getaddrinfo|ENOTFOUND/i.test(topMsg + causeMsg);
+    if (connHint) {
+      return res.status(502).json({
+        error: "Web UI недоступен для списка моделей.",
+        detail: (topMsg || causeMsg).trim().slice(0, 240) || undefined,
+      });
+    }
+    console.error("GET /api/ai/image/models", e);
+    return res.status(500).json({ error: "Ошибка" });
+  }
+});
+
 app.post("/api/ai/image", requireAuth, async (req, res) => {
   try {
     if (!isSdWebUiConfigured()) {
@@ -3176,6 +3271,7 @@ app.post("/api/ai/image", requireAuth, async (req, res) => {
     let prompt = sanitizeSdPrompt(req.body?.prompt, MAX_SD_PROMPT_CHARS);
     if (!prompt) return res.status(400).json({ error: "Пустой промпт" });
     const neg = sanitizeSdPrompt(req.body?.negative_prompt || req.body?.negativePrompt || "", MAX_SD_PROMPT_CHARS);
+    const checkpoint = sanitizeSdCheckpoint(req.body?.checkpoint ?? req.body?.sd_model_checkpoint ?? "");
 
     let steps = parseInt(req.body?.steps, 10);
     if (!Number.isFinite(steps)) steps = 25;
@@ -3189,7 +3285,7 @@ app.post("/api/ai/image", requireAuth, async (req, res) => {
     width = snapSide(width);
     height = snapSide(height);
 
-    const out = await callSdWebUiTxt2img({ prompt, negativePrompt: neg, steps, width, height });
+    const out = await callSdWebUiTxt2img({ prompt, negativePrompt: neg, steps, width, height, checkpoint });
     res.json({ ok: true, mimeType: out.mimeType, imageBase64: out.base64 });
   } catch (e) {
     return handleSdProxyError(e, res, "txt2img");
@@ -3249,6 +3345,8 @@ app.post("/api/ai/image/img2img", requireAuth, runSdImg2imgUpload, async (req, r
     const maskB64 =
       typeof maskBuf?.length === "number" && maskBuf.length > 0 ? maskBuf.toString("base64") : undefined;
 
+    const checkpoint = sanitizeSdCheckpoint(req.body?.checkpoint ?? req.body?.sd_model_checkpoint ?? "");
+
     const out = await callSdWebUiImg2img({
       prompt,
       negativePrompt: neg,
@@ -3258,6 +3356,7 @@ app.post("/api/ai/image/img2img", requireAuth, runSdImg2imgUpload, async (req, r
       initImageBase64: initB64,
       maskBase64: maskB64,
       denoisingStrength: denoising,
+      checkpoint,
     });
     return res.json({ ok: true, mimeType: out.mimeType, imageBase64: out.base64 });
   } catch (e) {
