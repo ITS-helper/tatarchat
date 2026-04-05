@@ -1029,12 +1029,49 @@ function extractSdWebUiHttpErrorText(txt) {
 
 const SD_MODELS_LIST_TIMEOUT_MS = Math.min(Math.max(Number(process.env.SD_MODELS_LIST_TIMEOUT_MS) || 20_000, 5000), 60_000);
 const SD_CHECKPOINT_VALUE_MAX = 384;
+/** Один GET-путь относительно SD_WEBUI_BASE_URL; альтернатива — SD_WEBUI_SD_MODELS_PATHS */
+const SD_WEBUI_SD_MODELS_PATH_SINGLE = String(process.env.SD_WEBUI_SD_MODELS_PATH || "")
+  .trim()
+  .replace(/^\/+/, "")
+  .replace(/\/+$/, "");
+/** Несколько путей через запятую — перебор при 404 (кастомные/урезанные сборки FLUX) */
+const SD_WEBUI_SD_MODELS_PATHS_MULTI = String(process.env.SD_WEBUI_SD_MODELS_PATHS || "")
+  .split(",")
+  .map((p) => String(p || "").trim().replace(/^\/+/, "").replace(/\/+$/, ""))
+  .filter(Boolean);
+const SD_MODELS_REL_PATHS =
+  SD_WEBUI_SD_MODELS_PATHS_MULTI.length > 0
+    ? SD_WEBUI_SD_MODELS_PATHS_MULTI
+    : SD_WEBUI_SD_MODELS_PATH_SINGLE
+      ? [SD_WEBUI_SD_MODELS_PATH_SINGLE]
+      : ["sdapi/v1/sd-models"];
 
 function sanitizeSdCheckpoint(raw) {
   return String(raw ?? "")
     .replace(/[\u0000-\u001F\u007F]/g, "")
     .trim()
     .slice(0, SD_CHECKPOINT_VALUE_MAX);
+}
+
+/** Резервный список имён чекпоинтов, если GET списка из WebUI даёт 404/ошибку: SD_CHECKPOINT_TITLES=а|б или многострочно / через ; */
+function parseSdCheckpointTitlesFromEnv() {
+  const raw = String(process.env.SD_CHECKPOINT_TITLES || "").trim();
+  if (!raw) return [];
+  const chunks = /[\n|]/.test(raw)
+    ? raw.split(/\r?\n|[|]/).flatMap((line) => line.split(";"))
+    : raw.split(",").map((s) => s.trim());
+  const out = [];
+  const seen = new Set();
+  for (const c of chunks) {
+    const t = sanitizeSdCheckpoint(c);
+    if (t && !seen.has(t)) {
+      seen.add(t);
+      out.push(t);
+      if (out.length >= 200) break;
+    }
+  }
+  out.sort((a, b) => a.localeCompare(b, "en"));
+  return out;
 }
 
 /** requestCheckpoint: из тела запроса; пусто → только env SD_MODEL_CHECKPOINT */
@@ -1051,40 +1088,71 @@ function buildSdWebUiPayloadBase(extra, requestCheckpoint) {
 }
 
 /**
- * Список чекпоинтов с GET /sdapi/v1/sd-models → массив title для override_settings.
+ * Список чекпоинтов через GET (пути из SD_MODELS_REL_PATHS) → массив title для override_settings.
  */
 async function fetchSdWebUiCheckpointTitles() {
-  const url = `${SD_WEBUI_BASE_URL}/sdapi/v1/sd-models`;
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), SD_MODELS_LIST_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { signal: ac.signal });
-    const txt = await res.text();
-    if (!res.ok) {
-      const err = new Error("sd_models_http");
-      err.detail = extractSdWebUiHttpErrorText(txt) || txt.slice(0, 300);
-      err.status = res.status;
-      throw err;
-    }
-    let data;
+  const base = SD_WEBUI_BASE_URL.replace(/\/$/, "");
+  let lastErr = null;
+  for (const rel of SD_MODELS_REL_PATHS) {
+    const url = `${base}/${rel}`;
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), SD_MODELS_LIST_TIMEOUT_MS);
     try {
-      data = txt ? JSON.parse(txt) : [];
-    } catch {
-      data = [];
+      const res = await fetch(url, {
+        signal: ac.signal,
+        headers: { Accept: "application/json" },
+      });
+      const txt = await res.text();
+      if (res.status === 404) {
+        lastErr = new Error("sd_models_http");
+        lastErr.detail = `${rel}: Not Found`;
+        lastErr.status = 404;
+        continue;
+      }
+      if (!res.ok) {
+        const err = new Error("sd_models_http");
+        err.detail = extractSdWebUiHttpErrorText(txt) || `${rel}: HTTP ${res.status}`;
+        err.status = res.status;
+        throw err;
+      }
+      let data;
+      try {
+        data = txt ? JSON.parse(txt) : [];
+      } catch {
+        data = [];
+      }
+      if (!Array.isArray(data)) {
+        lastErr = new Error("sd_models_http");
+        lastErr.detail = `${rel}: ожидался JSON-массив`;
+        lastErr.status = res.status;
+        continue;
+      }
+      const titles = [];
+      for (const row of data) {
+        if (row == null || typeof row !== "object") continue;
+        let t = typeof row.title === "string" ? row.title.trim() : "";
+        if (!t && typeof row.model_name === "string") t = row.model_name.trim();
+        if (t) titles.push(t);
+      }
+      titles.sort((a, b) => a.localeCompare(b, "en"));
+      const uniq = [...new Set(titles)];
+      if (!uniq.length && SD_MODELS_REL_PATHS.length > 1 && SD_MODELS_REL_PATHS.indexOf(rel) < SD_MODELS_REL_PATHS.length - 1) {
+        lastErr = new Error("sd_models_http");
+        lastErr.detail = `${rel}: пустой список, пробуем следующий путь`;
+        lastErr.status = res.status;
+        continue;
+      }
+      return uniq;
+    } catch (e) {
+      if (e?.name === "AbortError") throw e;
+      if (String(e?.message || "") === "sd_models_http") throw e;
+      lastErr = e;
+    } finally {
+      clearTimeout(timer);
     }
-    if (!Array.isArray(data)) return [];
-    const titles = [];
-    for (const row of data) {
-      if (row == null || typeof row !== "object") continue;
-      let t = typeof row.title === "string" ? row.title.trim() : "";
-      if (!t && typeof row.model_name === "string") t = row.model_name.trim();
-      if (t) titles.push(t);
-    }
-    titles.sort((a, b) => a.localeCompare(b, "en"));
-    return [...new Set(titles)];
-  } finally {
-    clearTimeout(timer);
   }
+  if (lastErr) throw lastErr;
+  return [];
 }
 
 /**
@@ -3230,16 +3298,56 @@ app.get("/api/ai/image/models", requireAuth, async (req, res) => {
           "Генерация не настроена: задайте SD_WEBUI_BASE_URL в .env на сервере (например http://127.0.0.1:7860) и запусти локальный UI (например C:\\sd\\run.bat) с включённым API.",
       });
     }
-    const titles = await fetchSdWebUiCheckpointTitles();
-    res.json({ models: titles.map((title) => ({ title })) });
-  } catch (e) {
-    if (e?.name === "AbortError") {
-      return res.status(504).json({ error: "Список моделей: таймаут" });
+    let fromApi = [];
+    let apiFailed = false;
+    let apiDetail = "";
+    try {
+      fromApi = await fetchSdWebUiCheckpointTitles();
+    } catch (e) {
+      if (e?.name === "AbortError") {
+        return res.status(504).json({ error: "Список моделей: таймаут" });
+      }
+      apiFailed = true;
+      apiDetail = String(e?.detail || e?.message || "").trim();
+      console.warn("[sd] список моделей с WebUI:", apiDetail || e);
     }
+
+    const fromEnv = parseSdCheckpointTitlesFromEnv();
+    let titles = [];
+    if (fromApi.length) {
+      titles = [...fromApi];
+      const seen = new Set(titles);
+      for (const t of fromEnv) {
+        if (!seen.has(t)) {
+          seen.add(t);
+          titles.push(t);
+        }
+      }
+      titles.sort((a, b) => a.localeCompare(b, "en"));
+    } else if (fromEnv.length) {
+      titles = fromEnv;
+    }
+
+    if (!titles.length) {
+      const pathsHint = SD_MODELS_REL_PATHS.join(", ");
+      return res.status(502).json({
+        error:
+          "Список моделей недоступен: все пути вернули ошибку (часто 404 в урезанной сборке). Открой /docs у WebUI, найди рабочий GET списка чекпоинтов и задай SD_WEBUI_SD_MODELS_PATH или SD_WEBUI_SD_MODELS_PATHS. Либо перечисли модели в SD_CHECKPOINT_TITLES (разделитель | или запятая).",
+        detail: apiDetail ? apiDetail.slice(0, 400) : undefined,
+        triedPaths: pathsHint,
+      });
+    }
+
+    res.json({
+      models: titles.map((title) => ({ title })),
+      listSource: fromApi.length && !apiFailed ? "webui" : fromEnv.length ? "env" : "webui",
+      partial: Boolean(apiFailed && fromEnv.length && fromApi.length === 0),
+    });
+  } catch (e) {
     if (String(e?.message || "") === "sd_models_http") {
       console.error("[sd] GET sd-models:", e?.detail || e?.status);
       return res.status(502).json({
-        error: "Не удалось получить список моделей из Web UI (GET /sdapi/v1/sd-models).",
+        error: "Не удалось получить список моделей из Web UI.",
         detail: String(e?.detail || "").trim().slice(0, 400) || undefined,
       });
     }
@@ -5064,6 +5172,9 @@ async function start() {
         `[sd] SD_WEBUI_BASE_URL=${SD_WEBUI_BASE_URL} cfg_scale=${SD_CFG_SCALE} sampler_index=${JSON.stringify(SD_SAMPLER_INDEX)}`
       );
       if (SD_MODEL_CHECKPOINT) console.log(`[sd] SD_MODEL_CHECKPOINT=${JSON.stringify(SD_MODEL_CHECKPOINT)}`);
+      console.log(`[sd] SD models GET paths: ${SD_MODELS_REL_PATHS.join(" | ")}`);
+      const fbN = parseSdCheckpointTitlesFromEnv().length;
+      if (fbN) console.log(`[sd] SD_CHECKPOINT_TITLES: ${fbN} fallback name(s)`);
     }
   });
 }

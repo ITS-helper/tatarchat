@@ -127,6 +127,9 @@ Node поднимается через Win32_Process.Create (не через Sta
   SD_SAMPLER_INDEX=Euler в .env Node (имя сэмплера — GET /sdapi/v1/samplers).
   Если API даёт sd_checkpoint_info / NoneType — один раз сгенерировать в UI или
   задать SD_MODEL_CHECKPOINT=файл.safetensors как в списке моделей.
+  Если GET /sdapi/v1/sd-models даёт 404 (урезанная сборка) — в .env Node задать
+  SD_CHECKPOINT_TITLES=имя1.safetensors|имя2.safetensors и/или верный путь к списку
+  из /docs: SD_WEBUI_SD_MODELS_PATH=... или SD_WEBUI_SD_MODELS_PATHS=путь1,путь2
   Подробнее — tatarchat-recent-features.mdc, подраздел FLUX.
 
 ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
   const [sdCheckpoint, setSdCheckpoint] = useState("");
   const [sdModelsLoading, setSdModelsLoading] = useState(false);
   const [sdModelsError, setSdModelsError] = useState(null);
+  const [sdModelsNote, setSdModelsNote] = useState(null);
   const [sdMode, setSdMode] = useState(SD_MODES.txt2img);
   const [sdPrompt, setSdPrompt] = useState("");
   const [sdNegative, setSdNegative] = useState("");
@@ -66,6 +67,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
     if (!token || !imageGenAvailable) return;
     setSdModelsLoading(true);
     setSdModelsError(null);
+    setSdModelsNote(null);
     try {
       const res = await fetch(`${base}/api/ai/image/models`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -73,7 +75,9 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         const d = typeof data.detail === "string" && data.detail.trim() ? ` ${data.detail.trim()}` : "";
-        throw new Error((data.error || `HTTP ${res.status}`) + d);
+        const tried =
+          typeof data.triedPaths === "string" && data.triedPaths.trim() ? ` Пробовали пути: ${data.triedPaths}.` : "";
+        throw new Error((data.error || `HTTP ${res.status}`) + d + tried);
       }
       const list = Array.isArray(data.models)
         ? data.models.map((m) => (typeof m?.title === "string" ? m.title.trim() : "")).filter(Boolean)
@@ -91,6 +95,13 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
         if (prev && merged.includes(prev)) return prev;
         return "";
       });
+      if (data.partial) {
+        setSdModelsNote(
+          "Список из резерва на сервере: Web UI не отдал список моделей (часто 404 на /sdapi/v1/sd-models). Админ: SD_CHECKPOINT_TITLES или SD_WEBUI_SD_MODELS_PATH в .env.",
+        );
+      } else if (data.listSource === "env") {
+        setSdModelsNote("Список из SD_CHECKPOINT_TITLES на сервере (или API вернул пустой список).");
+      }
     } catch (e) {
       console.error(e);
       setSdModelsError(typeof e?.message === "string" ? e.message : "Список моделей");
@@ -451,8 +462,9 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
               </button>
             </div>
             {sdModelsError ? <p className="text-[11px] text-tc-danger">{sdModelsError}</p> : null}
+            {sdModelsNote ? <p className="text-[11px] text-amber-600 dark:text-amber-400/90">{sdModelsNote}</p> : null}
             <p className="text-[10px] leading-snug text-tc-text-muted">
-              Список подгружается из Web UI. Длинные подписи сокращены в строке; полный текст — в подсказке при наведении на пункт.
+              Список запрашивается у Web UI (см. /docs). Длинные подписи сокращены; полный текст — в подсказке при наведении.
             </p>
           </div>
 
