@@ -84,6 +84,7 @@ alwaysApply: true
 ### Локальный Web UI на машине с Node (FLUX; API как у A1111)
 
 - **Точка входа на сервере:** **`C:\sd\run.bat`** (единый батник старта). Внутри должны подниматься Gradio/веб-интерфейс и **HTTP API**, совместимый с Automatic1111 (**`/sdapi/v1/txt2img`**, **`/sdapi/v1/img2img`**), порт — как в **`SD_WEBUI_BASE_URL`** (часто **7860**). Проверка: в браузере на этом ПК **`http://127.0.0.1:<порт>/docs`**.
+- **Флаг `--api` (критично):** в консоли Forge при старте смотри **`Launching Web UI with arguments`**. Там должен быть **`--api`**. Без него вкладка Gradio работает, а **REST `/sdapi/v1/...` не поднимается** → с сайта **404 Not Found**. Задаётся через **`COMMANDLINE_ARGS`** (пример: **`--api --listen --port 7860`**). Подробно — **`scripts/REMOTE-DEPLOY-RU.txt`** (**4bb**).
 - **Автозапуск после деплоя:** переменная **`TATARCHAT_SD_RUN_BAT=C:\sd\run.bat`** (или параметр **`-SdWebuiBat`** / **`-SdLaunchBat`** у **`deploy-pull.ps1 -FullRestart`**). Старое имя **`TATARCHAT_SD_WEBUI_BAT`** всё ещё читается скриптом, если **`TATARCHAT_SD_RUN_BAT`** не задана. Подробности — **`scripts/REMOTE-DEPLOY-RU.txt`** (**4b**).
 
 #### FLUX и параметры API
@@ -92,7 +93,7 @@ alwaysApply: true
 - **Сборка:** конкретные шаги — в доке твоего стека (Forge, sd-next, кастомный FLUX UI и т.д.). Пока **txt2img** в UI не стабилен, через TatarChat не заработает.
 - **Веса:** пути зависят от сборки; на **Hugging Face** модели бывают **gated** — логин, принятие условий, **`hf auth login`** при необходимости.
 - **Параметры прокси:** в `.env` Node часто **`SD_CFG_SCALE=1`** и **`SD_SAMPLER_INDEX=Euler`** (точное имя — **`GET /sdapi/v1/samplers`**). См. env **`SD_CFG_SCALE`**, **`SD_SAMPLER_INDEX`**, **`SD_RESTORE_FACES`** выше.
-- **VRAM:** **`--medvram`**, **`--lowvram`**, FP8 — по доке твоей установки (в **`run.bat`** или вложенных скриптах).
+- **VRAM:** в **Forge** часть старых флагов (**`--medvram`** и т.п.) может быть отключена — ориентируйся на лог старта и доку сборки; FP8 — по весам.
 
 #### Классический Automatic1111 (если используешь отдельно)
 
@@ -104,7 +105,7 @@ alwaysApply: true
 
 ### Деплой и автозапуск
 
-- Полный рестарт хоста и подъём UI: **`deploy-pull.ps1 -FullRestart`** и **`TATARCHAT_SD_RUN_BAT`** (путь к **`C:\sd\run.bat`**). Пути только **C:** — **`scripts/REMOTE-DEPLOY-RU.txt`** (**4b**, **4c**).
+- Полный рестарт хоста и подъём UI: **`deploy-pull.ps1 -FullRestart`** и **`TATARCHAT_SD_RUN_BAT`** (путь к **`C:\sd\run.bat`**). Пути только **C:** — **`scripts/REMOTE-DEPLOY-RU.txt`** (**4b**, **4bb**, **4c**).
 - **`start.bat`** в корне репозитория запускает Node из **`server\`**: **`cd ...\server`** и **`node server.js`**. Ошибка `Cannot find module '...\tatarchat\server.js'` — на машине устаревший батник/задача, указывающая на корень без папки **`server`**.
 
 ## Push / уведомления (server + client)
