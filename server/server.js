@@ -53,6 +53,23 @@ function normalizeSdWebUiBaseUrl(raw) {
   }
 }
 const SD_WEBUI_BASE_URL = normalizeSdWebUiBaseUrl(process.env.SD_WEBUI_BASE_URL || process.env.A1111_BASE_URL || "");
+function normalizeSdWebUiApiRelPath(raw, fallback) {
+  const t = String(raw || "")
+    .trim()
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
+  return t || fallback;
+}
+/** Переопределение, если в твоей сборке другой путь (см. /docs); по умолчанию как у A1111 */
+const SD_WEBUI_TXT2IMG_PATH = normalizeSdWebUiApiRelPath(process.env.SD_WEBUI_TXT2IMG_PATH, "sdapi/v1/txt2img");
+const SD_WEBUI_IMG2IMG_PATH = normalizeSdWebUiApiRelPath(process.env.SD_WEBUI_IMG2IMG_PATH, "sdapi/v1/img2img");
+
+function sdWebUiUrl(relPath) {
+  const base = SD_WEBUI_BASE_URL.replace(/\/$/, "");
+  const rel = String(relPath || "").replace(/^\//, "");
+  return `${base}/${rel}`;
+}
+
 /** Ожидание ответа WebUI (FLUX часто дольше SD); переопределение: SD_WEBUI_TIMEOUT_MS в .env */
 const SD_WEBUI_TIMEOUT_MS = Math.min(Math.max(Number(process.env.SD_WEBUI_TIMEOUT_MS) || 240_000, 45_000), 900_000);
 const MAX_SD_PROMPT_CHARS = Math.min(Math.max(Number(process.env.MAX_SD_PROMPT_CHARS) || 1500, 200), 4000);
@@ -1159,7 +1176,7 @@ async function fetchSdWebUiCheckpointTitles() {
  * Прокси к A1111 POST /sdapi/v1/txt2img → { base64, mime } или throw.
  */
 async function callSdWebUiTxt2img({ prompt, negativePrompt, steps, width, height, checkpoint }) {
-  const url = `${SD_WEBUI_BASE_URL}/sdapi/v1/txt2img`;
+  const url = sdWebUiUrl(SD_WEBUI_TXT2IMG_PATH);
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), SD_WEBUI_TIMEOUT_MS);
   try {
@@ -1225,7 +1242,7 @@ async function callSdWebUiImg2img({
   denoisingStrength,
   checkpoint,
 }) {
-  const url = `${SD_WEBUI_BASE_URL}/sdapi/v1/img2img`;
+  const url = sdWebUiUrl(SD_WEBUI_IMG2IMG_PATH);
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), SD_WEBUI_TIMEOUT_MS);
   try {
@@ -1291,17 +1308,32 @@ function handleSdProxyError(e, res, logLabel) {
   if (e?.name === "AbortError") {
     return res.status(504).json({ error: "Генерация слишком долгая (таймаут)" });
   }
-  if (String(e?.message || "").startsWith("sd_webui_")) {
+  if (String(e?.message || "").startsWith("sd_webui_http_")) {
     console.error(`[sd] ${logLabel}:`, e?.detail || e?.message);
     const det = String(e?.detail || "").trim();
     const hintSd =
       /sd_checkpoint_info|NoneType.*checkpoint/i.test(det)
         ? " В WebUI выбери FLUX/чекпоинт и сделай один txt2img вручную; при Forge после сбоя загрузки иногда помогает переключить модель и назад. Либо в .env Node задай SD_MODEL_CHECKPOINT=имя_файла.safetensors как в списке моделей."
         : "";
+    const is404 =
+      String(e?.message || "").includes("sd_webui_http_404") || /not found|^404\b/i.test(det);
+    const hint404 = is404
+      ? ` Сейчас Node шлёт POST на ${logLabel === "img2img" ? SD_WEBUI_IMG2IMG_PATH : SD_WEBUI_TXT2IMG_PATH} относительно SD_WEBUI_BASE_URL. 404 обычно значит: нет флага --api, неверный порт в .env или другой путь в твоей сборке — открой /docs у WebUI и при необходимости задай SD_WEBUI_TXT2IMG_PATH / SD_WEBUI_IMG2IMG_PATH.`
+      : "";
     return res.status(502).json({
       error:
         "Локальный Web UI генерации недоступен или вернул ошибку. Запусти стек (например C:\\sd\\run.bat) с включённым API и проверь адрес в SD_WEBUI_BASE_URL." +
-        hintSd,
+        hintSd +
+        hint404,
+      detail: det.slice(0, 480) || undefined,
+      sdPath: logLabel === "img2img" ? SD_WEBUI_IMG2IMG_PATH : SD_WEBUI_TXT2IMG_PATH,
+    });
+  }
+  if (String(e?.message || "") === "sd_webui_no_image") {
+    console.error(`[sd] ${logLabel} no_image:`, e?.detail || e?.message);
+    const det = String(e?.detail || "").trim();
+    return res.status(502).json({
+      error: "Web UI вернул ответ без изображения. Загляни в консоль WebUI и проверь модель/параметры.",
       detail: det.slice(0, 480) || undefined,
     });
   }
@@ -5171,6 +5203,7 @@ async function start() {
       console.log(
         `[sd] SD_WEBUI_BASE_URL=${SD_WEBUI_BASE_URL} cfg_scale=${SD_CFG_SCALE} sampler_index=${JSON.stringify(SD_SAMPLER_INDEX)}`
       );
+      console.log(`[sd] POST txt2img=${SD_WEBUI_TXT2IMG_PATH} img2img=${SD_WEBUI_IMG2IMG_PATH}`);
       if (SD_MODEL_CHECKPOINT) console.log(`[sd] SD_MODEL_CHECKPOINT=${JSON.stringify(SD_MODEL_CHECKPOINT)}`);
       console.log(`[sd] SD models GET paths: ${SD_MODELS_REL_PATHS.join(" | ")}`);
       const fbN = parseSdCheckpointTitlesFromEnv().length;
