@@ -7,7 +7,9 @@
    <<<TC_SEED>>>   <<<TC_CFG>>>   <<<TC_DENOISE>>>   <<<TC_CHECKPOINT>>>
    Для img2img в узле Load Image вместо имени файла: <<<TC_LOAD_IMAGE>>>
    Для инпейнта во втором Load Image (маска): <<<TC_LOAD_MASK>>>
-4) Положите файл в эту папку и укажите путь в .env:
+4) Положите файл в эту папку на СЕРВЕРЕ (рядом с папкой server после деплоя). Если JSON только у вас на ПК и его нет в git — скопируйте вручную на хост в C:\tatarchat\server\comfy\workflows\ (или укажите абсолютный путь в COMFY_TXT2IMG_WORKFLOW).
+
+   В .env:
    COMFY_TXT2IMG_WORKFLOW=comfy/workflows/имя.json
    COMFY_IMG2IMG_WORKFLOW=...   (опционально)
    COMFY_INPAINT_WORKFLOW=...   (опционально)

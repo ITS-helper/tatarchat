@@ -4783,9 +4783,7 @@ async function start() {
   ensureUploadDirs();
   server.listen(PORT, () => {
     console.log(`Сервер: http://localhost:${PORT}`);
-    if (comfy.COMFYUI_BASE_URL) {
-      comfy.logStartupInfo();
-    }
+    comfy.logStartupInfo();
   });
 }
 

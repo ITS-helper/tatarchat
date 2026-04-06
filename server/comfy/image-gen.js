@@ -56,17 +56,6 @@ const COMFY_DEFAULT_CHECKPOINT = String(process.env.COMFY_DEFAULT_CHECKPOINT || 
 
 const SD_CHECKPOINT_VALUE_MAX = 384;
 
-function resolveWorkflowPath(raw) {
-  const s = String(raw || "").trim();
-  if (!s) return null;
-  if (path.isAbsolute(s)) return s;
-  return path.resolve(__dirname, "..", s);
-}
-
-const COMFY_TXT2IMG_WORKFLOW = resolveWorkflowPath(process.env.COMFY_TXT2IMG_WORKFLOW);
-const COMFY_IMG2IMG_WORKFLOW = resolveWorkflowPath(process.env.COMFY_IMG2IMG_WORKFLOW || "");
-const COMFY_INPAINT_WORKFLOW = resolveWorkflowPath(process.env.COMFY_INPAINT_WORKFLOW || "");
-
 function fileExists(p) {
   try {
     return p && fs.existsSync(p);
@@ -74,6 +63,32 @@ function fileExists(p) {
     return false;
   }
 }
+
+function resolveWorkflowPath(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return null;
+  if (path.isAbsolute(s)) return s;
+  return path.resolve(__dirname, "..", s);
+}
+
+/**
+ * Если в .env указано `comfy/workflows/2in1` без расширения — пробуем также `2in1.json`.
+ */
+function resolveWorkflowPathWithFallback(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return null;
+  const primary = resolveWorkflowPath(s);
+  if (primary && fileExists(primary)) return primary;
+  if (!/\.(json|JSON)$/.test(s)) {
+    const withJson = resolveWorkflowPath(`${s}.json`);
+    if (withJson && fileExists(withJson)) return withJson;
+  }
+  return primary;
+}
+
+const COMFY_TXT2IMG_WORKFLOW = resolveWorkflowPathWithFallback(process.env.COMFY_TXT2IMG_WORKFLOW);
+const COMFY_IMG2IMG_WORKFLOW = resolveWorkflowPathWithFallback(process.env.COMFY_IMG2IMG_WORKFLOW || "");
+const COMFY_INPAINT_WORKFLOW = resolveWorkflowPathWithFallback(process.env.COMFY_INPAINT_WORKFLOW || "");
 
 function isComfyConfigured() {
   return Boolean(COMFYUI_BASE_URL && COMFY_TXT2IMG_WORKFLOW && fileExists(COMFY_TXT2IMG_WORKFLOW));
@@ -606,9 +621,23 @@ function handleComfyError(e, res, logLabel) {
 }
 
 function logStartupInfo() {
-  if (!COMFYUI_BASE_URL) return;
+  if (!COMFYUI_BASE_URL) {
+    console.log("[comfy] Нет COMFYUI_BASE_URL / SD_COMFYUI_BASE_URL — генерация картинок выключена.");
+    return;
+  }
   console.log(`[comfy] COMFYUI_BASE_URL=${COMFYUI_BASE_URL}`);
-  if (COMFY_TXT2IMG_WORKFLOW) console.log(`[comfy] COMFY_TXT2IMG_WORKFLOW=${COMFY_TXT2IMG_WORKFLOW}`);
+  if (COMFY_TXT2IMG_WORKFLOW) {
+    console.log(`[comfy] COMFY_TXT2IMG_WORKFLOW=${COMFY_TXT2IMG_WORKFLOW}`);
+    if (!fileExists(COMFY_TXT2IMG_WORKFLOW)) {
+      console.warn(
+        "[comfy] Файл workflow не найден на диске — imageGenAvailable=false. Положите JSON рядом с server (см. COMFY_TXT2IMG_WORKFLOW) и сделайте деплой, либо в .env укажите без расширения: comfy/workflows/2in1 (подберётся 2in1.json)."
+      );
+    } else {
+      console.log("[comfy] txt2img workflow: OK");
+    }
+  } else {
+    console.warn("[comfy] COMFY_TXT2IMG_WORKFLOW не задан — imageGenAvailable=false.");
+  }
   if (COMFY_IMG2IMG_WORKFLOW) console.log(`[comfy] COMFY_IMG2IMG_WORKFLOW=${COMFY_IMG2IMG_WORKFLOW}`);
   if (COMFY_INPAINT_WORKFLOW) console.log(`[comfy] COMFY_INPAINT_WORKFLOW=${COMFY_INPAINT_WORKFLOW}`);
   console.log(`[comfy] cfg_scale=${COMFY_CFG_SCALE} timeout_ms=${COMFYUI_TIMEOUT_MS}`);
