@@ -12,5 +12,6 @@
    COMFY_IMG2IMG_WORKFLOW=...   (опционально)
    COMFY_INPAINT_WORKFLOW=...   (опционально)
 5) COMFYUI_BASE_URL=http://127.0.0.1:8000  (порт как в ComfyUI → Settings → Network)
+   То же самое можно задать как SD_COMFYUI_BASE_URL — TatarChat подхватит оба имени.
 
 Если в шаблоне есть <<<TC_CHECKPOINT>>>, задайте COMFY_DEFAULT_CHECKPOINT или выбирайте модель в интерфейсе сайта.

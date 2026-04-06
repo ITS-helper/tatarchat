@@ -24,7 +24,10 @@ function normalizeComfyBaseUrl(raw) {
 }
 
 const COMFYUI_BASE_URL = normalizeComfyBaseUrl(
-  process.env.COMFYUI_BASE_URL || process.env.COMFY_BASE_URL || ""
+  process.env.COMFYUI_BASE_URL ||
+    process.env.SD_COMFYUI_BASE_URL ||
+    process.env.COMFY_BASE_URL ||
+    ""
 );
 
 function comfyUrl(relPath) {
