@@ -55,57 +55,40 @@ alwaysApply: true
   - Модель (пер‑пользователя): таблица **`user_ollama_prefs`** + `POST /api/ai/chat { setModel }`, `GET /api/ai/chat` отдаёт `model` и `availableModels`.
   - Память фактов: таблица **`user_ai_facts`** + API **`GET/POST/DELETE /api/ai/facts`**; факты подмешиваются в **system** перед каждым ответом.
   - HTTP к локальному API модели: `POST …/api/chat` (URL, таймаут, список моделей и лимиты — константы/`process.env` в начале **`server/server.js`**, наружу не прокидывать). Свой базовый промпт: опционально **`AI_SYSTEM_PROMPT`** (полностью подменяет встроенный; в коде читается и прежний одноимённый ключ из env для обратной совместимости).
-  - **Картинки (txt2img):** см. отдельный раздел **«Генерация картинок (Stable Diffusion)»** ниже.
+  - **Картинки (txt2img):** см. отдельный раздел **«Генерация картинок (ComfyUI)»** ниже.
 - **Поиск в интернете (опционально):** в **`POST /api/ai/chat`** флаг **`search: true`** — сначала [Tavily Search API](https://docs.tavily.com/) (`POST https://api.tavily.com/search`, **`Authorization: Bearer TAVILY_API_KEY`**), выдержки в **system** (в БД только user/assistant). При ответе по выдержкам в промпте учитывается контекст **России**. Env: **`TAVILY_API_KEY`**, опционально **`TAVILY_SEARCH_DEPTH`**, **`TAVILY_MAX_RESULTS`**, **`TAVILY_TIMEOUT_MS`**.
   - UI: чекбокс «Искать в интернете» (localStorage **`tatarchat_ai_web_search`**), индикатор **«Думаю… / Ищу и думаю…»**; ответ разбит по группам (`##`), голые URL сжимаются в `[текст](url)`, блок **«Источники»** в **`details`**.
   - Картинки: запрос Tavily с `include_images`; сервер фильтрует битые URL, клиент показывает сетку **«Картинки по теме поиска»** и открывает их в **превью‑лайтбоксе** внутри чата.
   - Источники: в ответе ассистента не должно быть `[1]` внутри текста — ссылки оформляются кратко в конце блоком **«Источники»**.
 
-## Генерация картинок (Stable Diffusion: txt2img, img2img, inpaint)
+## Генерация картинок (ComfyUI: txt2img, img2img, inpaint)
 
-Связка: **браузер** → **Node TatarChat** (JWT) → **локальный Automatic1111** (`/sdapi/v1/txt2img` или **`/sdapi/v1/img2img`**). Оба процесса на **одном ПК** (loopback). WebUI должен быть **запущен**, пока нужна генерация с сайта.
+Связка: **браузер** → **Node TatarChat** (JWT) → **локальный ComfyUI** (`POST /prompt` → опрос `GET /history/{prompt_id}` → `GET /view` для PNG). ComfyUI и Node на **одном ПК** (loopback). ComfyUI должен быть **запущен**, пока нужна генерация с сайта.
 
 ### Клиент (`client`)
 
-- Сайдбар **Личное** → **«Картинка (SD)»** (`personalSdOpen` в **`App.jsx`**). Экран **`PersonalSdImage.jsx`**: выпадающий список **модели** (`GET /api/ai/image/models`, выбор в **localStorage** `tatarchat_sd_checkpoint`, кнопка обновления списка); режимы **Текст → фото** (JSON `POST /api/ai/image`), **img2img** и **Инпейнт** (`multipart` `POST /api/ai/image/img2img`: поля **`source`**, опционально **`mask`**, плюс текстовые `prompt`, `negative_prompt`, `steps`, `width`, `height`, `denoising_strength`, опционально **`checkpoint`**); превью файлов, слайдер denoise, размеры до **1024** для img2img/inpaint.
-- Флаг **`imageGenAvailable`** приходит с **`GET /api/ai/chat`** (и не относится к блоку SD в ассистенте — генерация вынесена в отдельный пункт меню).
-- **Промпты:** обычные checkpoint’ы лучше понимают **английские теги** (`a cute dog, fluffy, outdoor…`), а не русские команды вроде «нарисуй собаку» — иначе результат случайный.
+- Сайдбар **Личное** → **«Картинка (ComfyUI)»** (`personalSdOpen` в **`App.jsx`**). Экран **`PersonalSdImage.jsx`**: выпадающий список **модели** (`GET /api/ai/image/models`, выбор в **localStorage** `tatarchat_comfy_checkpoint` / старый ключ `tatarchat_sd_checkpoint`, кнопка обновления списка); режимы **Текст → фото** (JSON `POST /api/ai/image`), **img2img** и **Инпейнт** (`multipart` `POST /api/ai/image/img2img`: поля **`source`**, опционально **`mask`**, плюс текстовые `prompt`, `negative_prompt`, `steps`, `width`, `height`, `denoising_strength`, опционально **`checkpoint`**); превью файлов, слайдер denoise, размеры до **1024** для img2img/inpaint.
+- Флаг **`imageGenAvailable`** приходит с **`GET /api/ai/chat`** (генерация вынесена в отдельный пункт меню).
+- **Промпты:** для многих моделей лучше **английские теги** (`a cute dog, fluffy, outdoor…`), а не русские команды вроде «нарисуй собаку» — иначе результат случайный.
 
-### Сервер TatarChat (`server/server.js`)
+### Сервер TatarChat (`server/comfy/image-gen.js` + маршруты в `server/server.js`)
 
-- **Код:** `normalizeSdWebUiBaseUrl`, `isSdWebUiConfigured`, `callSdWebUiTxt2img`, **`callSdWebUiImg2img`**, **`handleSdProxyError`**, **`uploadSdImg2img`**, маршруты **`POST /api/ai/image`** и **`POST /api/ai/image/img2img`**; в ответах **`GET/POST /api/ai/chat`** поле **`imageGenAvailable`**.
-- **Включение:** в `.env` задать **`SD_WEBUI_BASE_URL=http://127.0.0.1:7860`** (или **`A1111_BASE_URL`**). Пустое значение → в UI нет пункта генерации (`imageGenAvailable: false`).
-- **Нормализация URL:** `localhost` в базовом URL подменяется на **`127.0.0.1`** при старте Node (избежание IPv6 `::1`, когда WebUI слушает только IPv4).
-- **API:** **`GET /api/ai/image/models`** (`requireAuth`) — перебирает GET пути относительно **`SD_WEBUI_BASE_URL`** (по умолчанию **`sdapi/v1/sd-models`**); задаётся **`SD_WEBUI_SD_MODELS_PATH`** (один путь) или **`SD_WEBUI_SD_MODELS_PATHS`** (через запятую, при **404** пробуется следующий). Ответ: `{ models: [{ title }], listSource: "webui"|"env", partial?: true }`. Если все пути бесполезны — **`SD_CHECKPOINT_TITLES`** в `.env`: имена через **`|`** или **`,`** или с новой строки (резерв для переключалки). **`POST /api/ai/image`** (`requireAuth`, JSON) — `prompt`, опционально `negative_prompt` / `negativePrompt`, `steps`, `width`, `height`, опционально **`checkpoint`** / **`sd_model_checkpoint`** (строка как в списке моделей WebUI → **`override_settings.sd_model_checkpoint`**; пусто → только env **`SD_MODEL_CHECKPOINT`** / выбор в WebUI). **`POST /api/ai/image/img2img`** (`requireAuth`, **`multipart/form-data`**) — файл **`source`** (обязательно), **`mask`** (опционально: при наличии в A1111 включается инпainting с `inpaint_full_res`, `mask_blur` и т.д.; в WebUI обычно **белое** на маске = зона перерисовки). Текстовые поля формы: `prompt`, `negative_prompt`, `steps`, `width`, `height`, `denoising_strength` (0.05–0.95), опционально **`checkpoint`**. Лимит размера файлов — как у **AI-картинки** в чат (`MAX_AI_IMAGE_MB`). Прокси в WebUI: **`cfg_scale`**, **`sampler_index`**, **`restore_faces`** задаются env (см. ниже), плюс `send_images: true`. Таймаут запроса списка моделей: env **`SD_MODELS_LIST_TIMEOUT_MS`** (по умолчанию 20000).
-- **Лимиты env:** **`SD_WEBUI_TIMEOUT_MS`** (мс, по умолчанию **240000** ≈ **4 мин** ожидания ответа WebUI; верхняя граница **900000**), **`SD_WEBUI_TXT2IMG_PATH`** / **`SD_WEBUI_IMG2IMG_PATH`** (относительные пути POST к WebUI, по умолчанию **`sdapi/v1/txt2img`** и **`sdapi/v1/img2img`** — если в /docs другие маршруты или **404**, задать вручную), **`MAX_SD_PROMPT_CHARS`**, **`SD_MAX_STEPS`**, **`SD_MAX_SIDE`**, **`SD_CFG_SCALE`** (1–30, по умолчанию **7**), **`SD_SAMPLER_INDEX`** (строка, по умолчанию **`Euler a`** — имя как в **`GET /sdapi/v1/samplers`**), **`SD_RESTORE_FACES`** (`1` / `true` — редко нужно для FLUX), **`SD_MODEL_CHECKPOINT`** (опционально: имя файла чекпоинта **как в выпадающем списке** WebUI/Forge — в каждый запрос к API добавляется **`override_settings.sd_model_checkpoint`**, чтобы принудительно подгружать модель; полезно, если API падает с **`sd_checkpoint_info`** / **`NoneType`** до первой ручной генерации в UI).
-- **Ошибки:** при обрыве связи с WebUI — **502** с текстом про адрес/порт/`--api`; при таймауте — **504**. В логе старта при настроенном SD: строка **`[sd] SD_WEBUI_BASE_URL=...`**.
-- **Модель чекпоинта** в запросе **не передаётся** — используется **тот checkpoint, который сейчас выбран и загружен в UI WebUI** (выпадающий список вверху Gradio).
+- **Код:** `normalizeComfyBaseUrl`, `isComfyConfigured`, `runTxt2img`, `runImg2imgOrInpaint`, `handleComfyError`, `uploadSdImg2img` (multer), маршруты **`POST /api/ai/image`** и **`POST /api/ai/image/img2img`**; в ответах **`GET/POST /api/ai/chat`** поле **`imageGenAvailable`**.
+- **Включение:** в `.env` задать **`COMFYUI_BASE_URL=http://127.0.0.1:8000`** (порт как в ComfyUI → Settings → Network) и **`COMFY_TXT2IMG_WORKFLOW`** — путь к JSON **workflow в формате API** (ComfyUI → **Save (API Format)**). Пустой `COMFYUI_BASE_URL` или нет файла txt2img → `imageGenAvailable: false`.
+- **Шаблоны workflow:** в JSON подставляются плейсхолдеры **`<<<TC_PROMPT>>>`**, **`<<<TC_NEGATIVE>>>`**, **`<<<TC_STEPS>>>`**, **`<<<TC_WIDTH>>>`**, **`<<<TC_HEIGHT>>>`**, **`<<<TC_SEED>>>`**, **`<<<TC_CFG>>>`**, **`<<<TC_DENOISE>>>`** (img2img), **`<<<TC_CHECKPOINT>>>`** (имя чекпоинта как в ComfyUI), **`<<<TC_LOAD_IMAGE>>>`** (имя файла после `POST /upload/image`), **`<<<TC_LOAD_MASK>>>`** (инпейнт). Админ вставляет их в текстовые поля узлов вместо фиксированных значений. См. **`server/comfy/workflows/README.txt`**.
+- **img2img / inpaint:** **`COMFY_IMG2IMG_WORKFLOW`** — путь к JSON с **`<<<TC_LOAD_IMAGE>>>`**; опционально **`COMFY_INPAINT_WORKFLOW`** для отдельного графа с маской или тот же файл с **`<<<TC_LOAD_MASK>>>`**.
+- **API:** **`GET /api/ai/image/models`** — список чекпоинтов из ComfyUI (`GET /models/checkpoints` и др.) или разбор **`/object_info`**, при неудаче — **`COMFY_CHECKPOINT_TITLES`** в `.env` (тот же формат, что раньше **`SD_CHECKPOINT_TITLES`**). **`POST /api/ai/image`** — JSON, как раньше. **`POST /api/ai/image/img2img`** — multipart, как раньше; изображения в ComfyUI загружаются через **`/upload/image`**.
+- **Лимиты env (часть совместима со старыми именами):** **`COMFYUI_TIMEOUT_MS`** (или **`SD_WEBUI_TIMEOUT_MS`**, по умолчанию **240000**), **`MAX_COMFY_PROMPT_CHARS`** (или **`MAX_SD_PROMPT_CHARS`**), **`COMFY_MAX_STEPS`** / **`SD_MAX_STEPS`**, **`COMFY_MAX_SIDE`** / **`SD_MAX_SIDE`**, **`COMFY_CFG_SCALE`** (или **`SD_CFG_SCALE`**, по умолчанию **1** для FLUX), **`COMFY_DEFAULT_CHECKPOINT`** — если в шаблоне есть **`<<<TC_CHECKPOINT>>>`** и не выбрана модель в UI. Опционально **`COMFY_POLL_MS`**.
+- **Ошибки:** при обрыве связи с ComfyUI — **502**; при таймауте — **504**. В логе старта: **`[comfy] COMFYUI_BASE_URL=...`**.
 
-### Локальный Web UI на машине с Node (FLUX; API как у A1111)
+### Локальный ComfyUI на машине с Node
 
-- **Точка входа на сервере:** **`C:\sd\run.bat`** (единый батник старта). Внутри должны подниматься Gradio/веб-интерфейс и **HTTP API**, совместимый с Automatic1111 (**`/sdapi/v1/txt2img`**, **`/sdapi/v1/img2img`**), порт — как в **`SD_WEBUI_BASE_URL`** (часто **7860**). Проверка: в браузере на этом ПК **`http://127.0.0.1:<порт>/docs`**.
-- **Флаг `--api` (критично):** в консоли Forge при старте смотри **`Launching Web UI with arguments`**. Там должен быть **`--api`**. Без него вкладка Gradio работает, а **REST `/sdapi/v1/...` не поднимается** → с сайта **404 Not Found**. Задаётся через **`COMMANDLINE_ARGS`** (пример: **`--api --listen --port 7860`**). Подробно — **`scripts/REMOTE-DEPLOY-RU.txt`** (**4bb**).
-- **Автозапуск после деплоя:** переменная **`TATARCHAT_SD_RUN_BAT=C:\sd\run.bat`** (или параметр **`-SdWebuiBat`** / **`-SdLaunchBat`** у **`deploy-pull.ps1 -FullRestart`**). Старое имя **`TATARCHAT_SD_WEBUI_BAT`** всё ещё читается скриптом, если **`TATARCHAT_SD_RUN_BAT`** не задана. Подробности — **`scripts/REMOTE-DEPLOY-RU.txt`** (**4b**).
-
-#### FLUX и параметры API
-
-- **Ошибка WebUI `'NoneType' object has no attribute 'sd_checkpoint_info'`** (часто Forge): модель не в памяти / сбой после неполной загрузки (VAE, CLIP и т.д.). В UI выбери чекпоинт и один раз сгенерируй txt2img; при «залипании» — переключи модель, сгенерируй, переключи обратно ([обсуждение Forge](https://github.com/lllyasviel/stable-diffusion-webui-forge/issues/2166)). С сайта: задай **`SD_MODEL_CHECKPOINT=имя.safetensors`** в `.env` Node.
-- **Сборка:** конкретные шаги — в доке твоего стека (Forge, sd-next, кастомный FLUX UI и т.д.). Пока **txt2img** в UI не стабилен, через TatarChat не заработает.
-- **Веса:** пути зависят от сборки; на **Hugging Face** модели бывают **gated** — логин, принятие условий, **`hf auth login`** при необходимости.
-- **Параметры прокси:** в `.env` Node часто **`SD_CFG_SCALE=1`** и **`SD_SAMPLER_INDEX=Euler`** (точное имя — **`GET /sdapi/v1/samplers`**). См. env **`SD_CFG_SCALE`**, **`SD_SAMPLER_INDEX`**, **`SD_RESTORE_FACES`** выше.
-- **VRAM:** в **Forge** часть старых флагов (**`--medvram`** и т.п.) может быть отключена — ориентируйся на лог старта и доку сборки; FP8 — по весам.
-
-#### Классический Automatic1111 (если используешь отдельно)
-
-- **`webui-user.bat`:** **`COMMANDLINE_ARGS=--api --listen --port 7860`** (без **`--listen 127.0.0.1`** одним токеном); при необходимости **`--server-name 127.0.0.1`**. **`set PYTHON=`** — **python.exe 3.10.x или 3.11.x**; не обнулять второй строкой **`set PYTHON=`**.
-- Запуск из папки **`stable-diffusion-webui`**, иначе ищется **`launch.py`** в **`System32`**.
-- **Репозиторий Stability-AI:** при 404 — **`set STABLE_DIFFUSION_REPO=https://github.com/w-e-w/stablediffusion.git`**; при ошибке очистить **`repositories\stable-diffusion-stability-ai`** и повторить.
-- **CLIP / setuptools:** рецепты с **`setuptools==69.5.1`**, **`PIP_NO_BUILD_ISOLATION`** — как в старых гайдах A1111.
-- **xformers:** необязателен. **Модели:** **`models\Stable-diffusion\`** и выбор в UI — для сайта тот же выбранный чекпоинт.
+- Запусти ComfyUI **с тем же портом**, что в **`COMFYUI_BASE_URL`** (по умолчанию в настройках сети часто **8000** или **8188**).
+- Workflow для сайта: один раз настроить граф в UI → **Save (API Format)** → вставить плейсхолдеры → положить файл и прописать путь в **`COMFY_TXT2IMG_WORKFLOW`** (относительно папки **`server/`**).
 
 ### Деплой и автозапуск
 
-- Полный рестарт хоста и подъём UI: **`deploy-pull.ps1 -FullRestart`** и **`TATARCHAT_SD_RUN_BAT`** (путь к **`C:\sd\run.bat`**). Пути только **C:** — **`scripts/REMOTE-DEPLOY-RU.txt`** (**4b**, **4bb**, **4c**).
+- Полный рестарт хоста: **`deploy-pull.ps1 -FullRestart`**. ComfyUI на сервере нужно поднимать отдельно (батник/служба/планировщик по аналогии с прежним **`TATARCHAT_SD_RUN_BAT`** — можно заменить на скрипт старта ComfyUI). Пути только **C:** — **`scripts/REMOTE-DEPLOY-RU.txt`** (**4b**, **4c**).
 - **`start.bat`** в корне репозитория запускает Node из **`server\`**: **`cd ...\server`** и **`node server.js`**. Ошибка `Cannot find module '...\tatarchat\server.js'` — на машине устаревший батник/задача, указывающая на корень без папки **`server`**.
 
 ## Push / уведомления (server + client)

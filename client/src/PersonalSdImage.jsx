@@ -5,7 +5,8 @@ const SD_MODES = { txt2img: "txt2img", img2img: "img2img", inpaint: "inpaint" };
 const SIZE_TXT = [512, 576, 640, 704, 768];
 const SIZE_IMG = [512, 576, 640, 704, 768, 832, 896, 1024];
 
-const LS_SD_CHECKPOINT_KEY = "tatarchat_sd_checkpoint";
+const LS_COMFY_CHECKPOINT_KEY = "tatarchat_comfy_checkpoint";
+const LS_COMFY_CHECKPOINT_LEGACY = "tatarchat_sd_checkpoint";
 
 export default function PersonalSdImage({ getApiBase, token, onError }) {
   const [loading, setLoading] = useState(true);
@@ -84,7 +85,11 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
         : [];
       let saved = "";
       try {
-        saved = String(window.localStorage.getItem(LS_SD_CHECKPOINT_KEY) || "").trim();
+        saved = String(
+          window.localStorage.getItem(LS_COMFY_CHECKPOINT_KEY) ||
+            window.localStorage.getItem(LS_COMFY_CHECKPOINT_LEGACY) ||
+            "",
+        ).trim();
       } catch {
         /* ignore */
       }
@@ -97,10 +102,10 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
       });
       if (data.partial) {
         setSdModelsNote(
-          "Список из резерва на сервере: Web UI не отдал список моделей (часто 404 на /sdapi/v1/sd-models). Админ: SD_CHECKPOINT_TITLES или SD_WEBUI_SD_MODELS_PATH в .env.",
+          "Список из резерва на сервере: ComfyUI не отдал чекпоинты. Админ: COMFY_CHECKPOINT_TITLES в .env или проверьте, что ComfyUI запущен.",
         );
       } else if (data.listSource === "env") {
-        setSdModelsNote("Список из SD_CHECKPOINT_TITLES на сервере (или API вернул пустой список).");
+        setSdModelsNote("Список из COMFY_CHECKPOINT_TITLES на сервере (или API ComfyUI вернул пустой список).");
       }
     } catch (e) {
       console.error(e);
@@ -290,9 +295,10 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
           <div className="mx-auto max-w-md rounded-xl border border-tc-border/60 bg-tc-panel/30 p-4 text-sm text-tc-text-sec">
             <p className="font-medium text-tc-text">Генерация картинок недоступна</p>
             <p className="mt-2 text-xs leading-relaxed text-tc-text-muted">
-              На сервере задайте <code className="rounded bg-tc-input px-1">SD_WEBUI_BASE_URL</code> (например{" "}
-              <code className="rounded bg-tc-input px-1">http://127.0.0.1:7860</code>), запустите локальный UI (например{" "}
-              <code className="rounded bg-tc-input px-1">C:\sd\run.bat</code>) с включённым HTTP API, затем перезапустите Node.
+              На сервере в .env задайте <code className="rounded bg-tc-input px-1">COMFYUI_BASE_URL</code> (например{" "}
+              <code className="rounded bg-tc-input px-1">http://127.0.0.1:8000</code>) и путь{" "}
+              <code className="rounded bg-tc-input px-1">COMFY_TXT2IMG_WORKFLOW</code> к JSON workflow (ComfyUI → Save API
+              Format), затем перезапустите Node. Подробности: <code className="rounded bg-tc-input px-1">server/comfy/workflows/README.txt</code>.
             </p>
           </div>
         ) : (
@@ -309,7 +315,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
                       className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-tc-border border-t-tc-accent"
                       aria-hidden
                     />
-                    <span className="text-xs">Рисую… (до ~4 минут)</span>
+                    <span className="text-xs">Рисую в ComfyUI… (до ~4 минут)</span>
                   </div>
                 </div>
               </div>
@@ -435,8 +441,8 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
                     const v = e.target.value;
                     setSdCheckpoint(v);
                     try {
-                      if (v) window.localStorage.setItem(LS_SD_CHECKPOINT_KEY, v);
-                      else window.localStorage.removeItem(LS_SD_CHECKPOINT_KEY);
+                      if (v) window.localStorage.setItem(LS_COMFY_CHECKPOINT_KEY, v);
+                      else window.localStorage.removeItem(LS_COMFY_CHECKPOINT_KEY);
                     } catch {
                       /* ignore */
                     }
@@ -444,7 +450,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
                   disabled={sdGenerating || sdModelsLoading}
                   className="tc-msg-input max-w-full truncate rounded-lg border border-tc-border bg-tc-input px-2 py-1.5 text-xs text-tc-text outline-none focus:ring-2 focus:ring-tc-accent/50"
                 >
-                  <option value="">Как в WebUI / SD_MODEL_CHECKPOINT</option>
+                  <option value="">По умолчанию (COMFY_DEFAULT_CHECKPOINT) / без смены</option>
                   {sdCheckpointOptions.map((t) => (
                     <option key={t} value={t} title={t}>
                       {t.length > 72 ? `${t.slice(0, 70)}…` : t}
@@ -464,7 +470,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
             {sdModelsError ? <p className="text-[11px] text-tc-danger">{sdModelsError}</p> : null}
             {sdModelsNote ? <p className="text-[11px] text-amber-600 dark:text-amber-400/90">{sdModelsNote}</p> : null}
             <p className="text-[10px] leading-snug text-tc-text-muted">
-              Список запрашивается у Web UI (см. /docs). Длинные подписи сокращены; полный текст — в подсказке при наведении.
+              Список чекпоинтов через ComfyUI API. Длинные имена сокращены; полный текст — в подсказке при наведении.
             </p>
           </div>
 

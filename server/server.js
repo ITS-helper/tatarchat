@@ -37,55 +37,7 @@ const OLLAMA_HTTP_TIMEOUT_MS = Math.min(Math.max(Number(process.env.OLLAMA_HTTP_
 /** Tavily Search API (ключ в заголовке Authorization: Bearer) */
 const TAVILY_API_KEY = String(process.env.TAVILY_API_KEY || "").trim();
 const TAVILY_TIMEOUT_MS = Math.min(Math.max(Number(process.env.TAVILY_TIMEOUT_MS) || 25_000, 5000), 120_000);
-/** Локальный Web UI (FLUX и т.п.): тот же HTTP API, что у A1111 (`/sdapi/v1/...`). Пример: `C:\sd\run.bat` + `SD_WEBUI_BASE_URL`. */
-function normalizeSdWebUiBaseUrl(raw) {
-  const s = String(raw || "")
-    .trim()
-    .replace(/\/$/, "");
-  if (!s) return "";
-  try {
-    const u = new URL(s);
-    // Node fetch часто бьёт в ::1 для "localhost", а A1111 с --listen 127.0.0.1 слушает только IPv4 → "fetch failed"
-    if (u.hostname === "localhost") u.hostname = "127.0.0.1";
-    return u.toString().replace(/\/$/, "");
-  } catch {
-    return s;
-  }
-}
-const SD_WEBUI_BASE_URL = normalizeSdWebUiBaseUrl(process.env.SD_WEBUI_BASE_URL || process.env.A1111_BASE_URL || "");
-function normalizeSdWebUiApiRelPath(raw, fallback) {
-  const t = String(raw || "")
-    .trim()
-    .replace(/^\/+/, "")
-    .replace(/\/+$/, "");
-  return t || fallback;
-}
-/** Переопределение, если в твоей сборке другой путь (см. /docs); по умолчанию как у A1111 */
-const SD_WEBUI_TXT2IMG_PATH = normalizeSdWebUiApiRelPath(process.env.SD_WEBUI_TXT2IMG_PATH, "sdapi/v1/txt2img");
-const SD_WEBUI_IMG2IMG_PATH = normalizeSdWebUiApiRelPath(process.env.SD_WEBUI_IMG2IMG_PATH, "sdapi/v1/img2img");
-
-function sdWebUiUrl(relPath) {
-  const base = SD_WEBUI_BASE_URL.replace(/\/$/, "");
-  const rel = String(relPath || "").replace(/^\//, "");
-  return `${base}/${rel}`;
-}
-
-/** Ожидание ответа WebUI (FLUX часто дольше SD); переопределение: SD_WEBUI_TIMEOUT_MS в .env */
-const SD_WEBUI_TIMEOUT_MS = Math.min(Math.max(Number(process.env.SD_WEBUI_TIMEOUT_MS) || 240_000, 45_000), 900_000);
-const MAX_SD_PROMPT_CHARS = Math.min(Math.max(Number(process.env.MAX_SD_PROMPT_CHARS) || 1500, 200), 4000);
-const SD_MAX_STEPS = Math.min(Math.max(Number(process.env.SD_MAX_STEPS) || 28, 8), 45);
-const SD_MAX_SIDE = Math.min(Math.max(Number(process.env.SD_MAX_SIDE) || 768, 320), 1024);
-/** Параметры прокси к A1111; для FLUX часто SD_CFG_SCALE=1 и SD_SAMPLER_INDEX=Euler */
-const SD_CFG_SCALE_RAW = Number(process.env.SD_CFG_SCALE);
-const SD_CFG_SCALE = Number.isFinite(SD_CFG_SCALE_RAW)
-  ? Math.max(1, Math.min(30, SD_CFG_SCALE_RAW))
-  : 7;
-const SD_SAMPLER_INDEX = String(process.env.SD_SAMPLER_INDEX || "Euler a").trim() || "Euler a";
-const SD_RESTORE_FACES =
-  String(process.env.SD_RESTORE_FACES || "").toLowerCase() === "1" ||
-  String(process.env.SD_RESTORE_FACES || "").toLowerCase() === "true";
-/** Имя файла чекпоинта как в выпадающем списке WebUI/Forge (принудительная подгрузка по API; см. SD_MODEL_CHECKPOINT). */
-const SD_MODEL_CHECKPOINT = String(process.env.SD_MODEL_CHECKPOINT || "").trim();
+const comfy = require("./comfy/image-gen.js");
 /** Погода в сайдбаре: прокси к api.met.no (Gismeteo — только с коммерческим API‑ключом). */
 const WEATHER_HTTP_TIMEOUT_MS = Math.min(Math.max(Number(process.env.WEATHER_HTTP_TIMEOUT_MS) || 12_000, 3000), 30_000);
 const MET_NO_USER_AGENT = String(process.env.MET_NO_USER_AGENT || "TatarChat/1.0 (weather sidebar; contact: server admin)").trim();
@@ -1016,345 +968,6 @@ function buildAiSystemPrompt(nickname, webSearchBlock, factsBlock) {
   return s.slice(0, 120_000);
 }
 
-function isSdWebUiConfigured() {
-  return SD_WEBUI_BASE_URL.length > 0;
-}
-
-function sanitizeSdPrompt(s, maxLen) {
-  return String(s ?? "")
-    .replace(/[\u0000-\u001F\u007F]/g, "")
-    .trim()
-    .slice(0, maxLen);
-}
-
-/** Разбор тела ответа WebUI при HTTP 4xx/5xx (часто JSON с полем message). */
-function extractSdWebUiHttpErrorText(txt) {
-  if (!txt || typeof txt !== "string") return "";
-  const s = txt.trim().slice(0, 4000);
-  if (!s) return "";
-  try {
-    const j = JSON.parse(s);
-    const m = j?.message ?? j?.error ?? j?.detail;
-    if (typeof m === "string" && m.trim()) return m.trim().slice(0, 800);
-    if (m != null && typeof m !== "object") return String(m).trim().slice(0, 800);
-    if (j?.errors != null) return String(typeof j.errors === "string" ? j.errors : JSON.stringify(j.errors)).slice(0, 800);
-  } catch {
-    /* not JSON */
-  }
-  return s.slice(0, 800);
-}
-
-const SD_MODELS_LIST_TIMEOUT_MS = Math.min(Math.max(Number(process.env.SD_MODELS_LIST_TIMEOUT_MS) || 20_000, 5000), 60_000);
-const SD_CHECKPOINT_VALUE_MAX = 384;
-/** Один GET-путь относительно SD_WEBUI_BASE_URL; альтернатива — SD_WEBUI_SD_MODELS_PATHS */
-const SD_WEBUI_SD_MODELS_PATH_SINGLE = String(process.env.SD_WEBUI_SD_MODELS_PATH || "")
-  .trim()
-  .replace(/^\/+/, "")
-  .replace(/\/+$/, "");
-/** Несколько путей через запятую — перебор при 404 (кастомные/урезанные сборки FLUX) */
-const SD_WEBUI_SD_MODELS_PATHS_MULTI = String(process.env.SD_WEBUI_SD_MODELS_PATHS || "")
-  .split(",")
-  .map((p) => String(p || "").trim().replace(/^\/+/, "").replace(/\/+$/, ""))
-  .filter(Boolean);
-const SD_MODELS_REL_PATHS =
-  SD_WEBUI_SD_MODELS_PATHS_MULTI.length > 0
-    ? SD_WEBUI_SD_MODELS_PATHS_MULTI
-    : SD_WEBUI_SD_MODELS_PATH_SINGLE
-      ? [SD_WEBUI_SD_MODELS_PATH_SINGLE]
-      : ["sdapi/v1/sd-models"];
-
-function sanitizeSdCheckpoint(raw) {
-  return String(raw ?? "")
-    .replace(/[\u0000-\u001F\u007F]/g, "")
-    .trim()
-    .slice(0, SD_CHECKPOINT_VALUE_MAX);
-}
-
-/** Резервный список имён чекпоинтов, если GET списка из WebUI даёт 404/ошибку: SD_CHECKPOINT_TITLES=а|б или многострочно / через ; */
-function parseSdCheckpointTitlesFromEnv() {
-  const raw = String(process.env.SD_CHECKPOINT_TITLES || "").trim();
-  if (!raw) return [];
-  const chunks = /[\n|]/.test(raw)
-    ? raw.split(/\r?\n|[|]/).flatMap((line) => line.split(";"))
-    : raw.split(",").map((s) => s.trim());
-  const out = [];
-  const seen = new Set();
-  for (const c of chunks) {
-    const t = sanitizeSdCheckpoint(c);
-    if (t && !seen.has(t)) {
-      seen.add(t);
-      out.push(t);
-      if (out.length >= 200) break;
-    }
-  }
-  out.sort((a, b) => a.localeCompare(b, "en"));
-  return out;
-}
-
-/** requestCheckpoint: из тела запроса; пусто → только env SD_MODEL_CHECKPOINT */
-function buildSdWebUiPayloadBase(extra, requestCheckpoint) {
-  const payload = { ...extra };
-  const fromReq = sanitizeSdCheckpoint(requestCheckpoint);
-  const use = fromReq || SD_MODEL_CHECKPOINT;
-  if (use) {
-    const prev =
-      payload.override_settings && typeof payload.override_settings === "object" ? payload.override_settings : {};
-    payload.override_settings = { ...prev, sd_model_checkpoint: use };
-  }
-  return payload;
-}
-
-/**
- * Список чекпоинтов через GET (пути из SD_MODELS_REL_PATHS) → массив title для override_settings.
- */
-async function fetchSdWebUiCheckpointTitles() {
-  const base = SD_WEBUI_BASE_URL.replace(/\/$/, "");
-  let lastErr = null;
-  for (const rel of SD_MODELS_REL_PATHS) {
-    const url = `${base}/${rel}`;
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), SD_MODELS_LIST_TIMEOUT_MS);
-    try {
-      const res = await fetch(url, {
-        signal: ac.signal,
-        headers: { Accept: "application/json" },
-      });
-      const txt = await res.text();
-      if (res.status === 404) {
-        lastErr = new Error("sd_models_http");
-        lastErr.detail = `${rel}: Not Found`;
-        lastErr.status = 404;
-        continue;
-      }
-      if (!res.ok) {
-        const err = new Error("sd_models_http");
-        err.detail = extractSdWebUiHttpErrorText(txt) || `${rel}: HTTP ${res.status}`;
-        err.status = res.status;
-        throw err;
-      }
-      let data;
-      try {
-        data = txt ? JSON.parse(txt) : [];
-      } catch {
-        data = [];
-      }
-      if (!Array.isArray(data)) {
-        lastErr = new Error("sd_models_http");
-        lastErr.detail = `${rel}: ожидался JSON-массив`;
-        lastErr.status = res.status;
-        continue;
-      }
-      const titles = [];
-      for (const row of data) {
-        if (row == null || typeof row !== "object") continue;
-        let t = typeof row.title === "string" ? row.title.trim() : "";
-        if (!t && typeof row.model_name === "string") t = row.model_name.trim();
-        if (t) titles.push(t);
-      }
-      titles.sort((a, b) => a.localeCompare(b, "en"));
-      const uniq = [...new Set(titles)];
-      if (!uniq.length && SD_MODELS_REL_PATHS.length > 1 && SD_MODELS_REL_PATHS.indexOf(rel) < SD_MODELS_REL_PATHS.length - 1) {
-        lastErr = new Error("sd_models_http");
-        lastErr.detail = `${rel}: пустой список, пробуем следующий путь`;
-        lastErr.status = res.status;
-        continue;
-      }
-      return uniq;
-    } catch (e) {
-      if (e?.name === "AbortError") throw e;
-      if (String(e?.message || "") === "sd_models_http") throw e;
-      lastErr = e;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  if (lastErr) throw lastErr;
-  return [];
-}
-
-/**
- * Прокси к A1111 POST /sdapi/v1/txt2img → { base64, mime } или throw.
- */
-async function callSdWebUiTxt2img({ prompt, negativePrompt, steps, width, height, checkpoint }) {
-  const url = sdWebUiUrl(SD_WEBUI_TXT2IMG_PATH);
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), SD_WEBUI_TIMEOUT_MS);
-  try {
-    const payload = buildSdWebUiPayloadBase(
-      {
-        prompt,
-        negative_prompt: negativePrompt || "",
-        steps,
-        width,
-        height,
-        cfg_scale: SD_CFG_SCALE,
-        sampler_index: SD_SAMPLER_INDEX,
-        restore_faces: SD_RESTORE_FACES,
-        send_images: true,
-      },
-      checkpoint
-    );
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: ac.signal,
-    });
-    const txt = await res.text();
-    let data = {};
-    try {
-      data = txt ? JSON.parse(txt) : {};
-    } catch {
-      data = {};
-    }
-    if (!res.ok) {
-      const err = new Error(`sd_webui_http_${res.status}`);
-      err.detail = extractSdWebUiHttpErrorText(txt) || (txt || "").slice(0, 500);
-      throw err;
-    }
-    const b64 = data?.images?.[0];
-    if (typeof b64 !== "string" || !b64.length) {
-      const err = new Error("sd_webui_no_image");
-      err.detail =
-        extractSdWebUiHttpErrorText(txt) ||
-        (typeof data?.message === "string" ? data.message : "") ||
-        (typeof data?.error === "string" ? data.error : JSON.stringify(data).slice(0, 300));
-      throw err;
-    }
-    return { base64: b64, mimeType: "image/png" };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * Прокси к A1111 POST /sdapi/v1/img2img → { base64, mime } или throw.
- * maskBase64: опционально — инпainting (в WebUI обычно белое = зона перерисовки).
- */
-async function callSdWebUiImg2img({
-  prompt,
-  negativePrompt,
-  steps,
-  width,
-  height,
-  initImageBase64,
-  maskBase64,
-  denoisingStrength,
-  checkpoint,
-}) {
-  const url = sdWebUiUrl(SD_WEBUI_IMG2IMG_PATH);
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), SD_WEBUI_TIMEOUT_MS);
-  try {
-    const payload = buildSdWebUiPayloadBase(
-      {
-        init_images: [initImageBase64],
-        prompt,
-        negative_prompt: negativePrompt || "",
-        steps,
-        width,
-        height,
-        cfg_scale: SD_CFG_SCALE,
-        sampler_index: SD_SAMPLER_INDEX,
-        restore_faces: SD_RESTORE_FACES,
-        send_images: true,
-        denoising_strength: denoisingStrength,
-        resize_mode: 0,
-      },
-      checkpoint
-    );
-    if (typeof maskBase64 === "string" && maskBase64.length > 0) {
-      payload.mask = maskBase64;
-      payload.mask_blur = 4;
-      payload.inpainting_fill = 1;
-      payload.inpaint_full_res = true;
-      payload.inpaint_full_res_padding = 32;
-      payload.inpainting_mask_invert = 0;
-    }
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: ac.signal,
-    });
-    const txt = await res.text();
-    let data = {};
-    try {
-      data = txt ? JSON.parse(txt) : {};
-    } catch {
-      data = {};
-    }
-    if (!res.ok) {
-      const err = new Error(`sd_webui_http_${res.status}`);
-      err.detail = extractSdWebUiHttpErrorText(txt) || (txt || "").slice(0, 500);
-      throw err;
-    }
-    const b64 = data?.images?.[0];
-    if (typeof b64 !== "string" || !b64.length) {
-      const err = new Error("sd_webui_no_image");
-      err.detail =
-        extractSdWebUiHttpErrorText(txt) ||
-        (typeof data?.message === "string" ? data.message : "") ||
-        (typeof data?.error === "string" ? data.error : JSON.stringify(data).slice(0, 300));
-      throw err;
-    }
-    return { base64: b64, mimeType: "image/png" };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function handleSdProxyError(e, res, logLabel) {
-  if (e?.name === "AbortError") {
-    return res.status(504).json({ error: "Генерация слишком долгая (таймаут)" });
-  }
-  if (String(e?.message || "").startsWith("sd_webui_http_")) {
-    console.error(`[sd] ${logLabel}:`, e?.detail || e?.message);
-    const det = String(e?.detail || "").trim();
-    const hintSd =
-      /sd_checkpoint_info|NoneType.*checkpoint/i.test(det)
-        ? " В WebUI выбери FLUX/чекпоинт и сделай один txt2img вручную; при Forge после сбоя загрузки иногда помогает переключить модель и назад. Либо в .env Node задай SD_MODEL_CHECKPOINT=имя_файла.safetensors как в списке моделей."
-        : "";
-    const is404 =
-      String(e?.message || "").includes("sd_webui_http_404") || /not found|^404\b/i.test(det);
-    const hint404 = is404
-      ? ` Сейчас Node шлёт POST на ${logLabel === "img2img" ? SD_WEBUI_IMG2IMG_PATH : SD_WEBUI_TXT2IMG_PATH} относительно SD_WEBUI_BASE_URL. 404 обычно значит: нет флага --api, неверный порт в .env или другой путь в твоей сборке — открой /docs у WebUI и при необходимости задай SD_WEBUI_TXT2IMG_PATH / SD_WEBUI_IMG2IMG_PATH.`
-      : "";
-    return res.status(502).json({
-      error:
-        "Локальный Web UI генерации недоступен или вернул ошибку. Запусти стек (например C:\\sd\\run.bat) с включённым API и проверь адрес в SD_WEBUI_BASE_URL." +
-        hintSd +
-        hint404,
-      detail: det.slice(0, 480) || undefined,
-      sdPath: logLabel === "img2img" ? SD_WEBUI_IMG2IMG_PATH : SD_WEBUI_TXT2IMG_PATH,
-    });
-  }
-  if (String(e?.message || "") === "sd_webui_no_image") {
-    console.error(`[sd] ${logLabel} no_image:`, e?.detail || e?.message);
-    const det = String(e?.detail || "").trim();
-    return res.status(502).json({
-      error: "Web UI вернул ответ без изображения. Загляни в консоль WebUI и проверь модель/параметры.",
-      detail: det.slice(0, 480) || undefined,
-    });
-  }
-  const causeMsg = String(e?.cause?.message || e?.cause || "");
-  const topMsg = String(e?.message || "");
-  const connHint =
-    e?.cause?.code === "ECONNREFUSED" ||
-    e?.code === "ECONNREFUSED" ||
-    /ECONNREFUSED|fetch failed|getaddrinfo|ENOTFOUND|ConnectTimeoutError/i.test(topMsg + causeMsg);
-  if (connHint) {
-    console.error("[sd] connect:", topMsg || causeMsg, e?.cause?.code || "");
-    return res.status(502).json({
-      error:
-        "Не удаётся достучаться до Web UI. Запусти генератор с API (--api или как в твоей сборке); на этом ПК должна открываться страница /docs по адресу из SD_WEBUI_BASE_URL.",
-      detail: (topMsg || causeMsg).trim().slice(0, 240) || undefined,
-    });
-  }
-  console.error(`POST /api/ai/image (${logLabel})`, e);
-  return res.status(500).json({ error: "Ошибка генерации", detail: topMsg.trim().slice(0, 240) || undefined });
-}
-
 async function callOllamaChat(model, messages) {
   const ac = new AbortController();
   const to = setTimeout(() => ac.abort(), OLLAMA_HTTP_TIMEOUT_MS);
@@ -2105,14 +1718,14 @@ const uploadAiImage = multer({
   },
 });
 
-/** Исходник + опциональная маска для img2img / inpainting (A1111 API). */
+/** Исходник + опциональная маска для img2img / inpainting (ComfyUI). */
 const uploadSdImg2img = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_AI_IMAGE_BYTES, files: 2 },
   fileFilter(_req, file, cb) {
     const mime = normalizeContentTypeMime(file.mimetype || "");
     if (AI_IMAGE_MIMES.has(mime)) return cb(null, true);
-    cb(new Error("SD_IMAGE_TYPE"));
+    cb(new Error("COMFY_IMAGE_TYPE"));
   },
 });
 
@@ -3269,7 +2882,7 @@ app.get("/api/ai/chat", requireAuth, async (req, res) => {
       model: await getUserAiModel(req.user.userId),
       availableModels: OLLAMA_MODELS,
       webSearchAvailable: isTavilyConfigured(),
-      imageGenAvailable: isSdWebUiConfigured(),
+      imageGenAvailable: comfy.isComfyConfigured(),
       facts,
     });
   } catch (err) {
@@ -3324,65 +2937,34 @@ app.delete("/api/ai/facts/:id", requireAuth, async (req, res) => {
 
 app.get("/api/ai/image/models", requireAuth, async (req, res) => {
   try {
-    if (!isSdWebUiConfigured()) {
+    if (!comfy.isComfyConfigured()) {
       return res.status(503).json({
         error:
-          "Генерация не настроена: задайте SD_WEBUI_BASE_URL в .env на сервере (например http://127.0.0.1:7860) и запусти локальный UI (например C:\\sd\\run.bat) с включённым API.",
+          "Генерация не настроена: задайте COMFYUI_BASE_URL и COMFY_TXT2IMG_WORKFLOW в .env на сервере (JSON workflow: ComfyUI → Save API Format).",
       });
     }
-    let fromApi = [];
-    let apiFailed = false;
-    let apiDetail = "";
+    let result;
     try {
-      fromApi = await fetchSdWebUiCheckpointTitles();
+      result = await comfy.fetchCheckpointTitles();
     } catch (e) {
       if (e?.name === "AbortError") {
         return res.status(504).json({ error: "Список моделей: таймаут" });
       }
-      apiFailed = true;
-      apiDetail = String(e?.detail || e?.message || "").trim();
-      console.warn("[sd] список моделей с WebUI:", apiDetail || e);
+      throw e;
     }
-
-    const fromEnv = parseSdCheckpointTitlesFromEnv();
-    let titles = [];
-    if (fromApi.length) {
-      titles = [...fromApi];
-      const seen = new Set(titles);
-      for (const t of fromEnv) {
-        if (!seen.has(t)) {
-          seen.add(t);
-          titles.push(t);
-        }
-      }
-      titles.sort((a, b) => a.localeCompare(b, "en"));
-    } else if (fromEnv.length) {
-      titles = fromEnv;
-    }
-
+    const titles = result.titles;
     if (!titles.length) {
-      const pathsHint = SD_MODELS_REL_PATHS.join(", ");
       return res.status(502).json({
         error:
-          "Список моделей недоступен: все пути вернули ошибку (часто 404 в урезанной сборке). Открой /docs у WebUI, найди рабочий GET списка чекпоинтов и задай SD_WEBUI_SD_MODELS_PATH или SD_WEBUI_SD_MODELS_PATHS. Либо перечисли модели в SD_CHECKPOINT_TITLES (разделитель | или запятая).",
-        detail: apiDetail ? apiDetail.slice(0, 400) : undefined,
-        triedPaths: pathsHint,
+          "Список чекпоинтов недоступен: ComfyUI не отдал модели и в .env пусто COMFY_CHECKPOINT_TITLES (можно перечислить имена вручную).",
       });
     }
-
     res.json({
       models: titles.map((title) => ({ title })),
-      listSource: fromApi.length && !apiFailed ? "webui" : fromEnv.length ? "env" : "webui",
-      partial: Boolean(apiFailed && fromEnv.length && fromApi.length === 0),
+      listSource: result.listSource === "comfy" ? "comfy" : result.listSource,
+      partial: result.partial,
     });
   } catch (e) {
-    if (String(e?.message || "") === "sd_models_http") {
-      console.error("[sd] GET sd-models:", e?.detail || e?.status);
-      return res.status(502).json({
-        error: "Не удалось получить список моделей из Web UI.",
-        detail: String(e?.detail || "").trim().slice(0, 400) || undefined,
-      });
-    }
     const causeMsg = String(e?.cause?.message || e?.cause || "");
     const topMsg = String(e?.message || "");
     const connHint =
@@ -3391,7 +2973,7 @@ app.get("/api/ai/image/models", requireAuth, async (req, res) => {
       /ECONNREFUSED|fetch failed|getaddrinfo|ENOTFOUND/i.test(topMsg + causeMsg);
     if (connHint) {
       return res.status(502).json({
-        error: "Web UI недоступен для списка моделей.",
+        error: "ComfyUI недоступен для списка моделей.",
         detail: (topMsg || causeMsg).trim().slice(0, 240) || undefined,
       });
     }
@@ -3402,33 +2984,32 @@ app.get("/api/ai/image/models", requireAuth, async (req, res) => {
 
 app.post("/api/ai/image", requireAuth, async (req, res) => {
   try {
-    if (!isSdWebUiConfigured()) {
+    if (!comfy.isComfyConfigured()) {
       return res.status(503).json({
         error:
-          "Генерация не настроена: задайте SD_WEBUI_BASE_URL в .env на сервере (например http://127.0.0.1:7860) и запусти локальный UI (например C:\\sd\\run.bat) с включённым API.",
+          "Генерация не настроена: задайте COMFYUI_BASE_URL и COMFY_TXT2IMG_WORKFLOW в .env на сервере.",
       });
     }
-    let prompt = sanitizeSdPrompt(req.body?.prompt, MAX_SD_PROMPT_CHARS);
+    let prompt = comfy.sanitizePrompt(req.body?.prompt, comfy.MAX_COMFY_PROMPT_CHARS);
     if (!prompt) return res.status(400).json({ error: "Пустой промпт" });
-    const neg = sanitizeSdPrompt(req.body?.negative_prompt || req.body?.negativePrompt || "", MAX_SD_PROMPT_CHARS);
-    const checkpoint = sanitizeSdCheckpoint(req.body?.checkpoint ?? req.body?.sd_model_checkpoint ?? "");
+    const neg = comfy.sanitizePrompt(req.body?.negative_prompt || req.body?.negativePrompt || "", comfy.MAX_COMFY_PROMPT_CHARS);
+    const checkpoint = comfy.sanitizeCheckpoint(req.body?.checkpoint ?? req.body?.sd_model_checkpoint ?? "");
 
     let steps = parseInt(req.body?.steps, 10);
     if (!Number.isFinite(steps)) steps = 25;
-    steps = Math.max(8, Math.min(SD_MAX_STEPS, Math.floor(steps)));
+    steps = Math.max(8, Math.min(comfy.COMFY_MAX_STEPS, Math.floor(steps)));
 
     let width = parseInt(req.body?.width, 10);
     let height = parseInt(req.body?.height, 10);
     if (!Number.isFinite(width)) width = 512;
     if (!Number.isFinite(height)) height = 512;
-    const snapSide = (n) => Math.max(256, Math.min(SD_MAX_SIDE, Math.floor(n / 8) * 8));
-    width = snapSide(width);
-    height = snapSide(height);
+    width = comfy.snapSide(width);
+    height = comfy.snapSide(height);
 
-    const out = await callSdWebUiTxt2img({ prompt, negativePrompt: neg, steps, width, height, checkpoint });
+    const out = await comfy.runTxt2img({ prompt, negativePrompt: neg, steps, width, height, checkpoint });
     res.json({ ok: true, mimeType: out.mimeType, imageBase64: out.base64 });
   } catch (e) {
-    return handleSdProxyError(e, res, "txt2img");
+    return comfy.handleComfyError(e, res, "txt2img");
   }
 });
 
@@ -3441,66 +3022,69 @@ function runSdImg2imgUpload(req, res, next) {
     if (err.code === "LIMIT_FILE_SIZE") {
       return res.status(400).json({ error: "Файл слишком большой" });
     }
-    if (String(err.message || "") === "SD_IMAGE_TYPE") {
+    if (String(err.message || "") === "COMFY_IMAGE_TYPE" || String(err.message || "") === "SD_IMAGE_TYPE") {
       return res.status(400).json({ error: "Неподдерживаемый тип файла (используй PNG / JPEG / WebP)" });
     }
-    console.error("[sd] multer img2img:", err);
+    console.error("[comfy] multer img2img:", err);
     return res.status(400).json({ error: "Ошибка загрузки файлов" });
   });
 }
 
 app.post("/api/ai/image/img2img", requireAuth, runSdImg2imgUpload, async (req, res) => {
   try {
-    if (!isSdWebUiConfigured()) {
+    if (!comfy.isComfyConfigured()) {
       return res.status(503).json({
         error:
-          "Генерация не настроена: задайте SD_WEBUI_BASE_URL в .env на сервере (например http://127.0.0.1:7860) и запусти локальный UI (например C:\\sd\\run.bat) с включённым API.",
+          "Генерация не настроена: задайте COMFYUI_BASE_URL и COMFY_TXT2IMG_WORKFLOW в .env на сервере.",
+      });
+    }
+    if (!comfy.isComfyImg2imgConfigured()) {
+      return res.status(503).json({
+        error:
+          "img2img не настроен: задайте COMFY_IMG2IMG_WORKFLOW в .env (JSON workflow с плейсхолдером <<<TC_LOAD_IMAGE>>>).",
       });
     }
     const srcBuf = req.files?.source?.[0]?.buffer;
     if (!srcBuf?.length) return res.status(400).json({ error: "Добавь исходное изображение" });
 
-    const prompt = sanitizeSdPrompt(req.body?.prompt, MAX_SD_PROMPT_CHARS);
+    const prompt = comfy.sanitizePrompt(req.body?.prompt, comfy.MAX_COMFY_PROMPT_CHARS);
     if (!prompt) return res.status(400).json({ error: "Пустой промпт" });
-    const neg = sanitizeSdPrompt(req.body?.negative_prompt || req.body?.negativePrompt || "", MAX_SD_PROMPT_CHARS);
+    const neg = comfy.sanitizePrompt(req.body?.negative_prompt || req.body?.negativePrompt || "", comfy.MAX_COMFY_PROMPT_CHARS);
 
     let steps = parseInt(req.body?.steps, 10);
     if (!Number.isFinite(steps)) steps = 25;
-    steps = Math.max(8, Math.min(SD_MAX_STEPS, Math.floor(steps)));
+    steps = Math.max(8, Math.min(comfy.COMFY_MAX_STEPS, Math.floor(steps)));
 
     let width = parseInt(req.body?.width, 10);
     let height = parseInt(req.body?.height, 10);
     if (!Number.isFinite(width)) width = 512;
     if (!Number.isFinite(height)) height = 512;
-    const snapSide = (n) => Math.max(256, Math.min(SD_MAX_SIDE, Math.floor(n / 8) * 8));
-    width = snapSide(width);
-    height = snapSide(height);
+    width = comfy.snapSide(width);
+    height = comfy.snapSide(height);
 
     let denoising = parseFloat(req.body?.denoising_strength ?? req.body?.denoisingStrength ?? "0.55");
     if (!Number.isFinite(denoising)) denoising = 0.55;
     denoising = Math.max(0.05, Math.min(0.95, denoising));
 
-    const initB64 = srcBuf.toString("base64");
     const maskBuf = req.files?.mask?.[0]?.buffer;
-    const maskB64 =
-      typeof maskBuf?.length === "number" && maskBuf.length > 0 ? maskBuf.toString("base64") : undefined;
+    const hasMask = typeof maskBuf?.length === "number" && maskBuf.length > 0;
 
-    const checkpoint = sanitizeSdCheckpoint(req.body?.checkpoint ?? req.body?.sd_model_checkpoint ?? "");
+    const checkpoint = comfy.sanitizeCheckpoint(req.body?.checkpoint ?? req.body?.sd_model_checkpoint ?? "");
 
-    const out = await callSdWebUiImg2img({
+    const out = await comfy.runImg2imgOrInpaint({
       prompt,
       negativePrompt: neg,
       steps,
       width,
       height,
-      initImageBase64: initB64,
-      maskBase64: maskB64,
+      initImageBuffer: srcBuf,
+      maskBuffer: hasMask ? maskBuf : undefined,
       denoisingStrength: denoising,
       checkpoint,
     });
     return res.json({ ok: true, mimeType: out.mimeType, imageBase64: out.base64 });
   } catch (e) {
-    return handleSdProxyError(e, res, "img2img");
+    return comfy.handleComfyError(e, res, "img2img");
   }
 });
 
@@ -3590,7 +3174,7 @@ app.post("/api/ai/chat/send-with-image", requireAuth, uploadAiImage.single("imag
       messages: list,
       model: effectiveModel,
       web: wantSearch ? { images: webImages, sources: webSources.slice(0, 8) } : undefined,
-      imageGenAvailable: isSdWebUiConfigured(),
+      imageGenAvailable: comfy.isComfyConfigured(),
       facts,
     });
   } catch (err) {
@@ -3703,7 +3287,7 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
       messages: list,
       model: effectiveModel,
       web: wantSearch ? { images: webImages, sources: webSources.slice(0, 8) } : undefined,
-      imageGenAvailable: isSdWebUiConfigured(),
+      imageGenAvailable: comfy.isComfyConfigured(),
       facts,
     });
   } catch (err) {
@@ -5199,15 +4783,8 @@ async function start() {
   ensureUploadDirs();
   server.listen(PORT, () => {
     console.log(`Сервер: http://localhost:${PORT}`);
-    if (SD_WEBUI_BASE_URL) {
-      console.log(
-        `[sd] SD_WEBUI_BASE_URL=${SD_WEBUI_BASE_URL} cfg_scale=${SD_CFG_SCALE} sampler_index=${JSON.stringify(SD_SAMPLER_INDEX)}`
-      );
-      console.log(`[sd] POST txt2img=${SD_WEBUI_TXT2IMG_PATH} img2img=${SD_WEBUI_IMG2IMG_PATH}`);
-      if (SD_MODEL_CHECKPOINT) console.log(`[sd] SD_MODEL_CHECKPOINT=${JSON.stringify(SD_MODEL_CHECKPOINT)}`);
-      console.log(`[sd] SD models GET paths: ${SD_MODELS_REL_PATHS.join(" | ")}`);
-      const fbN = parseSdCheckpointTitlesFromEnv().length;
-      if (fbN) console.log(`[sd] SD_CHECKPOINT_TITLES: ${fbN} fallback name(s)`);
+    if (comfy.COMFYUI_BASE_URL) {
+      comfy.logStartupInfo();
     }
   });
 }

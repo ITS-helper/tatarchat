@@ -3792,7 +3792,7 @@ export default function App() {
                 </svg>
               </div>
               <div className="min-w-0 flex-1 text-left">
-                <span className={`truncate text-sm font-medium ${personalSdOpen ? "text-tc-accent" : "text-tc-text"}`}>Картинка (SD)</span>
+                <span className={`truncate text-sm font-medium ${personalSdOpen ? "text-tc-accent" : "text-tc-text"}`}>Картинка (ComfyUI)</span>
                 <p className="truncate text-xs text-tc-text-muted">Stable Diffusion на сервере</p>
               </div>
             </button>
@@ -4454,7 +4454,7 @@ export default function App() {
           </button>
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-base font-semibold text-tc-text">
-              {personalAiOpen ? "Ассистент" : personalSdOpen ? "Картинка (SD)" : headerTitleForRoom({ roomTitle, activeRoom, activeView })}
+              {personalAiOpen ? "Ассистент" : personalSdOpen ? "Картинка (ComfyUI)" : headerTitleForRoom({ roomTitle, activeRoom, activeView })}
             </h2>
             <div className="flex items-center gap-2 text-xs text-tc-text-muted">
               <span className={`inline-block h-2 w-2 rounded-full ${status === "online" ? "bg-tc-online" : "bg-tc-text-muted"}`} />
