@@ -37,7 +37,7 @@ const OLLAMA_HTTP_TIMEOUT_MS = Math.min(Math.max(Number(process.env.OLLAMA_HTTP_
 /** Tavily Search API (ключ в заголовке Authorization: Bearer) */
 const TAVILY_API_KEY = String(process.env.TAVILY_API_KEY || "").trim();
 const TAVILY_TIMEOUT_MS = Math.min(Math.max(Number(process.env.TAVILY_TIMEOUT_MS) || 25_000, 5000), 120_000);
-const comfy = require("./comfy/image-gen.js");
+const swarm = require("./swarm/image-gen.js");
 /** Погода в сайдбаре: прокси к api.met.no (Gismeteo — только с коммерческим API‑ключом). */
 const WEATHER_HTTP_TIMEOUT_MS = Math.min(Math.max(Number(process.env.WEATHER_HTTP_TIMEOUT_MS) || 12_000, 3000), 30_000);
 const MET_NO_USER_AGENT = String(process.env.MET_NO_USER_AGENT || "TatarChat/1.0 (weather sidebar; contact: server admin)").trim();
@@ -2882,7 +2882,7 @@ app.get("/api/ai/chat", requireAuth, async (req, res) => {
       model: await getUserAiModel(req.user.userId),
       availableModels: OLLAMA_MODELS,
       webSearchAvailable: isTavilyConfigured(),
-      imageGenAvailable: comfy.isComfyConfigured(),
+      imageGenAvailable: swarm.isSwarmConfigured(),
       facts,
     });
   } catch (err) {
@@ -2937,32 +2937,27 @@ app.delete("/api/ai/facts/:id", requireAuth, async (req, res) => {
 
 app.get("/api/ai/image/models", requireAuth, async (req, res) => {
   try {
-    if (!comfy.isComfyConfigured()) {
+    if (!swarm.isSwarmConfigured()) {
       return res.status(503).json({
-        error:
-          "Генерация не настроена: задайте COMFYUI_BASE_URL и COMFY_TXT2IMG_WORKFLOW в .env на сервере (JSON workflow: ComfyUI → Save API Format).",
+        error: "Генерация не настроена: задайте SWARMUI_BASE_URL в .env на сервере и перезапустите Node.",
       });
     }
-    let result;
+    let titles = [];
     try {
-      result = await comfy.fetchCheckpointTitles();
+      titles = await swarm.fetchModelTitles();
     } catch (e) {
-      if (e?.name === "AbortError") {
-        return res.status(504).json({ error: "Список моделей: таймаут" });
-      }
+      if (e?.name === "AbortError") return res.status(504).json({ error: "Список моделей: таймаут" });
       throw e;
     }
-    const titles = result.titles;
     if (!titles.length) {
       return res.status(502).json({
-        error:
-          "Список чекпоинтов недоступен: ComfyUI не отдал модели и в .env пусто COMFY_CHECKPOINT_TITLES (можно перечислить имена вручную).",
+        error: "Список моделей недоступен: SwarmUI не отдал список Stable-Diffusion моделей.",
       });
     }
     res.json({
       models: titles.map((title) => ({ title })),
-      listSource: result.listSource === "comfy" ? "comfy" : result.listSource,
-      partial: result.partial,
+      listSource: "swarm",
+      partial: false,
     });
   } catch (e) {
     const causeMsg = String(e?.cause?.message || e?.cause || "");
@@ -2973,7 +2968,7 @@ app.get("/api/ai/image/models", requireAuth, async (req, res) => {
       /ECONNREFUSED|fetch failed|getaddrinfo|ENOTFOUND/i.test(topMsg + causeMsg);
     if (connHint) {
       return res.status(502).json({
-        error: "ComfyUI недоступен для списка моделей.",
+        error: "SwarmUI недоступен для списка моделей.",
         detail: (topMsg || causeMsg).trim().slice(0, 240) || undefined,
       });
     }
@@ -2984,32 +2979,31 @@ app.get("/api/ai/image/models", requireAuth, async (req, res) => {
 
 app.post("/api/ai/image", requireAuth, async (req, res) => {
   try {
-    if (!comfy.isComfyConfigured()) {
+    if (!swarm.isSwarmConfigured()) {
       return res.status(503).json({
-        error:
-          "Генерация не настроена: задайте COMFYUI_BASE_URL и COMFY_TXT2IMG_WORKFLOW в .env на сервере.",
+        error: "Генерация не настроена: задайте SWARMUI_BASE_URL в .env на сервере.",
       });
     }
-    let prompt = comfy.sanitizePrompt(req.body?.prompt, comfy.MAX_COMFY_PROMPT_CHARS);
+    let prompt = swarm.sanitizePrompt(req.body?.prompt, swarm.MAX_SWARM_PROMPT_CHARS);
     if (!prompt) return res.status(400).json({ error: "Пустой промпт" });
-    const neg = comfy.sanitizePrompt(req.body?.negative_prompt || req.body?.negativePrompt || "", comfy.MAX_COMFY_PROMPT_CHARS);
-    const checkpoint = comfy.sanitizeCheckpoint(req.body?.checkpoint ?? req.body?.sd_model_checkpoint ?? "");
+    const neg = swarm.sanitizePrompt(req.body?.negative_prompt || req.body?.negativePrompt || "", swarm.MAX_SWARM_PROMPT_CHARS);
+    const model = swarm.sanitizeModel(req.body?.checkpoint ?? req.body?.model ?? req.body?.sd_model_checkpoint ?? "");
 
     let steps = parseInt(req.body?.steps, 10);
     if (!Number.isFinite(steps)) steps = 25;
-    steps = Math.max(8, Math.min(comfy.COMFY_MAX_STEPS, Math.floor(steps)));
+    steps = Math.max(8, Math.min(swarm.SWARM_MAX_STEPS, Math.floor(steps)));
 
     let width = parseInt(req.body?.width, 10);
     let height = parseInt(req.body?.height, 10);
     if (!Number.isFinite(width)) width = 512;
     if (!Number.isFinite(height)) height = 512;
-    width = comfy.snapSide(width);
-    height = comfy.snapSide(height);
+    width = swarm.snapSide(width);
+    height = swarm.snapSide(height);
 
-    const out = await comfy.runTxt2img({ prompt, negativePrompt: neg, steps, width, height, checkpoint });
+    const out = await swarm.runTxt2img({ prompt, negativePrompt: neg, steps, width, height, model });
     res.json({ ok: true, mimeType: out.mimeType, imageBase64: out.base64 });
   } catch (e) {
-    return comfy.handleComfyError(e, res, "txt2img");
+    return swarm.handleSwarmError(e, res, "txt2img");
   }
 });
 
@@ -3025,42 +3019,36 @@ function runSdImg2imgUpload(req, res, next) {
     if (String(err.message || "") === "COMFY_IMAGE_TYPE" || String(err.message || "") === "SD_IMAGE_TYPE") {
       return res.status(400).json({ error: "Неподдерживаемый тип файла (используй PNG / JPEG / WebP)" });
     }
-    console.error("[comfy] multer img2img:", err);
+    console.error("[swarm] multer img2img:", err);
     return res.status(400).json({ error: "Ошибка загрузки файлов" });
   });
 }
 
 app.post("/api/ai/image/img2img", requireAuth, runSdImg2imgUpload, async (req, res) => {
   try {
-    if (!comfy.isComfyConfigured()) {
+    if (!swarm.isSwarmConfigured()) {
       return res.status(503).json({
-        error:
-          "Генерация не настроена: задайте COMFYUI_BASE_URL и COMFY_TXT2IMG_WORKFLOW в .env на сервере.",
-      });
-    }
-    if (!comfy.isComfyImg2imgConfigured()) {
-      return res.status(503).json({
-        error:
-          "img2img не настроен: задайте COMFY_IMG2IMG_WORKFLOW в .env (JSON workflow с плейсхолдером <<<TC_LOAD_IMAGE>>>).",
+        error: "Генерация не настроена: задайте SWARMUI_BASE_URL в .env на сервере.",
       });
     }
     const srcBuf = req.files?.source?.[0]?.buffer;
     if (!srcBuf?.length) return res.status(400).json({ error: "Добавь исходное изображение" });
+    const srcMime = normalizeContentTypeMime(req.files?.source?.[0]?.mimetype || "");
 
-    const prompt = comfy.sanitizePrompt(req.body?.prompt, comfy.MAX_COMFY_PROMPT_CHARS);
+    const prompt = swarm.sanitizePrompt(req.body?.prompt, swarm.MAX_SWARM_PROMPT_CHARS);
     if (!prompt) return res.status(400).json({ error: "Пустой промпт" });
-    const neg = comfy.sanitizePrompt(req.body?.negative_prompt || req.body?.negativePrompt || "", comfy.MAX_COMFY_PROMPT_CHARS);
+    const neg = swarm.sanitizePrompt(req.body?.negative_prompt || req.body?.negativePrompt || "", swarm.MAX_SWARM_PROMPT_CHARS);
 
     let steps = parseInt(req.body?.steps, 10);
     if (!Number.isFinite(steps)) steps = 25;
-    steps = Math.max(8, Math.min(comfy.COMFY_MAX_STEPS, Math.floor(steps)));
+    steps = Math.max(8, Math.min(swarm.SWARM_MAX_STEPS, Math.floor(steps)));
 
     let width = parseInt(req.body?.width, 10);
     let height = parseInt(req.body?.height, 10);
     if (!Number.isFinite(width)) width = 512;
     if (!Number.isFinite(height)) height = 512;
-    width = comfy.snapSide(width);
-    height = comfy.snapSide(height);
+    width = swarm.snapSide(width);
+    height = swarm.snapSide(height);
 
     let denoising = parseFloat(req.body?.denoising_strength ?? req.body?.denoisingStrength ?? "0.55");
     if (!Number.isFinite(denoising)) denoising = 0.55;
@@ -3068,23 +3056,26 @@ app.post("/api/ai/image/img2img", requireAuth, runSdImg2imgUpload, async (req, r
 
     const maskBuf = req.files?.mask?.[0]?.buffer;
     const hasMask = typeof maskBuf?.length === "number" && maskBuf.length > 0;
+    const maskMime = normalizeContentTypeMime(req.files?.mask?.[0]?.mimetype || "");
 
-    const checkpoint = comfy.sanitizeCheckpoint(req.body?.checkpoint ?? req.body?.sd_model_checkpoint ?? "");
+    const model = swarm.sanitizeModel(req.body?.checkpoint ?? req.body?.model ?? req.body?.sd_model_checkpoint ?? "");
 
-    const out = await comfy.runImg2imgOrInpaint({
+    const out = await swarm.runImg2imgOrInpaint({
       prompt,
       negativePrompt: neg,
       steps,
       width,
       height,
       initImageBuffer: srcBuf,
+      initImageMime: srcMime || "image/png",
       maskBuffer: hasMask ? maskBuf : undefined,
+      maskMime: maskMime || "image/png",
       denoisingStrength: denoising,
-      checkpoint,
+      model,
     });
     return res.json({ ok: true, mimeType: out.mimeType, imageBase64: out.base64 });
   } catch (e) {
-    return comfy.handleComfyError(e, res, "img2img");
+    return swarm.handleSwarmError(e, res, "img2img");
   }
 });
 
@@ -3174,7 +3165,7 @@ app.post("/api/ai/chat/send-with-image", requireAuth, uploadAiImage.single("imag
       messages: list,
       model: effectiveModel,
       web: wantSearch ? { images: webImages, sources: webSources.slice(0, 8) } : undefined,
-      imageGenAvailable: comfy.isComfyConfigured(),
+      imageGenAvailable: swarm.isSwarmConfigured(),
       facts,
     });
   } catch (err) {
@@ -3287,7 +3278,7 @@ app.post("/api/ai/chat", requireAuth, async (req, res) => {
       messages: list,
       model: effectiveModel,
       web: wantSearch ? { images: webImages, sources: webSources.slice(0, 8) } : undefined,
-      imageGenAvailable: comfy.isComfyConfigured(),
+      imageGenAvailable: swarm.isSwarmConfigured(),
       facts,
     });
   } catch (err) {
@@ -4783,7 +4774,7 @@ async function start() {
   ensureUploadDirs();
   server.listen(PORT, () => {
     console.log(`Сервер: http://localhost:${PORT}`);
-    comfy.logStartupInfo();
+    swarm.logStartupInfo();
   });
 }
 

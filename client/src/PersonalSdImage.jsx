@@ -5,6 +5,7 @@ const SD_MODES = { txt2img: "txt2img", img2img: "img2img", inpaint: "inpaint" };
 const SIZE_TXT = [512, 576, 640, 704, 768];
 const SIZE_IMG = [512, 576, 640, 704, 768, 832, 896, 1024];
 
+const LS_MODEL_KEY = "tatarchat_swarm_model";
 const LS_COMFY_CHECKPOINT_KEY = "tatarchat_comfy_checkpoint";
 const LS_COMFY_CHECKPOINT_LEGACY = "tatarchat_sd_checkpoint";
 
@@ -17,6 +18,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
   const [sdModelsError, setSdModelsError] = useState(null);
   const [sdModelsNote, setSdModelsNote] = useState(null);
   const [sdMode, setSdMode] = useState(SD_MODES.txt2img);
+  const [useInpaint, setUseInpaint] = useState(false);
   const [sdPrompt, setSdPrompt] = useState("");
   const [sdNegative, setSdNegative] = useState("");
   const [sdSteps, setSdSteps] = useState(25);
@@ -86,7 +88,8 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
       let saved = "";
       try {
         saved = String(
-          window.localStorage.getItem(LS_COMFY_CHECKPOINT_KEY) ||
+          window.localStorage.getItem(LS_MODEL_KEY) ||
+            window.localStorage.getItem(LS_COMFY_CHECKPOINT_KEY) ||
             window.localStorage.getItem(LS_COMFY_CHECKPOINT_LEGACY) ||
             "",
         ).trim();
@@ -102,10 +105,10 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
       });
       if (data.partial) {
         setSdModelsNote(
-          "Список из резерва на сервере: ComfyUI не отдал чекпоинты. Админ: COMFY_CHECKPOINT_TITLES в .env или проверьте, что ComfyUI запущен.",
+          "Список из резерва на сервере. Админ: проверьте SwarmUI и его модели.",
         );
       } else if (data.listSource === "env") {
-        setSdModelsNote("Список из COMFY_CHECKPOINT_TITLES на сервере (или API ComfyUI вернул пустой список).");
+        setSdModelsNote("Список из резерва на сервере.");
       }
     } catch (e) {
       console.error(e);
@@ -156,6 +159,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
     if (sdMode === SD_MODES.txt2img) {
       setSourceFile(null);
       setMaskFile(null);
+      setUseInpaint(false);
       if (sourceRef.current) sourceRef.current.value = "";
       if (maskRef.current) maskRef.current.value = "";
     }
@@ -169,12 +173,14 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
     const p = sdPrompt.trim();
     if (!p || sdGenerating || !token || !imageGenAvailable) return;
 
-    if (sdMode === SD_MODES.img2img || sdMode === SD_MODES.inpaint) {
+    const effectiveMode = sdMode === SD_MODES.img2img && useInpaint ? SD_MODES.inpaint : sdMode;
+
+    if (effectiveMode === SD_MODES.img2img || effectiveMode === SD_MODES.inpaint) {
       if (!sourceFile) {
         onError?.("Выбери исходное изображение");
         return;
       }
-      if (sdMode === SD_MODES.inpaint && !maskFile) {
+      if (effectiveMode === SD_MODES.inpaint && !maskFile) {
         onError?.("Для инпейнта нужна маска (PNG: белое = зона перерисовки)");
         return;
       }
@@ -184,7 +190,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
     setSdResult(null);
     onError?.(null);
     try {
-      if (sdMode === SD_MODES.txt2img) {
+      if (effectiveMode === SD_MODES.txt2img) {
         const body = {
           prompt: p,
           negative_prompt: sdNegative.trim() || undefined,
@@ -210,14 +216,14 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
           onError?.("Пустой ответ картинки");
           return;
         }
-        setSdResult({ dataUrl: `data:${mime};base64,${b64}`, prompt: p, mode: sdMode });
+        setSdResult({ dataUrl: `data:${mime};base64,${b64}`, prompt: p, mode: effectiveMode });
         onError?.(null);
         return;
       }
 
       const fd = new FormData();
       fd.append("source", sourceFile);
-      if (sdMode === SD_MODES.inpaint && maskFile) fd.append("mask", maskFile);
+      if (effectiveMode === SD_MODES.inpaint && maskFile) fd.append("mask", maskFile);
       fd.append("prompt", p);
       fd.append("negative_prompt", sdNegative.trim());
       fd.append("steps", String(sdSteps));
@@ -243,7 +249,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
         onError?.("Пустой ответ картинки");
         return;
       }
-      setSdResult({ dataUrl: `data:${mime};base64,${b64}`, prompt: p, mode: sdMode });
+      setSdResult({ dataUrl: `data:${mime};base64,${b64}`, prompt: p, mode: effectiveMode });
       onError?.(null);
     } catch (e) {
       console.error(e);
@@ -261,6 +267,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
     sdSize,
     sdDenoise,
     sdMode,
+    useInpaint,
     sourceFile,
     maskFile,
     sdCheckpoint,
@@ -273,15 +280,14 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
   const modeHint =
     sdMode === SD_MODES.txt2img
       ? "Текст → картинка (txt2img). Промпт лучше на английском."
-      : sdMode === SD_MODES.img2img
-        ? "img2img: исходник + промпт. Сила перерисовки — «Шум» (denoising)."
-        : "Инпейнт: исходник + маска (белое = перерисовать). Размеры маски лучше совпадать с картинкой.";
+      : useInpaint
+        ? "Инпейнт: исходник + маска (белое = перерисовать). Размеры маски лучше совпадать с картинкой."
+        : "Изменить: исходник + промпт. Сила перерисовки — «Шум» (denoising).";
 
   const canSubmit =
     sdPrompt.trim() &&
     (sdMode === SD_MODES.txt2img ||
-      (sourceFile && sdMode === SD_MODES.img2img) ||
-      (sourceFile && maskFile && sdMode === SD_MODES.inpaint));
+      (sourceFile && sdMode === SD_MODES.img2img && (!useInpaint || (useInpaint && maskFile))));
 
   return (
     <div className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden">
@@ -295,10 +301,8 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
           <div className="mx-auto max-w-md rounded-xl border border-tc-border/60 bg-tc-panel/30 p-4 text-sm text-tc-text-sec">
             <p className="font-medium text-tc-text">Генерация картинок недоступна</p>
             <p className="mt-2 text-xs leading-relaxed text-tc-text-muted">
-              На сервере в .env задайте <code className="rounded bg-tc-input px-1">COMFYUI_BASE_URL</code> (например{" "}
-              <code className="rounded bg-tc-input px-1">http://127.0.0.1:8000</code>) и путь{" "}
-              <code className="rounded bg-tc-input px-1">COMFY_TXT2IMG_WORKFLOW</code> к JSON workflow (ComfyUI → Save API
-              Format), затем перезапустите Node. Подробности: <code className="rounded bg-tc-input px-1">server/comfy/workflows/README.txt</code>.
+              На сервере в .env задайте <code className="rounded bg-tc-input px-1">SWARMUI_BASE_URL</code> (например{" "}
+              <code className="rounded bg-tc-input px-1">http://127.0.0.1:7801</code>), затем перезапустите Node.
             </p>
           </div>
         ) : (
@@ -315,7 +319,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
                       className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-tc-border border-t-tc-accent"
                       aria-hidden
                     />
-                    <span className="text-xs">Рисую в ComfyUI… (до ~4 минут)</span>
+                    <span className="text-xs">Рисую в SwarmUI… (до ~4 минут)</span>
                   </div>
                 </div>
               </div>
@@ -411,24 +415,41 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
 
       {imageGenAvailable && !loading ? (
         <div className="tc-composer-bar relative z-10 flex flex-col gap-2 border-t border-tc-border bg-tc-header px-2 py-2 sm:px-3">
-          <div className="flex flex-wrap gap-1 rounded-lg border border-tc-border/50 bg-tc-panel/20 p-1">
-            {[
-              { id: SD_MODES.txt2img, label: "Текст → фото" },
-              { id: SD_MODES.img2img, label: "img2img" },
-              { id: SD_MODES.inpaint, label: "Инпейнт" },
-            ].map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                disabled={sdGenerating}
-                onClick={() => setSdMode(m.id)}
-                className={`rounded-md px-2.5 py-1.5 text-[11px] font-medium transition sm:text-xs ${
-                  sdMode === m.id ? "bg-tc-accent/25 text-tc-accent" : "text-tc-text-sec hover:bg-tc-hover"
-                } disabled:opacity-40`}
-              >
-                {m.label}
-              </button>
-            ))}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={sdGenerating}
+              onClick={() => setSdMode(SD_MODES.img2img)}
+              className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                sdMode === SD_MODES.img2img ? "bg-tc-accent text-white" : "bg-tc-input text-tc-text hover:bg-tc-hover"
+              } disabled:opacity-40`}
+              title="img2img / inpaint"
+            >
+              Изменить
+            </button>
+            <button
+              type="button"
+              disabled={sdGenerating}
+              onClick={() => setSdMode(SD_MODES.txt2img)}
+              className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                sdMode === SD_MODES.txt2img ? "bg-tc-accent text-white" : "bg-tc-input text-tc-text hover:bg-tc-hover"
+              } disabled:opacity-40`}
+              title="txt2img"
+            >
+              Нарисовать
+            </button>
+            {sdMode === SD_MODES.img2img ? (
+              <label className="ml-auto flex items-center gap-2 rounded-lg border border-tc-border/60 bg-tc-panel/25 px-3 py-2 text-[11px] text-tc-text-sec">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={useInpaint}
+                  onChange={(e) => setUseInpaint(e.target.checked)}
+                  disabled={sdGenerating}
+                />
+                Инпейнт (с маской)
+              </label>
+            ) : null}
           </div>
 
           <div className="rounded-xl border border-tc-border/60 bg-tc-panel/25 px-3 py-2 space-y-1">
@@ -441,8 +462,8 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
                     const v = e.target.value;
                     setSdCheckpoint(v);
                     try {
-                      if (v) window.localStorage.setItem(LS_COMFY_CHECKPOINT_KEY, v);
-                      else window.localStorage.removeItem(LS_COMFY_CHECKPOINT_KEY);
+                      if (v) window.localStorage.setItem(LS_MODEL_KEY, v);
+                      else window.localStorage.removeItem(LS_MODEL_KEY);
                     } catch {
                       /* ignore */
                     }
@@ -450,7 +471,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
                   disabled={sdGenerating || sdModelsLoading}
                   className="tc-msg-input max-w-full truncate rounded-lg border border-tc-border bg-tc-input px-2 py-1.5 text-xs text-tc-text outline-none focus:ring-2 focus:ring-tc-accent/50"
                 >
-                  <option value="">По умолчанию (COMFY_DEFAULT_CHECKPOINT) / без смены</option>
+                  <option value="">По умолчанию (SWARM_DEFAULT_MODEL)</option>
                   {sdCheckpointOptions.map((t) => (
                     <option key={t} value={t} title={t}>
                       {t.length > 72 ? `${t.slice(0, 70)}…` : t}
@@ -470,11 +491,11 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
             {sdModelsError ? <p className="text-[11px] text-tc-danger">{sdModelsError}</p> : null}
             {sdModelsNote ? <p className="text-[11px] text-amber-600 dark:text-amber-400/90">{sdModelsNote}</p> : null}
             <p className="text-[10px] leading-snug text-tc-text-muted">
-              Список чекпоинтов через ComfyUI API. Длинные имена сокращены; полный текст — в подсказке при наведении.
+              Список моделей через SwarmUI API. Длинные имена сокращены; полный текст — в подсказке при наведении.
             </p>
           </div>
 
-          {(sdMode === SD_MODES.img2img || sdMode === SD_MODES.inpaint) && (
+          {sdMode === SD_MODES.img2img && (
             <div className="rounded-xl border border-tc-border/60 bg-tc-panel/25 p-3 space-y-2">
               <p className="text-xs font-semibold text-tc-text-sec">Исходник и маска</p>
               <div className="flex flex-wrap gap-2">
@@ -497,7 +518,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
                 >
                   Картинка…
                 </button>
-                {sdMode === SD_MODES.inpaint && (
+                {useInpaint && (
                   <>
                     <input
                       ref={maskRef}
@@ -521,6 +542,11 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
                   </>
                 )}
               </div>
+              {useInpaint ? (
+                <p className="text-[10px] leading-snug text-tc-text-muted">
+                  Маска: белое = перерисовать, чёрное = оставить. Лучше PNG и тот же размер, что у исходника.
+                </p>
+              ) : null}
               {(srcPreview || maskPreview) && (
                 <div className="flex flex-wrap gap-2">
                   {srcPreview ? (
@@ -582,7 +608,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
                   ))}
                 </select>
               </label>
-              {(sdMode === SD_MODES.img2img || sdMode === SD_MODES.inpaint) && (
+              {sdMode === SD_MODES.img2img && (
                 <label className="flex min-w-[8rem] flex-col gap-0.5 text-[11px] text-tc-text-muted">
                   Шум (denoise)
                   <input
@@ -604,7 +630,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
                 disabled={sdGenerating || !canSubmit}
                 className="rounded-lg bg-tc-accent px-3 py-2 text-xs font-semibold text-white transition hover:opacity-95 disabled:opacity-40"
               >
-                {sdGenerating ? "…" : "Сгенерировать"}
+                {sdGenerating ? "…" : sdMode === SD_MODES.txt2img ? "Нарисовать" : useInpaint ? "Изменить (инпейнт)" : "Изменить"}
               </button>
             </div>
           </div>
