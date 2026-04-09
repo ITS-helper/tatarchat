@@ -49,21 +49,51 @@ alwaysApply: true
 
 ## Личный ассистент (LLM на сервере, server + client)
 
-- В сайдбаре **Личное** → после **Избранного** **«Ассистент»** (`personalAiOpen`), ниже **«Картинка (SD)»** (`personalSdOpen`): чат **`PersonalAiChat.jsx`**, генерация картинок **`PersonalSdImage.jsx`**, не Socket-комнаты.
+- В сайдбаре **Личное** → после **Избранного**: **«Ассистент»** (`personalAiOpen`), **«Картинка (ComfyUI)»** (`personalSdOpen`), **«Тест»** (`personalTestOpen`, только при **`canUseImageTest`**): чат **`PersonalAiChat.jsx`**, основная генерация **`PersonalSdImage.jsx`**, экспериментальный txt2img **`PersonalImageTest.jsx`**. Личные экраны не Socket-комнаты; **`personalAsideOpen`** = любой из трёх — сокет эмитит **`leave`** как для «Ассистента».
 - **Сервер** `server/server.js`:
   - История: таблица **`user_ollama_chats`** (per **`user_id`**: JSONB **`messages`**). **`GET /api/ai/chat`**, **`POST /api/ai/chat`** (`message` или `clear: true`).
   - Модель (пер‑пользователя): таблица **`user_ollama_prefs`** + `POST /api/ai/chat { setModel }`, `GET /api/ai/chat` отдаёт `model` и `availableModels`.
   - Память фактов: таблица **`user_ai_facts`** + API **`GET/POST/DELETE /api/ai/facts`**; факты подмешиваются в **system** перед каждым ответом.
   - HTTP к локальному API модели: `POST …/api/chat` (URL, таймаут, список моделей и лимиты — константы/`process.env` в начале **`server/server.js`**, наружу не прокидывать). Свой базовый промпт: опционально **`AI_SYSTEM_PROMPT`** (полностью подменяет встроенный; в коде читается и прежний одноимённый ключ из env для обратной совместимости).
-  - **Картинки (txt2img):** см. отдельный раздел **«Генерация картинок (ComfyUI)»** ниже.
+  - **Картинки:** см. разделы **SwarmUI — генерация картинок** и **Личное → «Тест»** ниже; устаревший блок про прямой Comfy — в **«Генерация картинок (ComfyUI)»**.
 - **Поиск в интернете (опционально):** в **`POST /api/ai/chat`** флаг **`search: true`** — сначала [Tavily Search API](https://docs.tavily.com/) (`POST https://api.tavily.com/search`, **`Authorization: Bearer TAVILY_API_KEY`**), выдержки в **system** (в БД только user/assistant). При ответе по выдержкам в промпте учитывается контекст **России**. Env: **`TAVILY_API_KEY`**, опционально **`TAVILY_SEARCH_DEPTH`**, **`TAVILY_MAX_RESULTS`**, **`TAVILY_TIMEOUT_MS`**.
   - UI: чекбокс «Искать в интернете» (localStorage **`tatarchat_ai_web_search`**), индикатор **«Думаю… / Ищу и думаю…»**; ответ разбит по группам (`##`), голые URL сжимаются в `[текст](url)`, блок **«Источники»** в **`details`**.
   - Картинки: запрос Tavily с `include_images`; сервер фильтрует битые URL, клиент показывает сетку **«Картинки по теме поиска»** и открывает их в **превью‑лайтбоксе** внутри чата.
   - Источники: в ответе ассистента не должно быть `[1]` внутри текста — ссылки оформляются кратко в конце блоком **«Источники»**.
 
-## Генерация картинок (ComfyUI: txt2img, img2img, inpaint)
+## SwarmUI — генерация картинок (актуально, server + client)
+
+- **Стек:** браузер → Node (**JWT**) → **SwarmUI** (HTTP API + при необходимости **ComfyBackendDirect** с workflow из JSON на диске сервера). Код: **`server/swarm/image-gen.js`**, маршруты в **`server/server.js`** (`GET/POST /api/ai/image*`, модели/пресеты).
+- **Env:** **`SWARMUI_BASE_URL`** (часто `http://127.0.0.1:7801`), таймаут **`SWARMUI_TIMEOUT_MS`**, лимиты **`MAX_SWARM_PROMPT_CHARS`**, **`SWARM_MAX_STEPS`**, **`SWARM_MAX_SIDE`**, опционально **`SWARM_PRESET_TXT2IMG`** / **`SWARM_PRESET_IMG2IMG`**, **`SWARM_DEFAULT_MODEL`**, **`SWARM_CFG_SCALE`**.
+- **Workflow Comfy (API format):** **`SWARM_COMFY_TXT2IMG_WORKFLOW`** (основной txt2img), **`SWARM_COMFY_IMG2IMG_WORKFLOW`** (изменение картинки / инпейнт с **`<<<TC_LOAD_IMAGE>>>`**, опционально **`<<<TC_LOAD_MASK>>>`**). Плейсхолдеры в шаблоне: **`<<<TC_PROMPT>>>`**, **`<<<TC_NEGATIVE>>>`**, **`<<<TC_STEPS>>>`**, **`<<<TC_WIDTH>>>`**, **`<<<TC_HEIGHT>>>`**, **`<<<TC_SEED>>>`**, **`<<<TC_CFG>>>`**, и т.д. (см. **`buildWorkflowFromTemplateString`** в **`image-gen.js`**).
+- **Клиент:** **`PersonalSdImage.jsx`** — **`POST /api/ai/image`** (txt2img), **`POST /api/ai/image/img2img`** (multipart); доступность пункта «Картинка»: **`imageGenAvailable`** из **`GET /api/ai/chat`**.
+- **Тестовый workflow (отдельный экран):** env **`SWARM_COMFY_TEST_TXT2IMG_WORKFLOW`**, API только для пользователей с **`can_use_image_test`**: **`POST /api/ai/image/test`**. Подробно — раздел **Личное → «Тест»** ниже.
+
+## Личное → «Тест» (только txt2img, отдельный workflow)
+
+- **Назначение:** один экран **«Тест»** в **Личном** для прогона **другого** txt2img JSON (эксперименты без трогания боевого **`SWARM_COMFY_TXT2IMG_WORKFLOW`**).
+- **Клиент (`client/src/App.jsx` + `PersonalImageTest.jsx`):**
+  - Кнопка **«Тест»** видна только при **`canUseImageTest`** (с **`GET /api/me`** / логина / регистрации).
+  - **`imageTestGenAvailable`**: правда, если есть право **и** на сервере настроен тестовый workflow (**`isSwarmComfyTestTxt2imgConfigured()`**); иначе текст «недоступна» с подсказкой про env.
+  - Запрос: **`POST /api/ai/image/test`**, body JSON: **`prompt`**, **`steps`**, **`width`**, **`height`**.
+  - При снятии права у текущего пользователя экран закрывается (**`useEffect`** по **`canUseImageTest`**). Переключение тумблера в админке у себя обновляет права через **`refreshChannels()`**.
+- **Админка:** модалка «Управление пользователями» — колонка **«Тест»** → **`PATCH /api/admin/users/:id`** с **`can_use_image_test`**. **`GET /api/admin/users`** отдаёт колонку в списке.
+- **Сервер (`server/server.js`):**
+  - Таблица **`users`**: **`can_use_image_test BOOLEAN DEFAULT FALSE`** (миграция **`ensureUserPermissionsSchema`**).
+  - Стартовая выдача кому указано в env: **`IMAGE_TEST_GRANT_NICKNAMES`** (строка через запятую, сравнение **`LOWER(nickname)`**; по умолчанию **`Макс`**). Уже выданное вручную **не** перетирается условием `AND can_use_image_test = FALSE` только для строк, которым ещё false (логика как у других bootstrap-апдейтов).
+  - **`requireImageTestAccess`**: перед **`POST /api/ai/image/test`** проверка **`can_use_image_test`** — иначе **403** с текстом про отсутствие доступа к разделу «Тест».
+  - **`GET /api/me`**: **`canUseImageTest`**, **`imageTestGenAvailable`** (право ∧ настроен **`SWARM_COMFY_TEST_TXT2IMG_WORKFLOW`** и файл существует ∧ **`SWARMUI_BASE_URL`**).
+- **Сервер (`server/swarm/image-gen.js`):**
+  - **`SWARM_COMFY_TEST_TXT2IMG_WORKFLOW`** (путь как у других workflow, относительно **`server/`** или абсолютный; при отсутствии расширения пробуется **`.json`**).
+  - **`isSwarmComfyTestTxt2imgConfigured()`**, **`runTxt2imgTestComfyWorkflow({ prompt, steps, width, height })`** → внутри **`runTxt2imgViaComfyWorkflowPath`** с **`cfg: 1`**.
+  - Ошибка **`swarm_test_workflow_not_configured`** → **503** с текстом про **`SWARM_COMFY_TEST_TXT2IMG_WORKFLOW`**.
+- **Деплой:** в **`.env`** на машине с Node задать **`SWARM_COMFY_TEST_TXT2IMG_WORKFLOW=swarm/workflows/ваш-файл.json`** (или копию рабочего z-image / другой граф с теми же плейсхолдерами), перезапуск Node. SwarmUI должен быть доступен по **`SWARMUI_BASE_URL`**.
+
+## Генерация картинок (ComfyUI: txt2img, img2img, inpaint) — исторический / прямой Comfy
 
 Связка: **браузер** → **Node TatarChat** (JWT) → **локальный ComfyUI** (`POST /prompt` → опрос `GET /history/{prompt_id}` → `GET /view` для PNG). ComfyUI и Node на **одном ПК** (loopback). ComfyUI должен быть **запущен**, пока нужна генерация с сайта.
+
+**Примечание:** в текущем проде генерация завязана на **SwarmUI** (`server/swarm/image-gen.js`). Блок ниже описывает старый модуль **`server/comfy/`**, если он ещё есть в дереве — не путать с актуальными env **`SWARM_*`**.
 
 ### Клиент (`client`)
 
