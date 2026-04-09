@@ -76,6 +76,7 @@ function resolveWorkflowPathWithFallback(raw) {
 }
 
 const SWARM_COMFY_TXT2IMG_WORKFLOW = resolveWorkflowPathWithFallback(process.env.SWARM_COMFY_TXT2IMG_WORKFLOW || "");
+const SWARM_COMFY_IMG2IMG_WORKFLOW = resolveWorkflowPathWithFallback(process.env.SWARM_COMFY_IMG2IMG_WORKFLOW || "");
 
 function isSwarmConfigured() {
   return Boolean(SWARMUI_BASE_URL);
@@ -83,6 +84,10 @@ function isSwarmConfigured() {
 
 function isSwarmComfyWorkflowConfigured() {
   return Boolean(isSwarmConfigured() && SWARM_COMFY_TXT2IMG_WORKFLOW && fileExists(SWARM_COMFY_TXT2IMG_WORKFLOW));
+}
+
+function isSwarmComfyImg2imgWorkflowConfigured() {
+  return Boolean(isSwarmConfigured() && SWARM_COMFY_IMG2IMG_WORKFLOW && fileExists(SWARM_COMFY_IMG2IMG_WORKFLOW));
 }
 
 function sanitizePrompt(s, maxLen = MAX_SWARM_PROMPT_CHARS) {
@@ -263,6 +268,41 @@ function comfyDirectUrl(relPath) {
   return `${base}/ComfyBackendDirect/${rel}`;
 }
 
+async function comfyUploadImageBuffer(buffer, filename = "upload.png") {
+  const form = new FormData();
+  const blob = new Blob([buffer], { type: "application/octet-stream" });
+  form.append("image", blob, filename);
+  form.append("type", "input");
+  form.append("overwrite", "true");
+  const url = comfyDirectUrl("upload/image");
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), SWARMUI_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { method: "POST", body: form, signal: ac.signal });
+    const txt = await res.text();
+    let data = {};
+    try {
+      data = txt ? JSON.parse(txt) : {};
+    } catch {
+      data = {};
+    }
+    if (!res.ok) {
+      const err = new Error(`swarm_comfy_upload_http_${res.status}`);
+      err.detail = txt.slice(0, 800);
+      throw err;
+    }
+    const name = typeof data.name === "string" ? data.name.trim() : "";
+    if (!name) {
+      const err = new Error("swarm_comfy_upload_no_name");
+      err.detail = txt.slice(0, 400);
+      throw err;
+    }
+    return name;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function escapeJsonString(s) {
   return String(s ?? "")
     .replace(/\\/g, "\\\\")
@@ -273,7 +313,7 @@ function escapeJsonString(s) {
 }
 
 function buildWorkflowFromTemplateString(templateStr, params) {
-  const { prompt, steps, width, height, seed, cfg } = params;
+  const { prompt, steps, width, height, seed, cfg, loadImage } = params;
   let s = templateStr;
   s = s.replace(/<<<TC_PROMPT>>>/g, escapeJsonString(prompt));
   s = s.replace(/<<<TC_STEPS>>>/g, String(steps));
@@ -281,6 +321,7 @@ function buildWorkflowFromTemplateString(templateStr, params) {
   s = s.replace(/<<<TC_HEIGHT>>>/g, String(height));
   s = s.replace(/<<<TC_SEED>>>/g, String(seed));
   s = s.replace(/<<<TC_CFG>>>/g, String(cfg));
+  if (loadImage != null) s = s.replace(/<<<TC_LOAD_IMAGE>>>/g, escapeJsonString(loadImage));
   try {
     return JSON.parse(s);
   } catch (e) {
@@ -443,6 +484,32 @@ async function runTxt2imgViaComfyWorkflow({ prompt, steps, width, height }) {
     height,
     seed,
     cfg: 1,
+    loadImage: null,
+  });
+  return runComfyDirectUntilImage(wf);
+}
+
+async function runImg2imgViaComfyWorkflow({ prompt, steps, cfg, initImageBuffer }) {
+  if (!isSwarmComfyImg2imgWorkflowConfigured()) {
+    const err = new Error("swarm_img2img_workflow_not_configured");
+    throw err;
+  }
+  const raw = await fsp.readFile(SWARM_COMFY_IMG2IMG_WORKFLOW, "utf8");
+  if (!raw.includes("<<<TC_LOAD_IMAGE>>>")) {
+    const err = new Error("swarm_workflow_missing_load_image");
+    err.detail = "В workflow для «Изменить» нужен плейсхолдер <<<TC_LOAD_IMAGE>>> в узле LoadImage.";
+    throw err;
+  }
+  const uploadName = await comfyUploadImageBuffer(initImageBuffer, "tatarchat_source.png");
+  const seed = Math.floor(Math.random() * 2147483647);
+  const wf = buildWorkflowFromTemplateString(raw, {
+    prompt,
+    steps,
+    width: 0,
+    height: 0,
+    seed,
+    cfg,
+    loadImage: uploadName,
   });
   return runComfyDirectUntilImage(wf);
 }
@@ -535,6 +602,18 @@ async function runImg2imgOrInpaint({ prompt, negativePrompt, steps, width, heigh
   const sid = await ensureSession();
   const p = sanitizePrompt(prompt);
   if (!p) throw new Error("swarm_empty_prompt");
+  if (isSwarmComfyImg2imgWorkflowConfigured()) {
+    const hasMask = typeof maskBuffer?.length === "number" && maskBuffer.length > 0;
+    if (hasMask) {
+      const err = new Error("swarm_workflow_mask_not_supported");
+      err.detail = "Текущий workflow «Изменить» не поддерживает маску (инпейнт).";
+      throw err;
+    }
+    const st = Math.max(1, Math.min(SWARM_MAX_STEPS, Math.floor(Number(steps) || 4)));
+    const cfg = Math.max(1, Math.min(30, Number.isFinite(Number(denoisingStrength)) ? 1 : 1));
+    // cfg из UI для «Изменить» у нас пока не отдельным полем, используем SWARM_CFG_SCALE как дефолт
+    return runImg2imgViaComfyWorkflow({ prompt: p, steps: st, cfg: SWARM_CFG_SCALE, initImageBuffer });
+  }
   const neg = sanitizePrompt(negativePrompt || "");
   const mRaw = sanitizeModel(model) || sanitizeModel(SWARM_DEFAULT_MODEL) || "";
   const preset = maybePresetForMode("img2img");
@@ -594,6 +673,16 @@ async function runImg2imgOrInpaintWithRequestPreset({
   const sid = await ensureSession();
   const p = sanitizePrompt(prompt);
   if (!p) throw new Error("swarm_empty_prompt");
+  if (isSwarmComfyImg2imgWorkflowConfigured()) {
+    const hasMask = typeof maskBuffer?.length === "number" && maskBuffer.length > 0;
+    if (hasMask) {
+      const err = new Error("swarm_workflow_mask_not_supported");
+      err.detail = "Текущий workflow «Изменить» не поддерживает маску (инпейнт).";
+      throw err;
+    }
+    const st = Math.max(1, Math.min(SWARM_MAX_STEPS, Math.floor(Number(steps) || 4)));
+    return runImg2imgViaComfyWorkflow({ prompt: p, steps: st, cfg: SWARM_CFG_SCALE, initImageBuffer });
+  }
   const neg = sanitizePrompt(negativePrompt || "");
   const mRaw = sanitizeModel(model) || sanitizeModel(SWARM_DEFAULT_MODEL) || "";
   const presetTitle = sanitizePresetTitle(preset);
@@ -656,6 +745,21 @@ function handleSwarmError(e, res, logLabel) {
         "Workflow не настроен: задайте SWARM_COMFY_TXT2IMG_WORKFLOW (путь к JSON workflow) в .env на сервере и перезапустите Node.",
     });
   }
+  if (String(e?.message) === "swarm_img2img_workflow_not_configured") {
+    return res.status(503).json({
+      error:
+        "Workflow «Изменить» не настроен: задайте SWARM_COMFY_IMG2IMG_WORKFLOW (путь к JSON workflow) в .env на сервере и перезапустите Node.",
+    });
+  }
+  if (String(e?.message) === "swarm_workflow_missing_load_image") {
+    return res.status(500).json({ error: "Workflow «Изменить»: нет <<<TC_LOAD_IMAGE>>>.", detail: e?.detail });
+  }
+  if (String(e?.message) === "swarm_workflow_mask_not_supported") {
+    return res.status(400).json({ error: "Инпейнт недоступен для текущего workflow.", detail: e?.detail });
+  }
+  if (String(e?.message).startsWith("swarm_comfy_upload_http_") || String(e?.message) === "swarm_comfy_upload_no_name") {
+    return res.status(502).json({ error: "Не удалось загрузить изображение в Comfy backend (через SwarmUI).", detail: String(e?.detail || "").slice(0, 400) });
+  }
   if (String(e?.message) === "swarm_workflow_invalid_json") {
     return res.status(500).json({
       error: "Некорректный JSON workflow после подстановки параметров. Проверьте шаблон и плейсхолдеры.",
@@ -712,8 +816,12 @@ function logStartupInfo() {
   if (SWARM_PRESET_TXT2IMG) console.log(`[swarm] SWARM_PRESET_TXT2IMG=${SWARM_PRESET_TXT2IMG}`);
   if (SWARM_PRESET_IMG2IMG) console.log(`[swarm] SWARM_PRESET_IMG2IMG=${SWARM_PRESET_IMG2IMG}`);
   if (SWARM_COMFY_TXT2IMG_WORKFLOW) console.log(`[swarm] SWARM_COMFY_TXT2IMG_WORKFLOW=${SWARM_COMFY_TXT2IMG_WORKFLOW}`);
+  if (SWARM_COMFY_IMG2IMG_WORKFLOW) console.log(`[swarm] SWARM_COMFY_IMG2IMG_WORKFLOW=${SWARM_COMFY_IMG2IMG_WORKFLOW}`);
   if (SWARM_COMFY_TXT2IMG_WORKFLOW && !fileExists(SWARM_COMFY_TXT2IMG_WORKFLOW)) {
     console.warn("[swarm] TXT2IMG workflow file not found — will fall back to Swarm GenerateText2Image.");
+  }
+  if (SWARM_COMFY_IMG2IMG_WORKFLOW && !fileExists(SWARM_COMFY_IMG2IMG_WORKFLOW)) {
+    console.warn("[swarm] IMG2IMG workflow file not found — will fall back to Swarm GenerateText2Image.");
   }
   console.log(`[swarm] cfg_scale=${SWARM_CFG_SCALE} timeout_ms=${SWARMUI_TIMEOUT_MS}`);
 }
@@ -721,8 +829,10 @@ function logStartupInfo() {
 module.exports = {
   SWARMUI_BASE_URL,
   SWARM_COMFY_TXT2IMG_WORKFLOW,
+  SWARM_COMFY_IMG2IMG_WORKFLOW,
   isSwarmConfigured,
   isSwarmComfyWorkflowConfigured,
+  isSwarmComfyImg2imgWorkflowConfigured,
   MAX_SWARM_PROMPT_CHARS,
   SWARM_MAX_STEPS,
   SWARM_MAX_SIDE,
