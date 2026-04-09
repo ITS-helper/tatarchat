@@ -8,6 +8,7 @@ import GalleryView from "./GalleryView.jsx";
 import CalendarView from "./CalendarView.jsx";
 import PersonalAiChat from "./PersonalAiChat.jsx";
 import PersonalSdImage from "./PersonalSdImage.jsx";
+import PersonalImageTest from "./PersonalImageTest.jsx";
 
 const LS_TOKEN = "tatarchat_token";
 const LS_NICKNAME = "tatarchat_nickname";
@@ -1142,6 +1143,8 @@ export default function App() {
   const [publicChannels, setPublicChannels] = useState([]);
   const [directChannels, setDirectChannels] = useState([]);
   const [canSeeDtdWork, setCanSeeDtdWork] = useState(true);
+  const [canUseImageTest, setCanUseImageTest] = useState(false);
+  const [imageTestGenAvailable, setImageTestGenAvailable] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dmModalOpen, setDmModalOpen] = useState(false);
   const [roomModalOpen, setRoomModalOpen] = useState(false);
@@ -1444,7 +1447,12 @@ export default function App() {
   const [personalAiOpen, setPersonalAiOpen] = useState(false);
   /** Stable Diffusion txt2img — отдельный экран под «Ассистент» */
   const [personalSdOpen, setPersonalSdOpen] = useState(false);
-  const personalAsideOpen = useMemo(() => personalAiOpen || personalSdOpen, [personalAiOpen, personalSdOpen]);
+  /** Экспериментальный txt2img (отдельный workflow на сервере) */
+  const [personalTestOpen, setPersonalTestOpen] = useState(false);
+  const personalAsideOpen = useMemo(
+    () => personalAiOpen || personalSdOpen || personalTestOpen,
+    [personalAiOpen, personalSdOpen, personalTestOpen]
+  );
   const personalAiOpenRef = useRef(false);
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
@@ -1540,6 +1548,10 @@ export default function App() {
   useEffect(() => {
     personalAiOpenRef.current = personalAsideOpen;
   }, [personalAsideOpen]);
+
+  useEffect(() => {
+    if (!canUseImageTest && personalTestOpen) setPersonalTestOpen(false);
+  }, [canUseImageTest, personalTestOpen]);
 
   useEffect(() => {
     if (themeLight) document.documentElement.classList.add("theme-light");
@@ -1732,6 +1744,8 @@ export default function App() {
       }
       if (meRes.ok) {
         setCanSeeDtdWork(me.canSeeDtdWork !== false);
+        setCanUseImageTest(!!me.canUseImageTest);
+        setImageTestGenAvailable(!!me.imageTestGenAvailable);
       }
     } catch (e) {
       console.error(e);
@@ -2787,6 +2801,8 @@ export default function App() {
     localStorage.setItem(LS_HAS_AVATAR, ha ? "1" : "0");
     setHasAvatar(ha);
     setCanSeeDtdWork(data.user?.canSeeDtdWork !== false);
+    setCanUseImageTest(!!data.user?.canUseImageTest);
+    setImageTestGenAvailable(!!data.user?.imageTestGenAvailable);
     setNickname(data.user?.nickname || name);
     setToken(data.token);
     setPasswordInput("");
@@ -3023,7 +3039,8 @@ export default function App() {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        setAdminUsers((prev) => prev.map((u) => u.id === userId ? { ...u, ...data.user } : u));
+        setAdminUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, ...data.user } : u)));
+        if (field === "can_use_image_test" && userId === myUserId) void refreshChannels();
       } else {
         setBanner(data.error || "Ошибка сохранения");
       }
@@ -3134,6 +3151,8 @@ export default function App() {
     setPublicChannels([]);
     setDirectChannels([]);
     setCanSeeDtdWork(true);
+    setCanUseImageTest(false);
+    setImageTestGenAvailable(false);
     setActiveRoom("lobby");
     setRoomTitle("Семья");
     setStatus("offline");
@@ -3141,6 +3160,7 @@ export default function App() {
     roomJoinedRef.current = false;
     setPersonalAiOpen(false);
     setPersonalSdOpen(false);
+    setPersonalTestOpen(false);
     setChangePwOpen(false);
     setChangePwCurrent("");
     setChangePwNew("");
@@ -3152,6 +3172,7 @@ export default function App() {
   const goToChatRoom = useCallback((slug) => {
     setPersonalAiOpen(false);
     setPersonalSdOpen(false);
+    setPersonalTestOpen(false);
     setBanner(null);
     const raw = String(slug ?? "").trim();
     setActiveRoom(/^dm-\d+-\d+$/i.test(raw) ? canonicalizeDmSlug(raw) : raw);
@@ -3205,6 +3226,7 @@ export default function App() {
   const chooseChannelView = (view) => {
     setPersonalAiOpen(false);
     setPersonalSdOpen(false);
+    setPersonalTestOpen(false);
     setActiveView(view);
     if (channelMenuRoom) setActiveRoom(channelMenuRoom);
     setChannelMenuRoom(null);
@@ -3754,6 +3776,7 @@ export default function App() {
               onClick={() => {
                 setPersonalAiOpen(true);
                 setPersonalSdOpen(false);
+                setPersonalTestOpen(false);
                 setActiveView(CHANNEL_VIEWS.chat);
                 setChannelMenuRoom(null);
                 setSidebarOpen(false);
@@ -3778,6 +3801,7 @@ export default function App() {
               onClick={() => {
                 setPersonalSdOpen(true);
                 setPersonalAiOpen(false);
+                setPersonalTestOpen(false);
                 setActiveView(CHANNEL_VIEWS.chat);
                 setChannelMenuRoom(null);
                 setSidebarOpen(false);
@@ -3796,6 +3820,33 @@ export default function App() {
                 <p className="truncate text-xs text-tc-text-muted">Stable Diffusion на сервере</p>
               </div>
             </button>
+
+            {canUseImageTest ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setPersonalTestOpen(true);
+                  setPersonalAiOpen(false);
+                  setPersonalSdOpen(false);
+                  setActiveView(CHANNEL_VIEWS.chat);
+                  setChannelMenuRoom(null);
+                  setSidebarOpen(false);
+                }}
+                className={`mt-2 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 transition-colors duration-200 ${
+                  personalTestOpen ? "bg-tc-accent/20" : "hover:bg-tc-hover"
+                }`}
+              >
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400" aria-hidden>
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
+                    <path d="M7 2v2h1v5.5L4 18v2h16v-2l-4-8.5V4h1V2H7zm2 2h6v5.5l3 6.5H6l3-6.5V4z" />
+                  </svg>
+                </div>
+                <div className="min-w-0 flex-1 text-left">
+                  <span className={`truncate text-sm font-medium ${personalTestOpen ? "text-tc-accent" : "text-tc-text"}`}>Тест</span>
+                  <p className="truncate text-xs text-tc-text-muted">txt2img (экспериментальный workflow)</p>
+                </div>
+              </button>
+            ) : null}
 
             {directChannels.length ? (
               <div className="mt-2 rounded-xl border border-tc-border/60 bg-tc-panel/20">
@@ -4272,6 +4323,7 @@ export default function App() {
                         <th className="px-3 py-3 text-center font-medium">Семья</th>
                         <th className="px-3 py-3 text-center font-medium">DTD</th>
                         <th className="px-3 py-3 text-center font-medium">Работа</th>
+                        <th className="px-3 py-3 text-center font-medium">Тест</th>
                         <th className="px-3 py-3 text-center font-medium">Админ</th>
                       </tr>
                     </thead>
@@ -4311,6 +4363,11 @@ export default function App() {
                             </td>
                             <td className="px-3 py-3">
                               <div className="flex justify-center">
+                                <Toggle field="can_use_image_test" value={!!u.can_use_image_test} />
+                              </div>
+                            </td>
+                            <td className="px-3 py-3">
+                              <div className="flex justify-center">
                                 <Toggle field="is_admin" value={!!u.is_admin} />
                               </div>
                             </td>
@@ -4322,7 +4379,9 @@ export default function App() {
                 )}
               </div>
               <div className="border-t border-tc-border px-6 py-3 text-xs text-tc-text-muted">
-                Доступ к каналу (Семья, DTD, Работа) даёт и чат, и галерею, и календарь для этой комнаты. Переключатели сохраняются сразу.
+                Доступ к каналу (Семья, DTD, Работа) даёт и чат, и галерею, и календарь для этой комнаты. «Тест» — пункт в Личном
+                (экспериментальный txt2img, нужен <code className="rounded bg-tc-input px-1">SWARM_COMFY_TEST_TXT2IMG_WORKFLOW</code> на сервере).
+                Переключатели сохраняются сразу.
               </div>
             </div>
           </div>
@@ -4454,7 +4513,13 @@ export default function App() {
           </button>
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-base font-semibold text-tc-text">
-              {personalAiOpen ? "Ассистент" : personalSdOpen ? "Картинка (ComfyUI)" : headerTitleForRoom({ roomTitle, activeRoom, activeView })}
+              {personalAiOpen
+                ? "Ассистент"
+                : personalSdOpen
+                  ? "Картинка (ComfyUI)"
+                  : personalTestOpen
+                    ? "Тест"
+                    : headerTitleForRoom({ roomTitle, activeRoom, activeView })}
             </h2>
             <div className="flex items-center gap-2 text-xs text-tc-text-muted">
               <span className={`inline-block h-2 w-2 rounded-full ${status === "online" ? "bg-tc-online" : "bg-tc-text-muted"}`} />
@@ -4472,6 +4537,10 @@ export default function App() {
               <svg viewBox="0 0 24 24" className="h-5 w-5 text-tc-accent" fill="currentColor" aria-hidden>
                 <path d="M21 19V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2zM8.5 11.5A2.5 2.5 0 1111 9a2.5 2.5 0 01-2.5 2.5zM6 19l4.5-6 3.5 4.5 2.5-3L19 19H6z" />
               </svg>
+            ) : personalTestOpen ? (
+              <svg viewBox="0 0 24 24" className="h-5 w-5 text-tc-accent" fill="currentColor" aria-hidden>
+                <path d="M7 2v2h1v5.5L4 18v2h16v-2l-4-8.5V4h1V2H7zm2 2h6v5.5l3 6.5H6l3-6.5V4z" />
+              </svg>
             ) : (
               <ChannelGlyph slug={activeRoom === DTD_WORK_CHAT_SLUG ? DTD_MAIN_SLUG : activeRoom} className="h-5 w-5" />
             )}
@@ -4487,6 +4556,13 @@ export default function App() {
           <PersonalAiChat getApiBase={getApiBase} token={token} nickname={nickname} onError={setBanner} />
         ) : personalSdOpen ? (
           <PersonalSdImage getApiBase={getApiBase} token={token} onError={setBanner} />
+        ) : personalTestOpen ? (
+          <PersonalImageTest
+            getApiBase={getApiBase}
+            token={token}
+            onError={setBanner}
+            imageTestGenAvailable={imageTestGenAvailable}
+          />
         ) : activeView === CHANNEL_VIEWS.gallery ? (
           <GalleryView
             getApiBase={getApiBase}
