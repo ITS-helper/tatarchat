@@ -193,12 +193,15 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
       setSourceFile(null);
       setMaskFile(null);
       setUseInpaint(false);
+      setSdSteps((prev) => (prev === 4 ? 25 : prev));
       if (sourceRef.current) sourceRef.current.value = "";
       if (maskRef.current) maskRef.current.value = "";
     }
     if (sdMode === SD_MODES.img2img) {
       setMaskFile(null);
       if (maskRef.current) maskRef.current.value = "";
+      // Qwen edit workflow обычно lightning: 4 шага. Держим быстрый дефолт.
+      setSdSteps((prev) => (prev === 25 ? 4 : prev));
     }
   }, [sdMode]);
 

@@ -502,13 +502,16 @@ async function runImg2imgViaComfyWorkflow({ prompt, steps, cfg, initImageBuffer 
   }
   const uploadName = await comfyUploadImageBuffer(initImageBuffer, "tatarchat_source.png");
   const seed = Math.floor(Math.random() * 2147483647);
+  // Qwen edit workflow обычно рассчитан на lightning (4 шага, cfg=1). Если дать 25 шагов из UI — будет в разы медленнее.
+  const st = Math.max(1, Math.min(8, Math.floor(Number(steps) || 4)));
+  const c = Math.max(1, Math.min(3, Number.isFinite(Number(cfg)) ? Number(cfg) : 1));
   const wf = buildWorkflowFromTemplateString(raw, {
     prompt,
-    steps,
+    steps: st,
     width: 0,
     height: 0,
     seed,
-    cfg,
+    cfg: c,
     loadImage: uploadName,
   });
   return runComfyDirectUntilImage(wf);
@@ -609,10 +612,10 @@ async function runImg2imgOrInpaint({ prompt, negativePrompt, steps, width, heigh
       err.detail = "Текущий workflow «Изменить» не поддерживает маску (инпейнт).";
       throw err;
     }
-    const st = Math.max(1, Math.min(SWARM_MAX_STEPS, Math.floor(Number(steps) || 4)));
-    const cfg = Math.max(1, Math.min(30, Number.isFinite(Number(denoisingStrength)) ? 1 : 1));
-    // cfg из UI для «Изменить» у нас пока не отдельным полем, используем SWARM_CFG_SCALE как дефолт
-    return runImg2imgViaComfyWorkflow({ prompt: p, steps: st, cfg: SWARM_CFG_SCALE, initImageBuffer });
+    // Для edit workflow держим lightning-профиль по умолчанию: шаги берём из UI, но жёстко ограничиваем,
+    // cfg фиксируем 1 (как в рабочем графе).
+    const st = Math.max(1, Math.min(8, Math.floor(Number(steps) || 4)));
+    return runImg2imgViaComfyWorkflow({ prompt: p, steps: st, cfg: 1, initImageBuffer });
   }
   const neg = sanitizePrompt(negativePrompt || "");
   const mRaw = sanitizeModel(model) || sanitizeModel(SWARM_DEFAULT_MODEL) || "";
@@ -680,8 +683,8 @@ async function runImg2imgOrInpaintWithRequestPreset({
       err.detail = "Текущий workflow «Изменить» не поддерживает маску (инпейнт).";
       throw err;
     }
-    const st = Math.max(1, Math.min(SWARM_MAX_STEPS, Math.floor(Number(steps) || 4)));
-    return runImg2imgViaComfyWorkflow({ prompt: p, steps: st, cfg: SWARM_CFG_SCALE, initImageBuffer });
+    const st = Math.max(1, Math.min(8, Math.floor(Number(steps) || 4)));
+    return runImg2imgViaComfyWorkflow({ prompt: p, steps: st, cfg: 1, initImageBuffer });
   }
   const neg = sanitizePrompt(negativePrompt || "");
   const mRaw = sanitizeModel(model) || sanitizeModel(SWARM_DEFAULT_MODEL) || "";
