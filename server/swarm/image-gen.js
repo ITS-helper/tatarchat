@@ -59,7 +59,10 @@ function sanitizeModel(raw) {
     .trim()
     .slice(0, 384);
   if (!s) return "";
-  return s;
+  // SwarmUI может показывать модели с суффиксом через запятую (например "xxx.safetensors,qwen-image").
+  // Для параметра `model` в API ожидается чистое имя модели (до запятой).
+  const i = s.indexOf(",");
+  return (i === -1 ? s : s.slice(0, i)).trim();
 }
 
 function maybePresetForMode(mode) {
@@ -221,7 +224,7 @@ async function runTxt2img({ prompt, negativePrompt, steps, width, height, model 
   const p = sanitizePrompt(prompt);
   if (!p) throw new Error("swarm_empty_prompt");
   const neg = sanitizePrompt(negativePrompt || "");
-  const mRaw = sanitizeModel(model) || SWARM_DEFAULT_MODEL || "";
+  const mRaw = sanitizeModel(model) || sanitizeModel(SWARM_DEFAULT_MODEL) || "";
   const preset = maybePresetForMode("txt2img");
   if (!mRaw && !preset) {
     const err = new Error("swarm_model_required");
@@ -241,10 +244,7 @@ async function runTxt2img({ prompt, negativePrompt, steps, width, height, model 
     seed: -1,
     request_id: crypto.randomUUID(),
   };
-  // Если модель содержит запятую (например ",z-image"), это часто означает не стандартный SD checkpoint.
-  // В таких случаях лучше полагаться на preset/workflow в SwarmUI, иначе API может отклонить значение.
-  const useModel = mRaw && !mRaw.includes(",");
-  const body = withPreset(useModel ? { ...body0, model: mRaw } : body0, "txt2img");
+  const body = withPreset(mRaw ? { ...body0, model: mRaw } : body0, "txt2img");
   const out = await callSwarm("API/GenerateText2Image", body);
   const first = Array.isArray(out?.images) ? out.images[0] : "";
   return fetchFirstImageAsBase64(first);
@@ -255,7 +255,7 @@ async function runTxt2imgWithRequestPreset({ prompt, negativePrompt, steps, widt
   const p = sanitizePrompt(prompt);
   if (!p) throw new Error("swarm_empty_prompt");
   const neg = sanitizePrompt(negativePrompt || "");
-  const mRaw = sanitizeModel(model) || SWARM_DEFAULT_MODEL || "";
+  const mRaw = sanitizeModel(model) || sanitizeModel(SWARM_DEFAULT_MODEL) || "";
   const presetTitle = sanitizePresetTitle(preset);
   const presetFromEnv = maybePresetForMode("txt2img");
   if (!mRaw && !presetTitle && !presetFromEnv) {
@@ -276,8 +276,7 @@ async function runTxt2imgWithRequestPreset({ prompt, negativePrompt, steps, widt
     seed: -1,
     request_id: crypto.randomUUID(),
   };
-  const useModel = mRaw && !mRaw.includes(",");
-  let body = useModel ? { ...body0, model: mRaw } : body0;
+  let body = mRaw ? { ...body0, model: mRaw } : body0;
   body = withPreset(body, "txt2img");
   body = applyRequestPreset(body, presetTitle);
   const out = await callSwarm("API/GenerateText2Image", body);
@@ -296,7 +295,7 @@ async function runImg2imgOrInpaint({ prompt, negativePrompt, steps, width, heigh
   const p = sanitizePrompt(prompt);
   if (!p) throw new Error("swarm_empty_prompt");
   const neg = sanitizePrompt(negativePrompt || "");
-  const mRaw = sanitizeModel(model) || SWARM_DEFAULT_MODEL || "";
+  const mRaw = sanitizeModel(model) || sanitizeModel(SWARM_DEFAULT_MODEL) || "";
   const preset = maybePresetForMode("img2img");
   if (!mRaw && !preset) {
     const err = new Error("swarm_model_required");
@@ -331,8 +330,7 @@ async function runImg2imgOrInpaint({ prompt, negativePrompt, steps, width, heigh
     body.mask_image = maskUrl;
   }
 
-  const useModel = mRaw && !mRaw.includes(",");
-  const body = withPreset(useModel ? { ...body0, model: mRaw } : body0, "img2img");
+  const body = withPreset(mRaw ? { ...body0, model: mRaw } : body0, "img2img");
   const out = await callSwarm("API/GenerateText2Image", body);
   const first = Array.isArray(out?.images) ? out.images[0] : "";
   return fetchFirstImageAsBase64(first);
@@ -356,7 +354,7 @@ async function runImg2imgOrInpaintWithRequestPreset({
   const p = sanitizePrompt(prompt);
   if (!p) throw new Error("swarm_empty_prompt");
   const neg = sanitizePrompt(negativePrompt || "");
-  const mRaw = sanitizeModel(model) || SWARM_DEFAULT_MODEL || "";
+  const mRaw = sanitizeModel(model) || sanitizeModel(SWARM_DEFAULT_MODEL) || "";
   const presetTitle = sanitizePresetTitle(preset);
   const presetFromEnv = maybePresetForMode("img2img");
   if (!mRaw && !presetTitle && !presetFromEnv) {
@@ -390,8 +388,7 @@ async function runImg2imgOrInpaintWithRequestPreset({
     body0.maskimage = maskUrl;
     body0.mask_image = maskUrl;
   }
-  const useModel = mRaw && !mRaw.includes(",");
-  let body = useModel ? { ...body0, model: mRaw } : body0;
+  let body = mRaw ? { ...body0, model: mRaw } : body0;
   body = withPreset(body, "img2img");
   body = applyRequestPreset(body, presetTitle);
   const out = await callSwarm("API/GenerateText2Image", body);
