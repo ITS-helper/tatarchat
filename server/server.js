@@ -2977,6 +2977,39 @@ app.get("/api/ai/image/models", requireAuth, async (req, res) => {
   }
 });
 
+app.get("/api/ai/image/presets", requireAuth, async (req, res) => {
+  try {
+    if (!swarm.isSwarmConfigured()) {
+      return res.status(503).json({
+        error: "Генерация не настроена: задайте SWARMUI_BASE_URL в .env на сервере и перезапустите Node.",
+      });
+    }
+    let titles = [];
+    try {
+      titles = await swarm.fetchPresets();
+    } catch (e) {
+      if (e?.name === "AbortError") return res.status(504).json({ error: "Список пресетов: таймаут" });
+      throw e;
+    }
+    res.json({ presets: titles.map((title) => ({ title })) });
+  } catch (e) {
+    const causeMsg = String(e?.cause?.message || e?.cause || "");
+    const topMsg = String(e?.message || "");
+    const connHint =
+      e?.cause?.code === "ECONNREFUSED" ||
+      e?.code === "ECONNREFUSED" ||
+      /ECONNREFUSED|fetch failed|getaddrinfo|ENOTFOUND/i.test(topMsg + causeMsg);
+    if (connHint) {
+      return res.status(502).json({
+        error: "SwarmUI недоступен для списка пресетов.",
+        detail: (topMsg || causeMsg).trim().slice(0, 240) || undefined,
+      });
+    }
+    console.error("GET /api/ai/image/presets", e);
+    return res.status(500).json({ error: "Ошибка" });
+  }
+});
+
 app.post("/api/ai/image", requireAuth, async (req, res) => {
   try {
     if (!swarm.isSwarmConfigured()) {
@@ -3000,7 +3033,8 @@ app.post("/api/ai/image", requireAuth, async (req, res) => {
     width = swarm.snapSide(width);
     height = swarm.snapSide(height);
 
-    const out = await swarm.runTxt2img({ prompt, negativePrompt: neg, steps, width, height, model });
+    const preset = swarm.sanitizePresetTitle(req.body?.preset || "");
+    const out = await swarm.runTxt2imgWithRequestPreset({ prompt, negativePrompt: neg, steps, width, height, model, preset });
     res.json({ ok: true, mimeType: out.mimeType, imageBase64: out.base64 });
   } catch (e) {
     return swarm.handleSwarmError(e, res, "txt2img");
@@ -3060,7 +3094,8 @@ app.post("/api/ai/image/img2img", requireAuth, runSdImg2imgUpload, async (req, r
 
     const model = swarm.sanitizeModel(req.body?.checkpoint ?? req.body?.model ?? req.body?.sd_model_checkpoint ?? "");
 
-    const out = await swarm.runImg2imgOrInpaint({
+    const preset = swarm.sanitizePresetTitle(req.body?.preset || "");
+    const out = await swarm.runImg2imgOrInpaintWithRequestPreset({
       prompt,
       negativePrompt: neg,
       steps,
@@ -3072,6 +3107,7 @@ app.post("/api/ai/image/img2img", requireAuth, runSdImg2imgUpload, async (req, r
       maskMime: maskMime || "image/png",
       denoisingStrength: denoising,
       model,
+      preset,
     });
     return res.json({ ok: true, mimeType: out.mimeType, imageBase64: out.base64 });
   } catch (e) {

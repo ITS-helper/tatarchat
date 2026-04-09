@@ -74,6 +74,13 @@ function withPreset(body, mode) {
   return { ...(body || {}), presets: [p] };
 }
 
+function sanitizePresetTitle(raw) {
+  return String(raw ?? "")
+    .replace(/[\u0000-\u001F\u007F]/g, "")
+    .trim()
+    .slice(0, 160);
+}
+
 function snapSide(n) {
   const x = Number(n);
   if (!Number.isFinite(x)) return 512;
@@ -156,6 +163,18 @@ async function fetchT2IParams() {
   return callSwarm("API/ListT2IParams", { session_id: sid });
 }
 
+async function fetchPresets() {
+  const sid = await ensureSession();
+  const out = await callSwarm("API/GetMyUserData", { session_id: sid });
+  const presets = Array.isArray(out?.presets) ? out.presets : [];
+  const titles = presets
+    .map((p) => sanitizePresetTitle(p?.title))
+    .filter(Boolean);
+  const uniq = [...new Set(titles)];
+  uniq.sort((a, b) => a.localeCompare(b, "en"));
+  return uniq;
+}
+
 async function fetchModelTitles() {
   const p = await fetchT2IParams();
   const models = p?.models;
@@ -231,6 +250,41 @@ async function runTxt2img({ prompt, negativePrompt, steps, width, height, model 
   return fetchFirstImageAsBase64(first);
 }
 
+async function runTxt2imgWithRequestPreset({ prompt, negativePrompt, steps, width, height, model, preset }) {
+  const sid = await ensureSession();
+  const p = sanitizePrompt(prompt);
+  if (!p) throw new Error("swarm_empty_prompt");
+  const neg = sanitizePrompt(negativePrompt || "");
+  const mRaw = sanitizeModel(model) || SWARM_DEFAULT_MODEL || "";
+  const presetTitle = sanitizePresetTitle(preset);
+  const presetFromEnv = maybePresetForMode("txt2img");
+  if (!mRaw && !presetTitle && !presetFromEnv) {
+    const err = new Error("swarm_model_required");
+    err.detail =
+      "Нужна модель или preset: выбери модель в UI, либо выбери пресет, либо задай SWARM_DEFAULT_MODEL / SWARM_PRESET_TXT2IMG в .env.";
+    throw err;
+  }
+  const body0 = {
+    session_id: sid,
+    images: 1,
+    prompt: p,
+    negativeprompt: neg,
+    width: snapSide(width),
+    height: snapSide(height),
+    steps: Math.max(8, Math.min(SWARM_MAX_STEPS, Math.floor(Number(steps) || 25))),
+    cfgscale: SWARM_CFG_SCALE,
+    seed: -1,
+    request_id: crypto.randomUUID(),
+  };
+  const useModel = mRaw && !mRaw.includes(",");
+  let body = useModel ? { ...body0, model: mRaw } : body0;
+  body = withPreset(body, "txt2img");
+  body = applyRequestPreset(body, presetTitle);
+  const out = await callSwarm("API/GenerateText2Image", body);
+  const first = Array.isArray(out?.images) ? out.images[0] : "";
+  return fetchFirstImageAsBase64(first);
+}
+
 function bufferToDataUrl(buf, mimeType) {
   const b64 = Buffer.from(buf).toString("base64");
   return `data:${mimeType || "image/png"};base64,${b64}`;
@@ -282,6 +336,73 @@ async function runImg2imgOrInpaint({ prompt, negativePrompt, steps, width, heigh
   const out = await callSwarm("API/GenerateText2Image", body);
   const first = Array.isArray(out?.images) ? out.images[0] : "";
   return fetchFirstImageAsBase64(first);
+}
+
+async function runImg2imgOrInpaintWithRequestPreset({
+  prompt,
+  negativePrompt,
+  steps,
+  width,
+  height,
+  initImageBuffer,
+  initImageMime,
+  maskBuffer,
+  maskMime,
+  denoisingStrength,
+  model,
+  preset,
+}) {
+  const sid = await ensureSession();
+  const p = sanitizePrompt(prompt);
+  if (!p) throw new Error("swarm_empty_prompt");
+  const neg = sanitizePrompt(negativePrompt || "");
+  const mRaw = sanitizeModel(model) || SWARM_DEFAULT_MODEL || "";
+  const presetTitle = sanitizePresetTitle(preset);
+  const presetFromEnv = maybePresetForMode("img2img");
+  if (!mRaw && !presetTitle && !presetFromEnv) {
+    const err = new Error("swarm_model_required");
+    err.detail =
+      "Нужна модель или preset: выбери модель в UI, либо выбери пресет, либо задай SWARM_DEFAULT_MODEL / SWARM_PRESET_IMG2IMG в .env.";
+    throw err;
+  }
+  const initUrl = bufferToDataUrl(initImageBuffer, initImageMime || "image/png");
+  const hasMask = typeof maskBuffer?.length === "number" && maskBuffer.length > 0;
+  const maskUrl = hasMask ? bufferToDataUrl(maskBuffer, maskMime || "image/png") : null;
+  const dn = Number(denoisingStrength);
+  const den = Number.isFinite(dn) ? Math.max(0.05, Math.min(0.95, dn)) : 0.55;
+  const body0 = {
+    session_id: sid,
+    images: 1,
+    prompt: p,
+    negativeprompt: neg,
+    width: snapSide(width),
+    height: snapSide(height),
+    steps: Math.max(8, Math.min(SWARM_MAX_STEPS, Math.floor(Number(steps) || 25))),
+    cfgscale: SWARM_CFG_SCALE,
+    seed: -1,
+    request_id: crypto.randomUUID(),
+    initimage: initUrl,
+    denoise_strength: den,
+    denoising_strength: den,
+    denoise: den,
+  };
+  if (maskUrl) {
+    body0.maskimage = maskUrl;
+    body0.mask_image = maskUrl;
+  }
+  const useModel = mRaw && !mRaw.includes(",");
+  let body = useModel ? { ...body0, model: mRaw } : body0;
+  body = withPreset(body, "img2img");
+  body = applyRequestPreset(body, presetTitle);
+  const out = await callSwarm("API/GenerateText2Image", body);
+  const first = Array.isArray(out?.images) ? out.images[0] : "";
+  return fetchFirstImageAsBase64(first);
+}
+
+function applyRequestPreset(body, reqPresetRaw) {
+  const t = sanitizePresetTitle(reqPresetRaw);
+  if (!t) return body;
+  return { ...(body || {}), presets: [t] };
 }
 
 function handleSwarmError(e, res, logLabel) {
@@ -341,10 +462,15 @@ module.exports = {
   SWARM_CFG_SCALE,
   sanitizePrompt,
   sanitizeModel,
+  sanitizePresetTitle,
   snapSide,
   fetchModelTitles,
+  fetchPresets,
   runTxt2img,
   runImg2imgOrInpaint,
+  runTxt2imgWithRequestPreset,
+  runImg2imgOrInpaintWithRequestPreset,
+  applyRequestPreset,
   handleSwarmError,
   logStartupInfo,
 };

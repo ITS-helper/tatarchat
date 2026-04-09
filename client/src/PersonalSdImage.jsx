@@ -6,6 +6,7 @@ const SIZE_TXT = [512, 576, 640, 704, 768];
 const SIZE_IMG = [512, 576, 640, 704, 768, 832, 896, 1024];
 
 const LS_MODEL_KEY = "tatarchat_swarm_model";
+const LS_PRESET_KEY = "tatarchat_swarm_preset";
 const LS_COMFY_CHECKPOINT_KEY = "tatarchat_comfy_checkpoint";
 const LS_COMFY_CHECKPOINT_LEGACY = "tatarchat_sd_checkpoint";
 
@@ -14,6 +15,8 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
   const [imageGenAvailable, setImageGenAvailable] = useState(false);
   const [sdCheckpointOptions, setSdCheckpointOptions] = useState([]);
   const [sdCheckpoint, setSdCheckpoint] = useState("");
+  const [sdPresetOptions, setSdPresetOptions] = useState([]);
+  const [sdPreset, setSdPreset] = useState("");
   const [sdModelsLoading, setSdModelsLoading] = useState(false);
   const [sdModelsError, setSdModelsError] = useState(null);
   const [sdModelsNote, setSdModelsNote] = useState(null);
@@ -118,17 +121,47 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
     }
   }, [base, token, imageGenAvailable]);
 
+  const loadSdPresets = useCallback(async () => {
+    if (!token || !imageGenAvailable) return;
+    try {
+      const res = await fetch(`${base}/api/ai/image/presets`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      const list = Array.isArray(data.presets)
+        ? data.presets.map((p) => (typeof p?.title === "string" ? p.title.trim() : "")).filter(Boolean)
+        : [];
+      let saved = "";
+      try {
+        saved = String(window.localStorage.getItem(LS_PRESET_KEY) || "").trim();
+      } catch {
+        /* ignore */
+      }
+      const merged = saved && !list.includes(saved) ? [saved, ...list] : list;
+      setSdPresetOptions(merged);
+      setSdPreset((prev) => {
+        if (saved && merged.includes(saved)) return saved;
+        if (prev && merged.includes(prev)) return prev;
+        return "";
+      });
+    } catch {
+      /* ignore presets */
+    }
+  }, [base, token, imageGenAvailable]);
+
   useEffect(() => {
     if (!imageGenAvailable || !token) return;
     let cancelled = false;
     (async () => {
       if (cancelled) return;
       await loadSdModels();
+      await loadSdPresets();
     })();
     return () => {
       cancelled = true;
     };
-  }, [imageGenAvailable, token, loadSdModels]);
+  }, [imageGenAvailable, token, loadSdModels, loadSdPresets]);
 
   useEffect(() => {
     if (!sourceFile) {
@@ -199,6 +232,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
           height: sdSize,
         };
         if (sdCheckpoint.trim()) body.checkpoint = sdCheckpoint.trim();
+        if (sdPreset.trim()) body.preset = sdPreset.trim();
         const res = await fetch(`${base}/api/ai/image`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -231,6 +265,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
       fd.append("height", String(sdSize));
       fd.append("denoising_strength", String(sdDenoise));
       if (sdCheckpoint.trim()) fd.append("checkpoint", sdCheckpoint.trim());
+      if (sdPreset.trim()) fd.append("preset", sdPreset.trim());
 
       const res = await fetch(`${base}/api/ai/image/img2img`, {
         method: "POST",
@@ -271,6 +306,7 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
     sourceFile,
     maskFile,
     sdCheckpoint,
+    sdPreset,
     sdGenerating,
     onError,
   ]);
@@ -473,6 +509,31 @@ export default function PersonalSdImage({ getApiBase, token, onError }) {
                 >
                   <option value="">По умолчанию (SWARM_DEFAULT_MODEL)</option>
                   {sdCheckpointOptions.map((t) => (
+                    <option key={t} value={t} title={t}>
+                      {t.length > 72 ? `${t.slice(0, 70)}…` : t}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex min-w-0 flex-1 flex-col gap-0.5 text-[11px] text-tc-text-muted sm:min-w-[12rem]">
+                Пресет (SwarmUI)
+                <select
+                  value={sdPreset}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSdPreset(v);
+                    try {
+                      if (v) window.localStorage.setItem(LS_PRESET_KEY, v);
+                      else window.localStorage.removeItem(LS_PRESET_KEY);
+                    } catch {
+                      /* ignore */
+                    }
+                  }}
+                  disabled={sdGenerating}
+                  className="tc-msg-input max-w-full truncate rounded-lg border border-tc-border bg-tc-input px-2 py-1.5 text-xs text-tc-text outline-none focus:ring-2 focus:ring-tc-accent/50"
+                >
+                  <option value="">(не использовать)</option>
+                  {sdPresetOptions.map((t) => (
                     <option key={t} value={t} title={t}>
                       {t.length > 72 ? `${t.slice(0, 70)}…` : t}
                     </option>
