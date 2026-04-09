@@ -39,6 +39,8 @@ const SWARM_CFG_RAW = Number(process.env.SWARM_CFG_SCALE);
 const SWARM_CFG_SCALE = Number.isFinite(SWARM_CFG_RAW) ? Math.max(1, Math.min(30, SWARM_CFG_RAW)) : 7;
 
 const SWARM_DEFAULT_MODEL = String(process.env.SWARM_DEFAULT_MODEL || "").trim();
+const SWARM_PRESET_TXT2IMG = String(process.env.SWARM_PRESET_TXT2IMG || "").trim();
+const SWARM_PRESET_IMG2IMG = String(process.env.SWARM_PRESET_IMG2IMG || "").trim();
 
 function isSwarmConfigured() {
   return Boolean(SWARMUI_BASE_URL);
@@ -57,10 +59,19 @@ function sanitizeModel(raw) {
     .trim()
     .slice(0, 384);
   if (!s) return "";
-  // SwarmUI иногда отдаёт модели с суффиксом после запятой (например "xxx.safetensors,z-image").
-  // В параметр `model` для генерации нужно передавать чистое имя модели.
-  const i = s.indexOf(",");
-  return (i === -1 ? s : s.slice(0, i)).trim();
+  return s;
+}
+
+function maybePresetForMode(mode) {
+  if (mode === "img2img") return SWARM_PRESET_IMG2IMG || "";
+  if (mode === "txt2img") return SWARM_PRESET_TXT2IMG || "";
+  return "";
+}
+
+function withPreset(body, mode) {
+  const p = maybePresetForMode(mode);
+  if (!p) return body;
+  return { ...(body || {}), presets: [p] };
 }
 
 function snapSide(n) {
@@ -191,18 +202,19 @@ async function runTxt2img({ prompt, negativePrompt, steps, width, height, model 
   const p = sanitizePrompt(prompt);
   if (!p) throw new Error("swarm_empty_prompt");
   const neg = sanitizePrompt(negativePrompt || "");
-  const m = sanitizeModel(model) || SWARM_DEFAULT_MODEL || "";
-  if (!m) {
+  const mRaw = sanitizeModel(model) || SWARM_DEFAULT_MODEL || "";
+  const preset = maybePresetForMode("txt2img");
+  if (!mRaw && !preset) {
     const err = new Error("swarm_model_required");
-    err.detail = "В SwarmUI не передана модель. Выбери модель в UI или задай SWARM_DEFAULT_MODEL в .env.";
+    err.detail = "Нужна модель или preset: выбери модель в UI, либо задай SWARM_DEFAULT_MODEL или SWARM_PRESET_TXT2IMG в .env.";
     throw err;
   }
-  const body = {
+
+  const body0 = {
     session_id: sid,
     images: 1,
     prompt: p,
     negativeprompt: neg,
-    model: m,
     width: snapSide(width),
     height: snapSide(height),
     steps: Math.max(8, Math.min(SWARM_MAX_STEPS, Math.floor(Number(steps) || 25))),
@@ -210,6 +222,10 @@ async function runTxt2img({ prompt, negativePrompt, steps, width, height, model 
     seed: -1,
     request_id: crypto.randomUUID(),
   };
+  // Если модель содержит запятую (например ",z-image"), это часто означает не стандартный SD checkpoint.
+  // В таких случаях лучше полагаться на preset/workflow в SwarmUI, иначе API может отклонить значение.
+  const useModel = mRaw && !mRaw.includes(",");
+  const body = withPreset(useModel ? { ...body0, model: mRaw } : body0, "txt2img");
   const out = await callSwarm("API/GenerateText2Image", body);
   const first = Array.isArray(out?.images) ? out.images[0] : "";
   return fetchFirstImageAsBase64(first);
@@ -226,10 +242,11 @@ async function runImg2imgOrInpaint({ prompt, negativePrompt, steps, width, heigh
   const p = sanitizePrompt(prompt);
   if (!p) throw new Error("swarm_empty_prompt");
   const neg = sanitizePrompt(negativePrompt || "");
-  const m = sanitizeModel(model) || SWARM_DEFAULT_MODEL || "";
-  if (!m) {
+  const mRaw = sanitizeModel(model) || SWARM_DEFAULT_MODEL || "";
+  const preset = maybePresetForMode("img2img");
+  if (!mRaw && !preset) {
     const err = new Error("swarm_model_required");
-    err.detail = "В SwarmUI не передана модель. Выбери модель в UI или задай SWARM_DEFAULT_MODEL в .env.";
+    err.detail = "Нужна модель или preset: выбери модель в UI, либо задай SWARM_DEFAULT_MODEL или SWARM_PRESET_IMG2IMG в .env.";
     throw err;
   }
   const initUrl = bufferToDataUrl(initImageBuffer, initImageMime || "image/png");
@@ -238,12 +255,11 @@ async function runImg2imgOrInpaint({ prompt, negativePrompt, steps, width, heigh
   const dn = Number(denoisingStrength);
   const den = Number.isFinite(dn) ? Math.max(0.05, Math.min(0.95, dn)) : 0.55;
 
-  const body = {
+  const body0 = {
     session_id: sid,
     images: 1,
     prompt: p,
     negativeprompt: neg,
-    model: m,
     width: snapSide(width),
     height: snapSide(height),
     steps: Math.max(8, Math.min(SWARM_MAX_STEPS, Math.floor(Number(steps) || 25))),
@@ -261,6 +277,8 @@ async function runImg2imgOrInpaint({ prompt, negativePrompt, steps, width, heigh
     body.mask_image = maskUrl;
   }
 
+  const useModel = mRaw && !mRaw.includes(",");
+  const body = withPreset(useModel ? { ...body0, model: mRaw } : body0, "img2img");
   const out = await callSwarm("API/GenerateText2Image", body);
   const first = Array.isArray(out?.images) ? out.images[0] : "";
   return fetchFirstImageAsBase64(first);
@@ -309,6 +327,8 @@ function logStartupInfo() {
   }
   console.log(`[swarm] SWARMUI_BASE_URL=${SWARMUI_BASE_URL}`);
   if (SWARM_DEFAULT_MODEL) console.log(`[swarm] SWARM_DEFAULT_MODEL=${SWARM_DEFAULT_MODEL}`);
+  if (SWARM_PRESET_TXT2IMG) console.log(`[swarm] SWARM_PRESET_TXT2IMG=${SWARM_PRESET_TXT2IMG}`);
+  if (SWARM_PRESET_IMG2IMG) console.log(`[swarm] SWARM_PRESET_IMG2IMG=${SWARM_PRESET_IMG2IMG}`);
   console.log(`[swarm] cfg_scale=${SWARM_CFG_SCALE} timeout_ms=${SWARMUI_TIMEOUT_MS}`);
 }
 
