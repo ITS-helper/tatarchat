@@ -52,10 +52,15 @@ function sanitizePrompt(s, maxLen = MAX_SWARM_PROMPT_CHARS) {
 }
 
 function sanitizeModel(raw) {
-  return String(raw ?? "")
+  const s = String(raw ?? "")
     .replace(/[\u0000-\u001F\u007F]/g, "")
     .trim()
     .slice(0, 384);
+  if (!s) return "";
+  // SwarmUI иногда отдаёт модели с суффиксом после запятой (например "xxx.safetensors,z-image").
+  // В параметр `model` для генерации нужно передавать чистое имя модели.
+  const i = s.indexOf(",");
+  return (i === -1 ? s : s.slice(0, i)).trim();
 }
 
 function snapSide(n) {
