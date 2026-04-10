@@ -1,8 +1,8 @@
 {
   "1": {
     "inputs": {
-      "unet_name": "hidream_i1_dev_fp8.safetensors.safetensors",
-      "weight_dtype": "fp8_e4m3fn_fast"
+      "unet_name": "hidream_i1_dev_fp8.safetensors",
+      "weight_dtype": "fp8_e5m2"
     },
     "class_type": "UNETLoader",
     "_meta": {
@@ -23,7 +23,7 @@
   },
   "3": {
     "inputs": {
-      "vae_name": "Flux\\flux2-vae.safetensors"
+      "vae_name": "ae.safetensors"
     },
     "class_type": "VAELoader",
     "_meta": {
