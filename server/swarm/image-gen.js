@@ -411,16 +411,50 @@ function extractFirstImageMeta(historyRoot, prompt_id) {
   return null;
 }
 
+function stringifyComfyMsgPart(v) {
+  if (typeof v === "string") return v;
+  if (v == null) return "";
+  try {
+    if (typeof v === "object") {
+      const type = typeof v.type === "string" ? v.type : "";
+      const msg = typeof v.message === "string" ? v.message : "";
+      const node = v.node_id != null ? `node=${v.node_id}` : "";
+      const nodeType = typeof v.node_type === "string" ? `node_type=${v.node_type}` : "";
+      const details = [type, msg, node, nodeType].filter(Boolean).join(" ");
+      if (details) return details;
+    }
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
 function historyEntryErrorMessage(entry) {
   const st = entry?.status;
+  const msgs = Array.isArray(st?.messages) ? st.messages : [];
+
+  // Comfy обычно отдаёт массивы вида ["execution_error", { message, node_id, node_type, ... }].
+  const errEvent = msgs.find((m) => Array.isArray(m) && String(m[0] || "").toLowerCase().includes("error"));
+  if (errEvent) {
+    const parts = errEvent.slice(1).map(stringifyComfyMsgPart).filter(Boolean);
+    const prefix = String(errEvent[0] || "execution_error");
+    const txt = [prefix, ...parts].join(" | ");
+    if (txt.trim()) return txt.slice(0, 1200);
+  }
+
   if (st?.status_str === "error" || st?.status_str === "failed") {
-    return String(st?.messages?.[0] || st?.message || "execution error").slice(0, 800);
+    const direct = stringifyComfyMsgPart(st?.message || "");
+    if (direct) return direct.slice(0, 1200);
+    if (msgs.length) {
+      const flat = msgs
+        .map((m) => (Array.isArray(m) ? m.map(stringifyComfyMsgPart).filter(Boolean).join(" | ") : stringifyComfyMsgPart(m)))
+        .filter(Boolean)
+        .join("; ");
+      if (flat) return flat.slice(0, 1200);
+    }
+    return "execution error";
   }
-  const msgs = entry?.status?.messages;
-  if (Array.isArray(msgs) && msgs.length) {
-    const t = msgs.map((m) => (typeof m === "string" ? m : JSON.stringify(m))).join("; ");
-    if (/error/i.test(t)) return t.slice(0, 800);
-  }
+
   return "";
 }
 
