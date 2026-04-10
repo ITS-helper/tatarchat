@@ -1457,6 +1457,10 @@ export default function App() {
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminSaving, setAdminSaving] = useState(null);
+  const [testWorkflowModalOpen, setTestWorkflowModalOpen] = useState(false);
+  const [testWorkflowText, setTestWorkflowText] = useState("");
+  const [testWorkflowLoading, setTestWorkflowLoading] = useState(false);
+  const [testWorkflowSaving, setTestWorkflowSaving] = useState(false);
   const adminPanelOpenRef = useRef(false);
   const [adminRooms, setAdminRooms] = useState([]);
   const [adminRoomsLoading, setAdminRoomsLoading] = useState(false);
@@ -2924,6 +2928,52 @@ export default function App() {
     await refetchAdminUsers();
   };
 
+  const openTestWorkflowModal = async () => {
+    setTestWorkflowModalOpen(true);
+    setTestWorkflowLoading(true);
+    try {
+      const base = getApiBase();
+      const res = await fetch(`${base}/api/admin/ai/test-workflow`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBanner(data.error || "Не удалось загрузить тестовый workflow");
+        return;
+      }
+      setTestWorkflowText(String(data.template || ""));
+    } catch {
+      setBanner("Сеть: ошибка загрузки тестового workflow");
+    } finally {
+      setTestWorkflowLoading(false);
+    }
+  };
+
+  const saveTestWorkflowModal = async () => {
+    setTestWorkflowSaving(true);
+    try {
+      const base = getApiBase();
+      const res = await fetch(`${base}/api/admin/ai/test-workflow`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ template: testWorkflowText }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const d = typeof data.detail === "string" && data.detail.trim() ? ` ${data.detail.trim()}` : "";
+        setBanner((data.error || "Ошибка сохранения workflow") + d);
+        return;
+      }
+      setBanner("Тестовый workflow сохранён");
+      setTestWorkflowModalOpen(false);
+      void refreshChannels();
+    } catch {
+      setBanner("Сеть: ошибка сохранения workflow");
+    } finally {
+      setTestWorkflowSaving(false);
+    }
+  };
+
   const refetchAdminRooms = useCallback(
     async ({ silent = false } = {}) => {
       if (!silent) setAdminRoomsLoading(true);
@@ -4222,6 +4272,16 @@ export default function App() {
                   Управление пользователями
                 </button>
               )}
+              {imAdmin && (
+                <button
+                  type="button"
+                  onClick={() => { openTestWorkflowModal(); setProfileModalOpen(false); }}
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-tc-text-sec transition hover:bg-tc-hover hover:text-tc-accent"
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" fill="currentColor"><path d="M7 2v2h1v5.5L4 18v2h16v-2l-4-8.5V4h1V2H7zm2 2h6v5.5l3 6.5H6l3-6.5V4z"/></svg>
+                  Тестовый workflow (JSON)
+                </button>
+              )}
 
               {/* Channels admin (owner only) */}
               {isOwner && (
@@ -4302,6 +4362,50 @@ export default function App() {
 
       {/* Main area */}
       <main className="flex min-h-0 min-w-0 w-full max-w-[100vw] flex-1 flex-col overflow-x-hidden">
+        {testWorkflowModalOpen && (
+          <div className="fixed inset-0 z-[205] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setTestWorkflowModalOpen(false)}>
+            <div className="w-full max-w-4xl max-h-[85vh] flex flex-col rounded-xl bg-tc-panel shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between border-b border-tc-border px-6 py-4">
+                <h2 className="text-base font-semibold text-tc-text">Тестовый workflow (горячая замена)</h2>
+                <button type="button" onClick={() => setTestWorkflowModalOpen(false)} className="rounded-lg p-1.5 text-tc-text-sec hover:bg-tc-hover">
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto px-6 py-4">
+                {testWorkflowLoading ? (
+                  <p className="text-sm text-tc-text-muted">Загрузка…</p>
+                ) : (
+                  <>
+                    <p className="mb-2 text-xs text-tc-text-muted">
+                      Вставьте JSON workflow с плейсхолдерами: <code className="rounded bg-tc-input px-1">{"<<<TC_PROMPT>>>"}</code>,{" "}
+                      <code className="rounded bg-tc-input px-1">{"<<<TC_STEPS>>>"}</code>,{" "}
+                      <code className="rounded bg-tc-input px-1">{"<<<TC_WIDTH>>>"}</code>,{" "}
+                      <code className="rounded bg-tc-input px-1">{"<<<TC_HEIGHT>>>"}</code>.
+                    </p>
+                    <textarea
+                      value={testWorkflowText}
+                      onChange={(e) => setTestWorkflowText(e.target.value)}
+                      spellCheck={false}
+                      className="min-h-[420px] w-full rounded-xl border border-tc-border/60 bg-tc-input px-3 py-2 font-mono text-xs text-tc-text outline-none focus:ring-1 focus:ring-tc-accent"
+                    />
+                  </>
+                )}
+              </div>
+              <div className="flex items-center justify-between border-t border-tc-border px-6 py-3">
+                <p className="text-xs text-tc-text-muted">Пустое поле = удалить override и использовать env-файл.</p>
+                <button
+                  type="button"
+                  disabled={testWorkflowSaving || testWorkflowLoading}
+                  onClick={() => void saveTestWorkflowModal()}
+                  className="rounded-lg bg-tc-accent px-4 py-2 text-sm font-semibold text-white transition hover:opacity-95 disabled:opacity-40"
+                >
+                  {testWorkflowSaving ? "Сохраняю…" : "Сохранить"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Admin panel modal */}
         {adminPanelOpen && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setAdminPanelOpen(false)}>

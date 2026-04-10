@@ -337,6 +337,20 @@ function buildWorkflowFromTemplateString(templateStr, params) {
   }
 }
 
+function validateWorkflowTemplateString(templateStr) {
+  const raw = String(templateStr || "");
+  buildWorkflowFromTemplateString(raw, {
+    prompt: "test",
+    steps: 8,
+    width: 512,
+    height: 512,
+    seed: 1,
+    cfg: 1,
+    loadImage: "test.png",
+  });
+  return true;
+}
+
 async function comfyPostPrompt(workflow) {
   const client_id = crypto.randomUUID();
   const url = comfyDirectUrl("prompt");
@@ -516,6 +530,25 @@ async function runTxt2imgViaComfyWorkflowPath(workflowPath, { prompt, steps, wid
     throw err;
   }
   const raw = await fsp.readFile(workflowPath, "utf8");
+  const seed = Math.floor(Math.random() * 2147483647);
+  const wf = buildWorkflowFromTemplateString(raw, {
+    prompt,
+    steps,
+    width,
+    height,
+    seed,
+    cfg: Number.isFinite(Number(cfg)) ? Number(cfg) : 1,
+    loadImage: null,
+  });
+  return runComfyDirectUntilImage(wf);
+}
+
+async function runTxt2imgViaComfyTemplateString(templateStr, { prompt, steps, width, height, cfg }) {
+  const raw = String(templateStr || "");
+  if (!raw.trim()) {
+    const err = new Error("swarm_test_workflow_not_configured");
+    throw err;
+  }
   const seed = Math.floor(Math.random() * 2147483647);
   const wf = buildWorkflowFromTemplateString(raw, {
     prompt,
@@ -919,6 +952,8 @@ module.exports = {
   runTxt2imgWithRequestPreset,
   runImg2imgOrInpaintWithRequestPreset,
   runTxt2imgTestComfyWorkflow,
+  runTxt2imgViaComfyTemplateString,
+  validateWorkflowTemplateString,
   applyRequestPreset,
   handleSwarmError,
   logStartupInfo,

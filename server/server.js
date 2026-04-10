@@ -128,6 +128,7 @@ const IMAGE_TEST_GRANT_NICKNAMES = (process.env.IMAGE_TEST_GRANT_NICKNAMES || "�
   .split(",")
   .map((s) => s.trim().toLowerCase())
   .filter(Boolean);
+const AI_WORKFLOW_TEST_TXT2IMG_KEY = "test_txt2img";
 
 /** DTD в списке и вход для всех, кроме перечисленных ников */
 const DTD_HIDDEN_NICKNAMES = (process.env.DTD_HIDDEN_NICKNAMES || "рена")
@@ -1597,6 +1598,54 @@ async function ensureUserPermissionsSchema() {
   }
 }
 
+async function ensureAiWorkflowSchema() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ai_workflow_templates (
+        key TEXT PRIMARY KEY,
+        template_json TEXT NOT NULL,
+        updated_by INTEGER REFERENCES users (id) ON DELETE SET NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+  } catch (err) {
+    console.error("[schema] ai_workflow_templates:", err?.message || err);
+    throw err;
+  }
+}
+
+async function getAiWorkflowTemplate(key) {
+  const k = String(key || "").trim();
+  if (!k) return "";
+  const { rows } = await pool.query(`SELECT template_json FROM ai_workflow_templates WHERE key = $1`, [k]);
+  return String(rows[0]?.template_json || "");
+}
+
+async function setAiWorkflowTemplate(key, templateJson, userId) {
+  const k = String(key || "").trim();
+  if (!k) throw new Error("bad_workflow_key");
+  const tpl = String(templateJson || "").trim();
+  if (!tpl) {
+    await pool.query(`DELETE FROM ai_workflow_templates WHERE key = $1`, [k]);
+    return;
+  }
+  await pool.query(
+    `INSERT INTO ai_workflow_templates (key, template_json, updated_by, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (key) DO UPDATE SET template_json = EXCLUDED.template_json, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+    [k, tpl, userId || null]
+  );
+}
+
+async function isImageTestWorkflowConfiguredNow() {
+  try {
+    const tpl = await getAiWorkflowTemplate(AI_WORKFLOW_TEST_TXT2IMG_KEY);
+    return Boolean(String(tpl || "").trim() || swarm.isSwarmComfyTestTxt2imgConfigured());
+  } catch (_) {
+    return swarm.isSwarmComfyTestTxt2imgConfigured();
+  }
+}
+
 async function ensureGallerySchema() {
   try {
     await pool.query(`
@@ -2883,6 +2932,7 @@ app.get("/api/me", requireAuth, async (req, res) => {
     );
     const u = rows[0];
     if (!u) return res.status(404).json({ error: "Нет пользователя" });
+    const imageTestConfigured = await isImageTestWorkflowConfiguredNow();
     res.json({
       id: u.id,
       nickname: u.nickname,
@@ -2892,7 +2942,7 @@ app.get("/api/me", requireAuth, async (req, res) => {
       canSeeDtd: !!u.can_see_dtd,
       canSeeDtdWork: !!u.can_see_dtd_work,
       canUseImageTest: !!u.can_use_image_test,
-      imageTestGenAvailable: !!u.can_use_image_test && swarm.isSwarmComfyTestTxt2imgConfigured(),
+      imageTestGenAvailable: !!u.can_use_image_test && imageTestConfigured,
     });
   } catch (err) {
     console.error("GET /api/me", err);
@@ -3080,10 +3130,12 @@ app.post("/api/ai/image/test", requireAuth, requireImageTestAccess, async (req, 
         error: "Генерация не настроена: задайте SWARMUI_BASE_URL в .env на сервере.",
       });
     }
-    if (!swarm.isSwarmComfyTestTxt2imgConfigured()) {
+    const dynamicTemplate = await getAiWorkflowTemplate(AI_WORKFLOW_TEST_TXT2IMG_KEY);
+    const hasDynamicTemplate = Boolean(String(dynamicTemplate || "").trim());
+    if (!hasDynamicTemplate && !swarm.isSwarmComfyTestTxt2imgConfigured()) {
       return res.status(503).json({
         error:
-          "Тест: задайте SWARM_COMFY_TEST_TXT2IMG_WORKFLOW (путь к JSON workflow для txt2img) в .env на сервере и перезапустите Node.",
+          "Тест: задайте SWARM_COMFY_TEST_TXT2IMG_WORKFLOW в .env или сохраните JSON через админку (горячая замена workflow).",
       });
     }
     const prompt = swarm.sanitizePrompt(req.body?.prompt, swarm.MAX_SWARM_PROMPT_CHARS);
@@ -3097,7 +3149,9 @@ app.post("/api/ai/image/test", requireAuth, requireImageTestAccess, async (req, 
     if (!Number.isFinite(height)) height = 512;
     width = swarm.snapSide(width);
     height = swarm.snapSide(height);
-    const out = await swarm.runTxt2imgTestComfyWorkflow({ prompt, steps, width, height });
+    const out = hasDynamicTemplate
+      ? await swarm.runTxt2imgViaComfyTemplateString(dynamicTemplate, { prompt, steps, width, height, cfg: 1 })
+      : await swarm.runTxt2imgTestComfyWorkflow({ prompt, steps, width, height });
     res.json({ ok: true, mimeType: out.mimeType, imageBase64: out.base64 });
   } catch (e) {
     return swarm.handleSwarmError(e, res, "test-txt2img");
@@ -3999,6 +4053,7 @@ app.post("/api/auth/register", async (req, res) => {
     const user = rows[0];
     const token = signToken(user.id);
     const perms = await getUserPerms(user.id);
+    const imageTestConfigured = await isImageTestWorkflowConfiguredNow();
     try {
       ioInstance?.to("admins").emit("admin-users-changed", {
         reason: "registered",
@@ -4016,7 +4071,7 @@ app.post("/api/auth/register", async (req, res) => {
         canSeeDtd: !!perms.can_see_dtd,
         canSeeDtdWork: !!perms.can_see_dtd_work,
         canUseImageTest: !!perms.can_use_image_test,
-        imageTestGenAvailable: !!perms.can_use_image_test && swarm.isSwarmComfyTestTxt2imgConfigured(),
+        imageTestGenAvailable: !!perms.can_use_image_test && imageTestConfigured,
       },
     });
   } catch (err) {
@@ -4059,6 +4114,7 @@ app.post("/api/auth/login", async (req, res) => {
     );
     const token = signToken(user.id);
     const perms = await getUserPerms(user.id);
+    const imageTestConfigured = await isImageTestWorkflowConfiguredNow();
     res.json({
       token,
       user: {
@@ -4070,7 +4126,7 @@ app.post("/api/auth/login", async (req, res) => {
         canSeeDtd: !!perms.can_see_dtd,
         canSeeDtdWork: !!perms.can_see_dtd_work,
         canUseImageTest: !!perms.can_use_image_test,
-        imageTestGenAvailable: !!perms.can_use_image_test && swarm.isSwarmComfyTestTxt2imgConfigured(),
+        imageTestGenAvailable: !!perms.can_use_image_test && imageTestConfigured,
       },
     });
   } catch (err) {
@@ -4080,6 +4136,46 @@ app.post("/api/auth/login", async (req, res) => {
 });
 
 // ─── Admin API ────────────────────────────────────────────────────────────────
+
+app.get("/api/admin/ai/test-workflow", requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const template = await getAiWorkflowTemplate(AI_WORKFLOW_TEST_TXT2IMG_KEY);
+    res.json({
+      key: AI_WORKFLOW_TEST_TXT2IMG_KEY,
+      template,
+      hasTemplate: !!String(template || "").trim(),
+      envFallbackConfigured: swarm.isSwarmComfyTestTxt2imgConfigured(),
+    });
+  } catch (err) {
+    console.error("GET /api/admin/ai/test-workflow", err);
+    res.status(500).json({ error: "Ошибка" });
+  }
+});
+
+app.put("/api/admin/ai/test-workflow", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const template = String(req.body?.template ?? "");
+    const trimmed = template.trim();
+    if (trimmed) {
+      const mustTokens = ["<<<TC_PROMPT>>>", "<<<TC_STEPS>>>", "<<<TC_WIDTH>>>", "<<<TC_HEIGHT>>>"];
+      for (const t of mustTokens) {
+        if (!trimmed.includes(t)) {
+          return res.status(400).json({ error: `В шаблоне нет обязательного плейсхолдера: ${t}` });
+        }
+      }
+      // Валидация JSON-шаблона: только parse после подстановки плейсхолдеров.
+      swarm.validateWorkflowTemplateString(trimmed);
+    }
+    await setAiWorkflowTemplate(AI_WORKFLOW_TEST_TXT2IMG_KEY, trimmed, req.user?.userId || null);
+    res.json({ ok: true, hasTemplate: !!trimmed });
+  } catch (err) {
+    if (String(err?.message) === "swarm_workflow_invalid_json") {
+      return res.status(400).json({ error: "Некорректный JSON workflow", detail: err?.detail });
+    }
+    console.error("PUT /api/admin/ai/test-workflow", err);
+    res.status(500).json({ error: "Ошибка сохранения" });
+  }
+});
 
 app.get("/api/admin/users", requireAuth, requireAdmin, async (_req, res) => {
   try {
@@ -4869,6 +4965,7 @@ async function start() {
   await ensureGallerySchema();
   await ensureCalendarSchema();
   await ensureUserPermissionsSchema();
+  await ensureAiWorkflowSchema();
   await ensurePushSchema();
   await ensureUserOllamaChatSchema();
   await ensureUserOllamaPrefsSchema();
