@@ -2,7 +2,7 @@
   "1": {
     "inputs": {
       "unet_name": "hidream_i1_dev_fp8.safetensors",
-      "weight_dtype": "fp8_e5m2"
+      "weight_dtype": "fp8_e4m3fn_fast"
     },
     "class_type": "UNETLoader",
     "_meta": {
